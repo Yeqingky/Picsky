@@ -10,7 +10,7 @@ export const dashboard = {
     ringCount: '使用数量',
     available: '可用',
     imagesUnit: '张图片',
-    noQuota: '不限存储配额',
+    occupied: '占用 {{size}}',
     detail: '已使用 {{used}}, 共 {{total}}',
   },
   stats: {

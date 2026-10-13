@@ -136,13 +136,14 @@ export default function DashboardPage() {
   const usageValue = remaining === null ? storedImages : formatQuota(remaining);
   const usageSuffix =
     remaining === null ? t('dashboard.usage.imagesUnit') : t('dashboard.usage.available');
+  // 已占用空间始终展示; 存储空间配额下 used 就是占用, 不重复
+  const occupied = t('dashboard.usage.occupied', { size: formatBytes(quota.used_bytes) });
+  const quotaDetail =
+    limit === null
+      ? ''
+      : t('dashboard.usage.detail', { used: formatQuota(quota.used), total: formatQuota(limit) });
   const usageDetail =
-    remaining === null
-      ? t('dashboard.usage.noQuota')
-      : t('dashboard.usage.detail', {
-          used: formatQuota(quota.used),
-          total: formatQuota(limit ?? 0),
-        });
+    limit === null ? occupied : isByteQuota ? quotaDetail : `${quotaDetail} · ${occupied}`;
 
   const policies = policiesQuery.data ?? [];
   const activeKeys = keysQuery.data?.filter((key) => key.revoked_at === null).length;

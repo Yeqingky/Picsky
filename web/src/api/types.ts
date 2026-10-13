@@ -36,6 +36,8 @@ export interface QuotaInfo {
   used: number;
   /** null 表示不限 */
   limit: number | null;
+  /** 已占用存储空间 (字节), 与 mode 无关 */
+  used_bytes: number;
 }
 
 export interface GroupRef {

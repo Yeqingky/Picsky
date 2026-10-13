@@ -20,9 +20,10 @@ type groupRefDTO struct {
 
 // quotaDTO 是配额用量.
 type quotaDTO struct {
-	Mode  *string `json:"mode"`
-	Used  int64   `json:"used"`
-	Limit *int64  `json:"limit"`
+	Mode      *string `json:"mode"`
+	Used      int64   `json:"used"`
+	Limit     *int64  `json:"limit"`
+	UsedBytes int64   `json:"used_bytes"`
 }
 
 // meDTO 是当前用户信息.
@@ -52,7 +53,7 @@ func (s *Server) meResponse(principal *service.Principal) meDTO {
 		EmailVerified:   user.EmailVerifiedAt != nil,
 		Group:           groupRefDTO{ID: principal.Group.ID, Name: principal.Group.Name},
 		Permissions:     principal.Permissions.Names(),
-		Quota:           quotaDTO{Used: quota.Used},
+		Quota:           quotaDTO{Used: quota.Used, UsedBytes: user.UsedBytes},
 		DefaultPolicyID: user.DefaultPolicyID,
 		TOTPEnabled:     user.TOTPSecret != "",
 		CreatedAt:       user.CreatedAt,
