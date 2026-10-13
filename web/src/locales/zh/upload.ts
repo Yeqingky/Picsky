@@ -1,0 +1,55 @@
+/** 上传页文案 */
+export const upload = {
+  title: '上传图片',
+  description:
+    '拖拽到页面任意位置, 或按 Ctrl+V 粘贴, 也可以点击选择文件; 图片写入外部存储后由分发域名提供直链。',
+  noPermission: {
+    title: '当前账号没有上传权限',
+    description: '请联系管理员为你所在的用户组开启 upload 权限位后再试。',
+  },
+  dropzone: {
+    hint: '拖拽图片到此处, 或点击选择文件',
+    hintActive: '松开鼠标即可开始上传',
+    pasteHint: '支持 Ctrl+V 粘贴剪贴板中的图片',
+    selectFiles: '选择文件',
+    objectRetainHint: '上传前会按 sha256 检查秒传, 命中时直接返回已有直链, 不重复占用配额。',
+  },
+  policy: {
+    label: '存储策略',
+    rememberHint: '已记住上次选择',
+    defaultHint: '默认策略',
+    none: '当前用户组没有可用策略, 请联系管理员授权。',
+  },
+  queue: {
+    title: '上传队列',
+    summary: '共 {{total}} 个任务, 完成 {{done}}, 失败 {{failed}}',
+    clearFinished: '清除已完成',
+    statusPending: '等待',
+    statusHashing: '计算校验值',
+    statusUploading: '上传中',
+    statusDone: '完成',
+    statusDuplicate: '已存在',
+    statusFailed: '失败',
+    retry: '重试',
+    remove: '移除',
+  },
+  result: {
+    title: '上传结果',
+    dedup: '命中秒传, 已存在',
+    quotaCharged: '首次存储, 计入配额',
+    quotaFree: '复用已有对象, 不计配额',
+    size: '大小',
+    dimensions: '尺寸',
+    format: '格式',
+    filename: '原始文件名',
+    urls: '各域名 URL',
+    copyFormats: '复制格式',
+    uploadedAt: '上传时间',
+  },
+  error: {
+    hashFailed: '无法计算文件校验值',
+    uploadFailed: '上传失败',
+    noPolicy: '请先选择存储策略',
+    notImage: '已忽略非图片文件',
+  },
+};

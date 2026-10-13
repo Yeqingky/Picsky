@@ -1,0 +1,189 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/geist';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans:
+    'Geist Variable', ui-sans-serif, system-ui, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning: var(--warning);
+  --color-info-foreground: var(--info-foreground);
+  --color-info: var(--info);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: #f5f6f8;
+  --foreground: #16181d;
+  --card: #ffffff;
+  --card-foreground: #16181d;
+  --popover: #ffffff;
+  --popover-foreground: #16181d;
+  --primary: #2f6fed;
+  --primary-foreground: #ffffff;
+  --secondary: #eceef3;
+  --secondary-foreground: #16181d;
+  --muted: #eceef3;
+  --muted-foreground: #5a6270;
+  --accent: #e8ebf1;
+  --accent-foreground: #16181d;
+  --destructive: #c62828;
+  --border: #0b12201a;
+  --input: #0b122026;
+  --ring: #2f6fed;
+  --success: #1f9254;
+  --success-foreground: #ffffff;
+  --warning: #b26a00;
+  --warning-foreground: #ffffff;
+  --info: #0277bd;
+  --info-foreground: #ffffff;
+  --chart-1: #2f6fed;
+  --chart-2: #7c4dff;
+  --chart-3: #1f9254;
+  --chart-4: #b26a00;
+  --chart-5: #0277bd;
+  --radius: 0.625rem;
+  --skeleton: #0b122017;
+  --skeleton-highlight: #ffffffa6;
+}
+
+.dark {
+  --background: #111315;
+  --foreground: #e8eaed;
+  --card: #1a1d20;
+  --card-foreground: #e8eaed;
+  --popover: #1a1d20;
+  --popover-foreground: #e8eaed;
+  --primary: #7ba2ff;
+  --primary-foreground: #101828;
+  --secondary: #26292e;
+  --secondary-foreground: #e8eaed;
+  --muted: #23262b;
+  --muted-foreground: #a5abb6;
+  --accent: #2a2e34;
+  --accent-foreground: #e8eaed;
+  --destructive: #f2686a;
+  --border: #ffffff24;
+  --input: #ffffff29;
+  --ring: #7ba2ff;
+  --success: #4cc38a;
+  --success-foreground: #101828;
+  --warning: #e0a04a;
+  --warning-foreground: #101828;
+  --info: #4fb3e8;
+  --info-foreground: #101828;
+  --chart-1: #7ba2ff;
+  --chart-2: #b39dff;
+  --chart-3: #4cc38a;
+  --chart-4: #e0a04a;
+  --chart-5: #4fb3e8;
+  --skeleton: #ffffff1f;
+  --skeleton-highlight: #ffffff17;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background-color: color-mix(in oklab, var(--primary) 25%, transparent);
+  }
+  /* 简约滚动条: 细滑块 + 透明轨道, 不显示系统箭头按钮 (docs/webui.md 第 1 节) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 40%, transparent) transparent;
+  }
+  /* 旧版 Chromium 不支持标准属性时的兜底 */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-corner {
+    background-color: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+    background-color: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
+  }
+  *::-webkit-scrollbar-button {
+    display: none;
+  }
+}
+
+/* 骨架屏扫光 (docs/webui.md 第 3 节): 周期 1.6s, 减少动态时退化为静态底色 */
+@keyframes skeleton-wave {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@utility skeleton-wave {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--skeleton);
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, var(--skeleton-highlight), transparent);
+    animation: skeleton-wave 1.6s infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &::after {
+      animation: none;
+      content: none;
+    }
+  }
+}

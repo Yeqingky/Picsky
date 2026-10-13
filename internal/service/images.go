@@ -1,0 +1,462 @@
+package service
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+
+	"github.com/yeqingky/Picsky/internal/apperr"
+	"github.com/yeqingky/Picsky/internal/imgdetect"
+	"github.com/yeqingky/Picsky/internal/model"
+	"github.com/yeqingky/Picsky/internal/storage"
+)
+
+// 删除响应中的原因取值.
+const (
+	DeleteReasonLastReference = "last_reference"
+	DeleteReasonNoCapability  = "no_capability"
+	DeleteReasonSettingOff    = "setting_disabled"
+	DeleteReasonShared        = "shared"
+	DeleteReasonBackendError  = "backend_error"
+)
+
+// Images 管理图片记录: 列表, 详情, 改名, 删除与配额回补.
+type Images struct {
+	db       *gorm.DB
+	settings *Settings
+	audit    *Audit
+	policies *Policies
+	log      *slog.Logger
+	tasks    *Tasks
+}
+
+// NewImages 创建图片服务.
+func NewImages(database *gorm.DB, settings *Settings, audit *Audit, policies *Policies, log *slog.Logger) *Images {
+	return &Images{db: database, settings: settings, audit: audit, policies: policies, log: log}
+}
+
+// SetTasks 注入维护任务队列 (外部对象清理失败时入队重试).
+func (i *Images) SetTasks(tasks *Tasks) { i.tasks = tasks }
+
+// ListFilter 是图库过滤条件.
+type ListFilter struct {
+	Page      int
+	PageSize  int
+	Keyword   string
+	Format    string
+	From      *time.Time
+	To        *time.Time
+	UserID    *int64
+	PolicyID  *int64
+	SortField string
+	SortDesc  bool
+}
+
+// ListResult 是分页结果.
+type ListResult struct {
+	Total    int64         `json:"total"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"page_size"`
+	Items    []model.Image `json:"items"`
+}
+
+// List 返回图片记录列表 (只含 kind 为 image 的记录).
+func (i *Images) List(principal *Principal, filter ListFilter) (*ListResult, error) {
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize < 1 {
+		pageSize = int(i.settings.Int64("gallery_page_size", 40))
+	}
+	if pageSize < 1 {
+		pageSize = 40
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
+	query := i.db.Model(&model.Image{}).Where("deleted_at IS NULL AND kind = ?", model.KindImage)
+	if !principal.Has(model.PermViewAll) {
+		query = query.Where("user_id = ?", principal.User.ID)
+	} else if filter.UserID != nil {
+		query = query.Where("user_id = ?", *filter.UserID)
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		query = query.Where("original_filename LIKE ?", "%"+keyword+"%")
+	}
+	if format := strings.ToLower(strings.TrimSpace(filter.Format)); format != "" {
+		query = query.Where("format = ?", format)
+	}
+	if filter.From != nil {
+		query = query.Where("created_at >= ?", filter.From.UTC())
+	}
+	if filter.To != nil {
+		query = query.Where("created_at <= ?", filter.To.UTC())
+	}
+	if filter.PolicyID != nil {
+		query = query.Where("policy_id = ?", *filter.PolicyID)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+
+	sortColumn := "created_at"
+	switch filter.SortField {
+	case "size", "created_at", "original_filename", "format":
+		sortColumn = filter.SortField
+	}
+	direction := "DESC"
+	if !filter.SortDesc && filter.SortField == "" {
+		direction = "DESC"
+	} else if !filter.SortDesc {
+		direction = "ASC"
+	}
+	if filter.SortField == "" {
+		direction = "DESC"
+	}
+
+	var items []model.Image
+	if err := query.Order(fmt.Sprintf("%s %s, id DESC", sortColumn, direction)).
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&items).Error; err != nil {
+		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if items == nil {
+		items = []model.Image{}
+	}
+	return &ListResult{Total: total, Page: page, PageSize: pageSize, Items: items}, nil
+}
+
+// Get 读取单条记录.
+func (i *Images) Get(principal *Principal, id int64) (*model.Image, error) {
+	record, err := i.find(id)
+	if err != nil {
+		return nil, err
+	}
+	if record.UserID != principal.User.ID && !principal.Has(model.PermViewAll) {
+		return nil, apperr.ErrNotFound.WithMessage("记录不存在")
+	}
+	return record, nil
+}
+
+// Rename 修改记录的原始文件名主体.
+func (i *Images) Rename(principal *Principal, id int64, filename string) (*model.Image, error) {
+	record, err := i.find(id)
+	if err != nil {
+		return nil, err
+	}
+	if record.UserID != principal.User.ID && !principal.Has(model.PermDeleteAll) {
+		return nil, apperr.ErrNotFound.WithMessage("记录不存在")
+	}
+	base := imgdetect.SanitizeFilenameBase(filename)
+	if base == "" {
+		return nil, apperr.ErrInvalidRequest.WithMessage("文件名不能为空")
+	}
+	updated := base + "." + record.Ext
+	if err := i.db.Model(&model.Image{}).Where("id = ?", record.ID).Update("original_filename", updated).Error; err != nil {
+		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	record.OriginalFilename = updated
+	i.audit.Recordf(Entry{
+		UserID:     &principal.User.ID,
+		Action:     "image_rename",
+		TargetType: "image",
+		TargetID:   &record.ID,
+		Detail:     map[string]any{"original_filename": updated},
+	})
+	return record, nil
+}
+
+// DeleteResult 是删除结果.
+type DeleteResult struct {
+	ID            int64  `json:"id"`
+	Deleted       bool   `json:"deleted"`
+	ObjectDeleted bool   `json:"object_deleted"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+// Delete 软删记录, 回补配额, 按引用计数与能力降级决定是否删除外部对象.
+func (i *Images) Delete(principal *Principal, id int64, ip, userAgent string) (*DeleteResult, error) {
+	record, err := i.find(id)
+	if err != nil {
+		return nil, err
+	}
+	if record.UserID != principal.User.ID && !principal.Has(model.PermDeleteAll) {
+		return nil, apperr.ErrNotFound.WithMessage("记录不存在")
+	}
+	if record.UserID == principal.User.ID && !principal.Has(model.PermDeleteOwn) && !principal.Has(model.PermDeleteAll) {
+		return nil, apperr.ErrForbidden.WithMessage("没有删除权限")
+	}
+	if record.DeletedAt != nil {
+		return &DeleteResult{
+			ID:            record.ID,
+			Deleted:       true,
+			ObjectDeleted: record.ObjectDeletedAt != nil,
+		}, nil
+	}
+	return i.deleteRecord(principal, record, ip, userAgent)
+}
+
+// BatchDelete 批量删除.
+func (i *Images) BatchDelete(principal *Principal, ids []int64, ip, userAgent string) ([]DeleteResult, error) {
+	if !principal.Has(model.PermDeleteOwn) && !principal.Has(model.PermDeleteAll) {
+		return nil, apperr.ErrForbidden.WithMessage("没有删除权限")
+	}
+	if len(ids) == 0 {
+		return nil, apperr.ErrInvalidRequest.WithMessage("ids 不能为空")
+	}
+	if len(ids) > 200 {
+		return nil, apperr.ErrInvalidRequest.WithMessage("单次最多删除 200 条")
+	}
+	results := make([]DeleteResult, 0, len(ids))
+	for _, id := range ids {
+		record, err := i.find(id)
+		if err != nil {
+			results = append(results, DeleteResult{ID: id, Deleted: false})
+			continue
+		}
+		if record.UserID != principal.User.ID && !principal.Has(model.PermDeleteAll) {
+			results = append(results, DeleteResult{ID: id, Deleted: false})
+			continue
+		}
+		if record.DeletedAt != nil {
+			results = append(results, DeleteResult{ID: id, Deleted: true, ObjectDeleted: record.ObjectDeletedAt != nil})
+			continue
+		}
+		result, err := i.deleteRecord(principal, record, ip, userAgent)
+		if err != nil {
+			apiErr := apperr.From(err)
+			i.log.Warn("批量删除中的单条失败", "image_id", id, "error", apiErr.Message)
+			results = append(results, DeleteResult{ID: id, Deleted: false})
+			continue
+		}
+		results = append(results, *result)
+	}
+	return results, nil
+}
+
+// deleteRecord 执行单条删除流程.
+func (i *Images) deleteRecord(principal *Principal, record *model.Image, ip, userAgent string) (*DeleteResult, error) {
+	now := nowUTC()
+	deleted := false
+
+	// 1. 事务内条件软删, 回补配额并把计费移交给同对象最早的剩余记录.
+	// 条件更新保证并发重复删除只有一次生效, 避免重复回补与重复移交.
+	if err := i.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.Image{}).Where("id = ? AND deleted_at IS NULL", record.ID).Update("deleted_at", now)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		deleted = true
+
+		if record.QuotaCharged {
+			if err := refundQuota(tx, record.UserID, 1, record.Size, now); err != nil {
+				return err
+			}
+			var next model.Image
+			err := tx.Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL AND quota_charged = ?",
+				record.PolicyID, record.ObjectKey, false).
+				Order("id ASC").First(&next).Error
+			if err == nil {
+				if err := tx.Model(&model.Image{}).Where("id = ? AND quota_charged = ?", next.ID, false).Update("quota_charged", true).Error; err != nil {
+					return err
+				}
+				if err := chargeQuota(tx, next.UserID, 1, next.Size, now); err != nil {
+					return err
+				}
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, apperr.ErrInternal.WithMessage("删除记录失败: " + err.Error())
+	}
+
+	if !deleted {
+		// 已被并发删除: 幂等返回当前状态.
+		current, err := i.find(record.ID)
+		if err != nil {
+			return nil, err
+		}
+		return &DeleteResult{ID: current.ID, Deleted: true, ObjectDeleted: current.ObjectDeletedAt != nil}, nil
+	}
+
+	// 2. 引用计数与外部对象删除.
+	var remaining int64
+	if err := i.db.Model(&model.Image{}).
+		Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL", record.PolicyID, record.ObjectKey).
+		Count(&remaining).Error; err != nil {
+		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+
+	result := &DeleteResult{ID: record.ID, Deleted: true}
+	switch {
+	case remaining > 0:
+		result.Reason = DeleteReasonShared
+	case !i.settings.Bool("delete_object_on_last_reference", true):
+		result.Reason = DeleteReasonSettingOff
+	default:
+		policy, err := i.policies.Get(record.PolicyID)
+		if err != nil {
+			result.Reason = DeleteReasonBackendError
+			i.log.Warn("读取策略失败, 保留外部对象", "policy_id", record.PolicyID, "error", err)
+			break
+		}
+		adapter, err := i.policies.Adapter(policy)
+		if err != nil {
+			result.Reason = DeleteReasonBackendError
+			i.log.Warn("初始化存储后端失败, 保留外部对象", "policy_id", record.PolicyID, "error", err)
+			break
+		}
+		if !adapter.Capabilities().Has(storage.CapDelete) {
+			result.Reason = DeleteReasonNoCapability
+			break
+		}
+		ctx, cancel := contextWithTimeout(30 * time.Second)
+		defer cancel()
+		if err := adapter.Delete(ctx, record.ObjectKey); err != nil {
+			result.Reason = DeleteReasonBackendError
+			i.log.Warn("删除外部对象失败, 保留记录并入队重试", "object_key", record.ObjectKey, "error", err)
+			// 外部删除失败可能只是瞬时问题: 入队对象清理任务, 由维护队列重试.
+			if i.tasks != nil {
+				if _, enqueueErr := i.tasks.Enqueue(model.TaskObjectDelete, map[string]any{
+					"policy_id":  record.PolicyID,
+					"object_key": record.ObjectKey,
+				}); enqueueErr != nil {
+					i.log.Warn("入队对象清理任务失败", "object_key", record.ObjectKey, "error", enqueueErr)
+				}
+			}
+			break
+		}
+		deletedAt := nowUTC()
+		if err := i.db.Model(&model.Image{}).Where("id = ?", record.ID).Update("object_deleted_at", deletedAt).Error; err != nil {
+			return nil, apperr.ErrInternal.WithMessage(err.Error())
+		}
+		result.ObjectDeleted = true
+		result.Reason = DeleteReasonLastReference
+	}
+
+	i.audit.Recordf(Entry{
+		UserID:     &principal.User.ID,
+		Action:     "delete",
+		TargetType: "image",
+		TargetID:   &record.ID,
+		Detail: map[string]any{
+			"policy_id":      record.PolicyID,
+			"object_key":     record.ObjectKey,
+			"object_deleted": result.ObjectDeleted,
+			"reason":         result.Reason,
+			"quota_charged":  record.QuotaCharged,
+			"remaining_refs": remaining,
+		},
+		IP:        ip,
+		UserAgent: userAgent,
+	})
+	return result, nil
+}
+
+// ReconcileUsed 按记录聚合重算用户的 used_images 与 used_bytes.
+func (i *Images) ReconcileUsed() (int, error) {
+	var users []model.User
+	if err := i.db.Order("id ASC").Find(&users).Error; err != nil {
+		return 0, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	fixed := 0
+	for _, user := range users {
+		var aggregate struct {
+			Count int64
+			Bytes int64
+		}
+		if err := i.db.Model(&model.Image{}).
+			Select("COUNT(*) as count, COALESCE(SUM(size), 0) as bytes").
+			Where("user_id = ? AND deleted_at IS NULL AND quota_charged = ?", user.ID, true).
+			Scan(&aggregate).Error; err != nil {
+			return fixed, apperr.ErrInternal.WithMessage(err.Error())
+		}
+		if aggregate.Count == user.UsedImages && aggregate.Bytes == user.UsedBytes {
+			continue
+		}
+		if err := i.db.Model(&model.User{}).Where("id = ?", user.ID).Updates(map[string]any{
+			"used_images": aggregate.Count,
+			"used_bytes":  aggregate.Bytes,
+			"updated_at":  nowUTC(),
+		}).Error; err != nil {
+			return fixed, apperr.ErrInternal.WithMessage(err.Error())
+		}
+		fixed++
+	}
+	return fixed, nil
+}
+
+// find 按 ID 读取记录 (含已软删记录, 由调用方判断).
+func (i *Images) find(id int64) (*model.Image, error) {
+	var record model.Image
+	if err := i.db.First(&record, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperr.ErrNotFound.WithMessage("记录不存在")
+		}
+		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	return &record, nil
+}
+
+// reconcileUsersTx 在事务内按记录聚合重算指定用户的用量计数.
+func reconcileUsersTx(tx *gorm.DB, userIDs []int64) error {
+	seen := make(map[int64]bool, len(userIDs))
+	now := nowUTC()
+	for _, userID := range userIDs {
+		if userID <= 0 || seen[userID] {
+			continue
+		}
+		seen[userID] = true
+		var aggregate struct {
+			Count int64
+			Bytes int64
+		}
+		if err := tx.Model(&model.Image{}).
+			Select("COUNT(*) as count, COALESCE(SUM(size), 0) as bytes").
+			Where("user_id = ? AND deleted_at IS NULL AND quota_charged = ?", userID, true).
+			Scan(&aggregate).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+			"used_images": aggregate.Count,
+			"used_bytes":  aggregate.Bytes,
+			"updated_at":  now,
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// refundQuota 原子回补用户配额计数, 结果不为负.
+func refundQuota(tx *gorm.DB, userID int64, images int64, bytes int64, now time.Time) error {
+	return tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"used_images": gorm.Expr("CASE WHEN used_images > ? THEN used_images - ? ELSE 0 END", images, images),
+		"used_bytes":  gorm.Expr("CASE WHEN used_bytes > ? THEN used_bytes - ? ELSE 0 END", bytes, bytes),
+		"updated_at":  now,
+	}).Error
+}
+
+// chargeQuota 原子增加用户配额计数 (计费移交时使用).
+func chargeQuota(tx *gorm.DB, userID int64, images int64, bytes int64, now time.Time) error {
+	return tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"used_images": gorm.Expr("used_images + ?", images),
+		"used_bytes":  gorm.Expr("used_bytes + ?", bytes),
+		"updated_at":  now,
+	}).Error
+}

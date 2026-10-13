@@ -1,0 +1,16 @@
+.git
+.gitignore
+.github
+data
+dist
+picsky
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.local
+web/node_modules
+web/build
+docs
+AGENTS.md
+.release-notes.md

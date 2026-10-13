@@ -1,0 +1,28 @@
+# 构建产物
+/picsky
+/dist/
+web/node_modules/
+web/build/*
+
+# 内嵌前端产物 (由 scripts/build.sh 或 Dockerfile 从 web/build 拷贝)
+internal/web/build/*
+!internal/web/build/.keep
+
+# 运行数据
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# 本地文档 (仅在本地维护, 不进入版本库)
+/docs/
+
+# 本地配置
+.env
+.env.local
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+.DS_Store

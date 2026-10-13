@@ -1,0 +1,167 @@
+import { useState } from 'react';
+import type { FormEvent } from 'react';
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import { ApiError, authApi } from '../api';
+import type { CaptchaConfig } from '../api';
+import { CaptchaWidget } from '../components/CaptchaWidget';
+import { AuthCardSkeleton } from '../components/skeletons';
+import { Alert, AlertDescription } from '../components/ui/alert';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { useAuth } from '../hooks/useAuth';
+
+/** 登录页: 用户名/邮箱 + 密码 (+ 可选动态口令) + 人机验证 (/login) */
+export default function LoginPage() {
+  const { t } = useTranslation();
+  const { login, isLoading } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [showTotp, setShowTotp] = useState(false);
+  const [totp, setTotp] = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [resetSignal, setResetSignal] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ identifier?: string; password?: string }>({});
+  const [submitting, setSubmitting] = useState(false);
+
+  const captchaQuery = useQuery({
+    queryKey: ['auth', 'captcha'],
+    queryFn: authApi.captchaConfig,
+    staleTime: Infinity,
+  });
+  const captchaConfig: CaptchaConfig | undefined = captchaQuery.data;
+  const captchaRequired = (captchaConfig?.provider ?? 'none') !== 'none';
+
+  if (isLoading) return <AuthCardSkeleton />;
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const nextErrors: { identifier?: string; password?: string } = {};
+    if (identifier.trim() === '') nextErrors.identifier = t('auth.login.identifierRequired');
+    if (password === '') nextErrors.password = t('auth.login.passwordRequired');
+    setFieldErrors(nextErrors);
+    if (nextErrors.identifier || nextErrors.password) return;
+
+    if (captchaRequired && captchaToken === '') {
+      setError(t('auth.login.captchaRequired'));
+      return;
+    }
+
+    setError(null);
+    setSubmitting(true);
+    try {
+      await login({
+        identifier: identifier.trim(),
+        password,
+        totp: showTotp && totp.trim() !== '' ? totp.trim() : undefined,
+        captcha_token: captchaToken === '' ? undefined : captchaToken,
+      });
+
+      const redirect = searchParams.get('redirect');
+      const target =
+        redirect && redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/';
+      navigate(target, { replace: true });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'captcha_failed') {
+        setCaptchaToken('');
+        setResetSignal((value) => value + 1);
+      }
+      if (err instanceof ApiError && err.details?.totp_required === true) {
+        setShowTotp(true);
+      }
+      setError(err instanceof ApiError ? err.message : t('common.error.unknown'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
+      <div className="flex flex-col gap-1">
+        <h2 className="font-heading text-xl font-semibold">{t('auth.login.title')}</h2>
+        <p className="text-muted-foreground text-sm">{t('auth.login.description')}</p>
+      </div>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="login-identifier">{t('auth.login.identifier')}</Label>
+        <Input
+          id="login-identifier"
+          value={identifier}
+          onChange={(event) => setIdentifier(event.target.value)}
+          aria-invalid={Boolean(fieldErrors.identifier)}
+          autoComplete="username"
+          autoFocus
+        />
+        {fieldErrors.identifier && (
+          <p className="text-destructive text-sm">{fieldErrors.identifier}</p>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="login-password">{t('auth.login.password')}</Label>
+        <Input
+          id="login-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          aria-invalid={Boolean(fieldErrors.password)}
+          autoComplete="current-password"
+        />
+        {fieldErrors.password && <p className="text-destructive text-sm">{fieldErrors.password}</p>}
+      </div>
+
+      <CaptchaWidget config={captchaConfig} onToken={setCaptchaToken} resetSignal={resetSignal} />
+
+      {showTotp ? (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="login-totp">{t('auth.login.totp')}</Label>
+          <Input
+            id="login-totp"
+            value={totp}
+            onChange={(event) => setTotp(event.target.value)}
+            placeholder={t('auth.login.totpPlaceholder')}
+            inputMode="numeric"
+            maxLength={6}
+            autoComplete="one-time-code"
+          />
+          <p className="text-muted-foreground text-sm">{t('auth.login.totpHint')}</p>
+        </div>
+      ) : (
+        <div>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setShowTotp(true)}>
+            {t('auth.login.totpToggle')}
+          </Button>
+        </div>
+      )}
+
+      <Button type="submit" size="lg" disabled={submitting}>
+        {submitting ? t('auth.login.submitting') : t('auth.login.submit')}
+      </Button>
+
+      <div className="flex flex-col items-center gap-1">
+        <p className="text-muted-foreground text-center text-xs">
+          {t('auth.login.firstAdminHint')}
+        </p>
+        <p className="text-sm">
+          {t('auth.login.noAccount')}{' '}
+          <RouterLink to="/register" className="text-primary underline-offset-4 hover:underline">
+            {t('auth.login.goRegister')}
+          </RouterLink>
+        </p>
+      </div>
+    </form>
+  );
+}
