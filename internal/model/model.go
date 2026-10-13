@@ -63,7 +63,6 @@ type Group struct {
 	QuotaMode        *string    `gorm:"size:8" json:"quota_mode"`
 	QuotaValue       *int64     `json:"quota_value"`
 	MaxFileSizeBytes *int64     `json:"max_file_size_bytes"`
-	AllowedFormats   string     `gorm:"size:255" json:"allowed_formats"`
 	UploadRateLimit  *int       `json:"upload_rate_limit"`
 	Sort             int        `gorm:"not null;default:0" json:"sort"`
 	CreatedAt        time.Time  `gorm:"not null" json:"created_at"`

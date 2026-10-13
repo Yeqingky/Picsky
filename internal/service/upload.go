@@ -134,7 +134,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if !imgdetect.IsImage(detected) {
 		return nil, apperr.ErrUnsupportedFormat.WithMessage("仅支持位图图片, 探测到 " + detected.Format)
 	}
-	allowedFormats := EffectiveAllowedFormats(u.settings, req.Principal.Group)
+	allowedFormats := EffectiveAllowedFormats(u.settings)
 	if !formatAllowed(detected.Format, allowedFormats) {
 		return nil, apperr.ErrUnsupportedFormat.WithDetails(map[string]any{
 			"format":  detected.Format,

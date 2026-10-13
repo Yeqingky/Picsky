@@ -72,7 +72,7 @@ var SettingDefinitions = []SettingDefinition{
 	{Key: "smtp_encryption", Label: "SMTP 加密方式", Type: "select", Group: "邮箱", Options: []string{"starttls", "ssl", "none"}},
 
 	{Key: "default_group_id", Label: "新用户默认用户组", Type: "int", Group: "上传限制", Help: "用户组 ID; 留空使用标记为默认的用户组"},
-	{Key: "default_allowed_formats", Label: "系统格式基线", Type: "string", Group: "上传限制", Help: "逗号分隔; 用户组只能在此基础上收紧; SVG 永远禁止"},
+	{Key: "default_allowed_formats", Label: "系统格式基线", Type: "string", Group: "上传限制", Help: "逗号分隔; 全局生效 (不区分用户组); SVG 永远禁止"},
 	{Key: "max_file_size_bytes", Label: "单文件上限 (字节)", Type: "int", Group: "上传限制"},
 	{Key: "gallery_page_size", Label: "图库每页数量", Type: "int", Group: "上传限制"},
 

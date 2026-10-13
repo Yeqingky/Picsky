@@ -31,7 +31,6 @@ type GroupInput struct {
 	QuotaMode        *string  `json:"quota_mode"`
 	QuotaValue       *int64   `json:"quota_value"`
 	MaxFileSizeBytes *int64   `json:"max_file_size_bytes"`
-	AllowedFormats   string   `json:"allowed_formats"`
 	UploadRateLimit  *int     `json:"upload_rate_limit"`
 	Sort             int      `json:"sort"`
 	PolicyIDs        []int64  `json:"policy_ids"`
@@ -92,7 +91,6 @@ func (g *Groups) Create(in GroupInput, actor *Principal, ip, userAgent string) (
 		QuotaMode:        normalizeQuotaMode(in.QuotaMode),
 		QuotaValue:       in.QuotaValue,
 		MaxFileSizeBytes: in.MaxFileSizeBytes,
-		AllowedFormats:   normalizeFormatList(in.AllowedFormats),
 		UploadRateLimit:  in.UploadRateLimit,
 		Sort:             in.Sort,
 		CreatedAt:        nowUTC(),
@@ -149,7 +147,6 @@ func (g *Groups) Update(id int64, in GroupInput, actor *Principal, ip, userAgent
 		"quota_mode":          normalizeQuotaMode(in.QuotaMode),
 		"quota_value":         in.QuotaValue,
 		"max_file_size_bytes": in.MaxFileSizeBytes,
-		"allowed_formats":     normalizeFormatList(in.AllowedFormats),
 		"upload_rate_limit":   in.UploadRateLimit,
 		"sort":                in.Sort,
 		"updated_at":          nowUTC(),
@@ -312,9 +309,6 @@ func (g *Groups) validate(in *GroupInput, group *model.Group) (model.Permission,
 	if in.UploadRateLimit != nil && *in.UploadRateLimit < 0 {
 		return 0, apperr.ErrInvalidRequest.WithMessage("上传速率限制不能为负数")
 	}
-	if err := validateFormatSubset(in.AllowedFormats, g.settings); err != nil {
-		return 0, err
-	}
 	return permissions, nil
 }
 
@@ -336,32 +330,6 @@ func (g *Groups) replacePolicies(tx *gorm.DB, groupID int64, policyIDs []int64) 
 		return nil
 	}
 	return tx.Create(&rows).Error
-}
-
-// validateFormatSubset 校验组格式白名单是系统基线的子集且不含 SVG.
-func validateFormatSubset(raw string, settings *Settings) error {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	baseline := splitFormats(settings.String("default_allowed_formats"))
-	baselineSet := map[string]bool{}
-	for _, item := range baseline {
-		baselineSet[item] = true
-	}
-	for _, item := range splitFormats(raw) {
-		if item == "svg" {
-			return apperr.ErrInvalidRequest.WithMessage("系统级禁止 SVG, 白名单不可包含")
-		}
-		if !baselineSet[item] {
-			return apperr.ErrInvalidRequest.WithMessage("格式 " + item + " 不在系统基线内, 用户组只能收紧")
-		}
-	}
-	return nil
-}
-
-// normalizeFormatList 规范化格式列表.
-func normalizeFormatList(raw string) string {
-	return strings.Join(splitFormats(raw), ",")
 }
 
 // normalizeQuotaMode 规范化配额方式.

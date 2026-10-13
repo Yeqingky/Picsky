@@ -305,7 +305,6 @@ export interface AdminGroup {
   quota_mode: QuotaMode | null;
   quota_value: number | null;
   max_file_size_bytes: number | null;
-  allowed_formats: string | null;
   upload_rate_limit: number | null;
   sort: number;
   user_count: number;
@@ -320,7 +319,6 @@ export interface AdminGroupWriteRequest {
   quota_mode?: QuotaMode | null;
   quota_value?: number | null;
   max_file_size_bytes?: number | null;
-  allowed_formats?: string | null;
   upload_rate_limit?: number | null;
   sort?: number;
 }

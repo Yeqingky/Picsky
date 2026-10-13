@@ -667,7 +667,6 @@ func TestRateLimit(t *testing.T) {
 		Permissions:     group.Permissions.Names(),
 		QuotaMode:       group.QuotaMode,
 		QuotaValue:      group.QuotaValue,
-		AllowedFormats:  group.AllowedFormats,
 		UploadRateLimit: new(1),
 	}, f.admin, "127.0.0.1", "test-agent"); err != nil {
 		t.Fatalf("更新用户组失败: %v", err)

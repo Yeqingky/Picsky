@@ -46,20 +46,6 @@ import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { cn } from '../../lib/utils';
 import { formatBytes, formatNumber } from '../../utils/format';
 
-/** 允许的图片格式 (docs/database.md 7: 系统基线不含 SVG) */
-const FORMAT_OPTIONS = [
-  'png',
-  'jpg',
-  'jpeg',
-  'gif',
-  'webp',
-  'bmp',
-  'avif',
-  'tiff',
-  'ico',
-  'heic',
-] as const;
-
 /** Radix Select 不支持空字符串值, 用哨兵表示 "不限" */
 const QUOTA_UNLIMITED = '__unlimited__';
 
@@ -234,14 +220,6 @@ export default function AdminGroupsPage() {
               ? t('admin.groups.unlimited')
               : formatBytes(row.max_file_size_bytes)}
         </span>
-      ),
-    },
-    {
-      id: 'allowed_formats',
-      header: t('admin.groups.column.allowedFormats'),
-      className: 'w-[200px]',
-      cell: (row) => (
-        <span className="text-sm">{row.allowed_formats || t('admin.groups.unlimited')}</span>
       ),
     },
     {
@@ -458,12 +436,6 @@ function GroupFormDialog({
       ? ''
       : String(group.max_file_size_bytes),
   );
-  const [allowedFormats, setAllowedFormats] = useState<string[]>(
-    (group?.allowed_formats ?? '')
-      .split(',')
-      .map((item) => item.trim())
-      .filter((item) => item !== ''),
-  );
   const [uploadRateLimit, setUploadRateLimit] = useState(
     group?.upload_rate_limit === null || group?.upload_rate_limit === undefined
       ? ''
@@ -475,12 +447,6 @@ function GroupFormDialog({
   const togglePermission = (permission: PermissionName, checked: boolean) => {
     setPermissions((prev) =>
       checked ? [...prev, permission] : prev.filter((item) => item !== permission),
-    );
-  };
-
-  const toggleFormat = (format: string, checked: boolean) => {
-    setAllowedFormats((prev) =>
-      checked ? [...prev, format] : prev.filter((item) => item !== format),
     );
   };
 
@@ -525,7 +491,6 @@ function GroupFormDialog({
       quota_mode: quotaMode === '' ? null : quotaMode,
       quota_value: quotaMode === '' ? null : Number(quotaValue.trim()),
       max_file_size_bytes: parseOptionalNumber(maxFileSize),
-      allowed_formats: allowedFormats.length === 0 ? null : allowedFormats.join(','),
       upload_rate_limit: parseOptionalNumber(uploadRateLimit),
       sort: sort.trim() === '' ? 0 : Number(sort.trim()),
     });
@@ -686,25 +651,6 @@ function GroupFormDialog({
               </p>
             </div>
           </div>
-
-          <fieldset className="flex flex-col gap-2">
-            <legend className="text-sm font-medium">
-              {t('admin.groups.field.allowedFormats')}
-            </legend>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {FORMAT_OPTIONS.map((format) => (
-                <label key={format} className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={allowedFormats.includes(format)}
-                    onCheckedChange={(checked) => toggleFormat(format, checked === true)}
-                    aria-label={format}
-                  />
-                  <span>{format}</span>
-                </label>
-              ))}
-            </div>
-            <p className="text-muted-foreground text-sm">{t('admin.groups.formatsHint')}</p>
-          </fieldset>
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="admin-group-sort">{t('admin.groups.field.sort')}</Label>

@@ -80,26 +80,13 @@ func EffectiveMaxFileSize(settings *Settings, group *model.Group) int64 {
 	return settings.Int64("max_file_size_bytes", 10*1024*1024)
 }
 
-// EffectiveAllowedFormats 计算格式白名单: 用户组只能在系统基线内收紧.
-func EffectiveAllowedFormats(settings *Settings, group *model.Group) []string {
+// EffectiveAllowedFormats 计算允许上传的格式: 只取系统设置里的格式基线 (全局生效).
+func EffectiveAllowedFormats(settings *Settings) []string {
 	baseline := splitFormats(settings.String("default_allowed_formats"))
 	if len(baseline) == 0 {
 		baseline = splitFormats("png,jpg,jpeg,gif,webp,bmp,avif,tiff,ico,heic")
 	}
-	if group == nil || strings.TrimSpace(group.AllowedFormats) == "" {
-		return baseline
-	}
-	allowed := make([]string, 0, len(baseline))
-	groupSet := map[string]bool{}
-	for _, item := range splitFormats(group.AllowedFormats) {
-		groupSet[item] = true
-	}
-	for _, item := range baseline {
-		if groupSet[item] {
-			allowed = append(allowed, item)
-		}
-	}
-	return allowed
+	return baseline
 }
 
 // EffectiveUploadRateLimit 计算每分钟上传次数上限; 0 表示不限.

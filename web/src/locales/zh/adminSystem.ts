@@ -49,7 +49,7 @@ export const adminSystem = {
       smtpFromHint: '例如 Picsky <no-reply@example.com>',
       smtpEncryption: '加密方式',
       allowedFormats: '允许的格式基线',
-      allowedFormatsHint: '以逗号分隔, 例如 png,jpg,webp; 系统禁止 SVG',
+      allowedFormatsHint: '以逗号分隔, 例如 png,jpg,webp; 全局生效, 系统禁止 SVG',
       allowedFormatsPreview: '共 {{count}} 种: {{formats}}',
       maxFileSize: '单文件上限',
       maxFileSizeHint: '当前 {{size}}; 可被用户组覆盖',
