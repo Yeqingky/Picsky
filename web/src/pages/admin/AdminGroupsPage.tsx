@@ -560,7 +560,7 @@ function GroupFormDialog({
           </fieldset>
 
           <div className="flex flex-col gap-4 sm:flex-row">
-            <div className="flex flex-1 flex-col gap-1.5">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               <Label htmlFor="admin-group-quota-mode">{t('admin.groups.field.quotaMode')}</Label>
               <Select
                 value={quotaMode === '' ? QUOTA_UNLIMITED : quotaMode}
@@ -579,7 +579,7 @@ function GroupFormDialog({
               </Select>
             </div>
             {quotaMode !== '' && (
-              <div className="flex flex-1 flex-col gap-1.5">
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                 <Label htmlFor="admin-group-quota-value">
                   {t('admin.groups.field.quotaValue')}
                 </Label>
@@ -609,7 +609,7 @@ function GroupFormDialog({
           </div>
 
           <div className="flex flex-col gap-4 sm:flex-row">
-            <div className="flex flex-1 flex-col gap-1.5">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               <Label htmlFor="admin-group-max-file-size">
                 {t('admin.groups.field.maxFileSize')}
               </Label>
@@ -630,7 +630,7 @@ function GroupFormDialog({
                 {errors.maxFileSize || t('admin.groups.inheritHint')}
               </p>
             </div>
-            <div className="flex flex-1 flex-col gap-1.5">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               <Label htmlFor="admin-group-rate-limit">
                 {t('admin.groups.field.uploadRateLimit')}
               </Label>
