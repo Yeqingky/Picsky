@@ -22,6 +22,7 @@ export interface Paginated<T> {
 export interface SiteInfo {
   site_name: string;
   register_enabled: boolean;
+  password_reset_enabled: boolean;
   captcha: CaptchaConfig;
 }
 
@@ -58,13 +59,18 @@ export interface CurrentUser {
   totp_enabled: boolean;
 }
 
-export interface LoginRequest {
-  identifier?: string;
-  username?: string;
-  password: string;
-  totp?: string;
-  captcha_token?: string;
-}
+export type LoginRequest =
+  | {
+      identifier?: string;
+      username?: string;
+      password: string;
+      captcha_token?: string;
+      login_challenge?: never;
+    }
+  | {
+      login_challenge: string;
+      totp: string;
+    };
 
 export interface RegisterRequest {
   username: string;
@@ -76,6 +82,16 @@ export interface RegisterRequest {
 export interface PasswordChangeRequest {
   old_password: string;
   new_password: string;
+}
+
+export interface PasswordResetRequest {
+  email: string;
+  captcha_token?: string;
+}
+
+export interface PasswordResetConfirmRequest {
+  token: string;
+  password: string;
 }
 
 export interface ProfileUpdateRequest {

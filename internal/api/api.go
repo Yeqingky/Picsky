@@ -51,6 +51,8 @@ func (s *Server) Register(router *gin.Engine) {
 	authGroup.POST("/register", s.register)
 	authGroup.GET("/captcha", s.captchaPublic)
 	authGroup.POST("/verify-email", s.verifyEmail)
+	authGroup.POST("/password/reset/request", s.requestPasswordReset)
+	authGroup.POST("/password/reset", s.resetPassword)
 
 	authed := authGroup.Group("", s.auth.Required())
 	authed.POST("/logout", s.logout)
@@ -185,12 +187,13 @@ func (s *Server) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "version": config.Version})
 }
 
-// publicSite 返回站点公开信息 (名称, 注册开关, 人机验证配置).
+// publicSite 返回站点公开信息 (名称, 注册开关, 找回密码可用性与人机验证配置).
 func (s *Server) publicSite(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"site_name":        s.svc.Settings.String("site_name"),
-		"register_enabled": s.svc.Settings.Bool("register_enabled", true),
-		"captcha":          s.svc.Captcha.Public(),
+		"site_name":              s.svc.Settings.String("site_name"),
+		"register_enabled":       s.svc.Settings.Bool("register_enabled", true),
+		"password_reset_enabled": s.svc.Mailer.Configured(),
+		"captcha":                s.svc.Captcha.Public(),
 	})
 }
 

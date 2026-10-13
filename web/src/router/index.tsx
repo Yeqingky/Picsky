@@ -11,6 +11,8 @@ import type { PermissionName } from '../api/types';
 import LoginPage from '../pages/LoginPage';
 import RegisterPage from '../pages/RegisterPage';
 import VerifyEmailPage from '../pages/VerifyEmailPage';
+import ForgotPasswordPage from '../pages/ForgotPasswordPage';
+import ResetPasswordPage from '../pages/ResetPasswordPage';
 import DashboardPage from '../pages/DashboardPage';
 import UploadPage from '../pages/UploadPage';
 import GalleryPage from '../pages/GalleryPage';
@@ -64,6 +66,13 @@ export const router = createBrowserRouter([
               { path: '/verify-email', element: <VerifyEmailPage /> },
             ],
           },
+        ],
+      },
+      {
+        element: <AuthLayout />,
+        children: [
+          { path: '/forgot-password', element: <ForgotPasswordPage /> },
+          { path: '/reset-password', element: <ResetPasswordPage /> },
         ],
       },
       {

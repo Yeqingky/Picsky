@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/mail"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -29,14 +31,21 @@ const (
 	SessionTTL = 7 * 24 * time.Hour
 	// EmailVerifyTTL 是邮箱验证链接有效期.
 	EmailVerifyTTL = 24 * time.Hour
+	// PasswordResetTTL 是密码找回链接有效期.
+	PasswordResetTTL = 30 * time.Minute
 	// bcryptCost 是密码散列强度.
 	bcryptCost = 12
 	// LoginFailureLimit 与 LoginFailureWindow 定义登录失败限流: 窗口内失败次数达到上限后拒绝登录.
-	LoginFailureLimit  = 20
-	LoginFailureWindow = 10 * time.Minute
+	LoginFailureLimit          = 20
+	LoginFailureWindow         = 10 * time.Minute
+	passwordResetRequestLimit  = 5
+	passwordResetRequestWindow = time.Hour
+	loginChallengeTTL          = 5 * time.Minute
+	maxPendingLoginChallenges  = 10000
 	// 令牌用途.
 	purposeSession        = "session"
 	purposeEmailVerify    = "email_verify"
+	purposePasswordReset  = "password_reset"
 	minPasswordRuneLength = 8
 	maxPasswordRuneLength = 128
 	maxUsernameRuneLength = 64
@@ -64,31 +73,36 @@ func (p *Principal) IsAdmin() bool {
 	return p.Has(adminBits)
 }
 
-// Auth 负责注册, 登录, 会话, 密码, TOTP 与邮箱验证.
+// Auth 负责注册, 登录, 会话, 密码, TOTP, 邮箱验证与密码找回.
 type Auth struct {
-	db           *gorm.DB
-	settings     *Settings
-	cipher       *crypto.Cipher
-	audit        *Audit
-	captcha      *Captcha
-	mailer       *Mailer
-	secretKey    []byte
-	log          *slog.Logger
-	loginLimiter *RateLimiter
+	db                   *gorm.DB
+	settings             *Settings
+	cipher               *crypto.Cipher
+	audit                *Audit
+	captcha              *Captcha
+	mailer               *Mailer
+	secretKey            []byte
+	log                  *slog.Logger
+	loginLimiter         *RateLimiter
+	passwordResetLimiter *RateLimiter
+	loginChallengesMu    sync.Mutex
+	loginChallenges      map[string]loginChallenge
 }
 
 // NewAuth 创建认证服务.
 func NewAuth(database *gorm.DB, settings *Settings, cipher *crypto.Cipher, audit *Audit, captcha *Captcha, mailer *Mailer, secretKey []byte, log *slog.Logger) *Auth {
 	return &Auth{
-		db:           database,
-		settings:     settings,
-		cipher:       cipher,
-		audit:        audit,
-		captcha:      captcha,
-		mailer:       mailer,
-		secretKey:    secretKey,
-		log:          log,
-		loginLimiter: NewRateLimiter(LoginFailureWindow),
+		db:                   database,
+		settings:             settings,
+		cipher:               cipher,
+		audit:                audit,
+		captcha:              captcha,
+		mailer:               mailer,
+		secretKey:            secretKey,
+		log:                  log,
+		loginLimiter:         NewRateLimiter(LoginFailureWindow),
+		passwordResetLimiter: NewRateLimiter(passwordResetRequestWindow),
+		loginChallenges:      make(map[string]loginChallenge),
 	}
 }
 
@@ -198,23 +212,39 @@ func (a *Auth) Register(ctx context.Context, in RegisterInput, ip, userAgent str
 
 // LoginInput 是登录入参.
 type LoginInput struct {
-	Identifier   string
-	Password     string
-	TOTPCode     string
-	CaptchaToken string
+	Identifier     string
+	Password       string
+	TOTPCode       string
+	CaptchaToken   string
+	LoginChallenge string
+}
+
+type loginChallenge struct {
+	userID        int64
+	ip            string
+	userAgent     string
+	ipKey         string
+	identifierKey string
+	expiresAt     time.Time
+	inFlight      bool
 }
 
 // Login 校验凭据并返回用户.
 func (a *Auth) Login(ctx context.Context, in LoginInput, ip, userAgent string) (*model.User, error) {
+	if challenge := strings.TrimSpace(in.LoginChallenge); challenge != "" {
+		return a.loginWithChallenge(challenge, in.TOTPCode, ip, userAgent)
+	}
 	if err := a.captcha.Verify(ctx, in.CaptchaToken, ip); err != nil {
 		return nil, err
+	}
+	if strings.TrimSpace(in.TOTPCode) != "" {
+		return nil, apperr.ErrInvalidRequest.WithMessage("两步验证码必须通过登录挑战提交")
 	}
 	identifier := strings.TrimSpace(in.Identifier)
 	if identifier == "" || in.Password == "" {
 		return nil, apperr.ErrInvalidRequest.WithMessage("请输入用户名与密码")
 	}
 
-	// 登录失败限流: 按来源 IP 与 (IP, 账号) 双键计数, 防止在线爆破且不造成全局账号锁定.
 	ipKey := "login:ip:" + ip
 	identifierKey := "login:user:" + ip + "|" + strings.ToLower(identifier)
 	for _, key := range []string{ipKey, identifierKey} {
@@ -246,23 +276,138 @@ func (a *Auth) Login(ctx context.Context, in LoginInput, ip, userAgent string) (
 	}
 
 	if user.TOTPSecret != "" {
-		secret, err := a.cipher.Decrypt(user.TOTPSecret)
-		if err != nil {
+		if _, err := a.cipher.Decrypt(user.TOTPSecret); err != nil {
 			return nil, apperr.ErrInternal.WithMessage("TOTP 秘钥解密失败")
 		}
-		code := strings.TrimSpace(in.TOTPCode)
-		if code == "" {
-			return nil, apperr.ErrUnauthorized.WithMessage("需要两步验证码").WithDetails(map[string]any{"totp_required": true})
+		challenge, err := a.issueLoginChallenge(user.ID, ip, userAgent, ipKey, identifierKey)
+		if err != nil {
+			return nil, err
 		}
-		if !totp.Validate(code, secret) {
-			a.recordLoginFailure(ipKey, identifierKey)
-			a.audit.Recordf(Entry{UserID: &user.ID, Action: "login_failed", Detail: map[string]any{"reason": "bad_totp"}, IP: ip, UserAgent: userAgent})
-			return nil, apperr.ErrUnauthorized.WithMessage("两步验证码错误")
+		return nil, apperr.ErrUnauthorized.WithMessage("需要两步验证码").WithDetails(map[string]any{
+			"totp_required":   true,
+			"login_challenge": challenge,
+		})
+	}
+
+	if err := a.finishLogin(&user, ip, userAgent, ipKey, identifierKey); err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+func (a *Auth) issueLoginChallenge(userID int64, ip, userAgent, ipKey, identifierKey string) (string, error) {
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", apperr.ErrInternal.WithMessage("登录验证令牌生成失败: " + err.Error())
+	}
+	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
+	now := time.Now()
+
+	a.loginChallengesMu.Lock()
+	defer a.loginChallengesMu.Unlock()
+	if a.loginChallenges == nil {
+		a.loginChallenges = make(map[string]loginChallenge)
+	}
+	for token, challenge := range a.loginChallenges {
+		if !challenge.expiresAt.After(now) {
+			delete(a.loginChallenges, token)
+		}
+	}
+	if len(a.loginChallenges) >= maxPendingLoginChallenges {
+		return "", apperr.ErrRateLimited.WithMessage("待完成的登录验证过多, 请稍后重试")
+	}
+	a.loginChallenges[token] = loginChallenge{
+		userID:        userID,
+		ip:            ip,
+		userAgent:     userAgent,
+		ipKey:         ipKey,
+		identifierKey: identifierKey,
+		expiresAt:     now.Add(loginChallengeTTL),
+	}
+	return token, nil
+}
+
+func (a *Auth) reserveLoginChallenge(token, ip, userAgent string) (loginChallenge, error) {
+	a.loginChallengesMu.Lock()
+	defer a.loginChallengesMu.Unlock()
+	challenge, ok := a.loginChallenges[token]
+	if !ok || !challenge.expiresAt.After(time.Now()) {
+		delete(a.loginChallenges, token)
+		return loginChallenge{}, apperr.ErrUnauthorized.WithMessage("登录验证已过期或无效, 请重新登录")
+	}
+	if challenge.ip != ip || challenge.userAgent != userAgent || challenge.inFlight {
+		return loginChallenge{}, apperr.ErrUnauthorized.WithMessage("登录验证已过期或无效, 请重新登录")
+	}
+	challenge.inFlight = true
+	a.loginChallenges[token] = challenge
+	return challenge, nil
+}
+
+func (a *Auth) releaseLoginChallenge(token string, consumed bool) {
+	a.loginChallengesMu.Lock()
+	defer a.loginChallengesMu.Unlock()
+	challenge, ok := a.loginChallenges[token]
+	if !ok {
+		return
+	}
+	if consumed {
+		delete(a.loginChallenges, token)
+		return
+	}
+	challenge.inFlight = false
+	a.loginChallenges[token] = challenge
+}
+
+func (a *Auth) loginWithChallenge(token, code, ip, userAgent string) (*model.User, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return nil, apperr.ErrUnauthorized.WithMessage("需要两步验证码")
+	}
+	challenge, err := a.reserveLoginChallenge(token, ip, userAgent)
+	if err != nil {
+		return nil, err
+	}
+	consumed := false
+	defer func() { a.releaseLoginChallenge(token, consumed) }()
+
+	for _, key := range []string{challenge.ipKey, challenge.identifierKey} {
+		if a.loginLimiter.Count(key) >= LoginFailureLimit {
+			return nil, apperr.ErrRateLimited.WithMessage("登录失败次数过多, 请稍后再试").
+				WithDetails(map[string]any{"retry_after_seconds": int(LoginFailureWindow.Seconds())})
 		}
 	}
 
+	var user model.User
+	if err := a.db.First(&user, challenge.userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperr.ErrUnauthorized.WithMessage("登录验证已过期或无效, 请重新登录")
+		}
+		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if user.Status == model.UserStatusDisabled {
+		return nil, apperr.ErrForbidden.WithMessage("账号已被禁用")
+	}
+	if user.TOTPSecret == "" {
+		return nil, apperr.ErrUnauthorized.WithMessage("两步验证已关闭, 请重新登录")
+	}
+	secret, err := a.cipher.Decrypt(user.TOTPSecret)
+	if err != nil {
+		return nil, apperr.ErrInternal.WithMessage("TOTP 秘钥解密失败")
+	}
+	if !totp.Validate(code, secret) {
+		a.recordLoginFailure(challenge.ipKey, challenge.identifierKey)
+		a.audit.Recordf(Entry{UserID: &user.ID, Action: "login_failed", Detail: map[string]any{"reason": "bad_totp"}, IP: ip, UserAgent: userAgent})
+		return nil, apperr.ErrUnauthorized.WithMessage("两步验证码错误")
+	}
+	if err := a.finishLogin(&user, ip, userAgent, challenge.ipKey, challenge.identifierKey); err != nil {
+		return nil, err
+	}
+	consumed = true
+	return &user, nil
+}
+
+func (a *Auth) finishLogin(user *model.User, ip, userAgent, ipKey, identifierKey string) error {
 	if a.settings.Bool("email_verification_enabled", false) && user.EmailVerifiedAt == nil {
-		return nil, apperr.ErrForbidden.WithMessage("邮箱尚未验证, 请先完成邮箱验证")
+		return apperr.ErrForbidden.WithMessage("邮箱尚未验证, 请先完成邮箱验证")
 	}
 
 	now := nowUTC()
@@ -271,7 +416,7 @@ func (a *Auth) Login(ctx context.Context, in LoginInput, ip, userAgent string) (
 		"last_login_ip": truncate(ip, 45),
 		"updated_at":    now,
 	}).Error; err != nil {
-		return nil, apperr.ErrInternal.WithMessage(err.Error())
+		return apperr.ErrInternal.WithMessage(err.Error())
 	}
 	user.LastLoginAt = &now
 	user.LastLoginIP = ip
@@ -279,7 +424,7 @@ func (a *Auth) Login(ctx context.Context, in LoginInput, ip, userAgent string) (
 	a.loginLimiter.Reset(ipKey)
 
 	a.audit.Recordf(Entry{UserID: &user.ID, Action: "login", TargetType: "user", TargetID: &user.ID, IP: ip, UserAgent: userAgent})
-	return &user, nil
+	return nil
 }
 
 // recordLoginFailure 记录一次登录失败 (IP 与账号双键).
@@ -412,6 +557,110 @@ func (a *Auth) VerifyEmail(token string) error {
 		return apperr.ErrInternal.WithMessage(result.Error.Error())
 	}
 	a.audit.Recordf(Entry{UserID: &userID, Action: "email_verified", TargetType: "user", TargetID: &userID})
+	return nil
+}
+
+// RequestPasswordReset 对已注册邮箱发送找回链接; 对不存在或已禁用的账号保持相同响应.
+func (a *Auth) RequestPasswordReset(ctx context.Context, email, captchaToken, ip string) error {
+	if err := a.captcha.Verify(ctx, captchaToken, ip); err != nil {
+		return err
+	}
+	email = strings.TrimSpace(email)
+	if err := validateEmail(email); err != nil {
+		return err
+	}
+
+	limited := false
+	for _, key := range []string{
+		"password-reset:ip:" + ip,
+		"password-reset:email:" + strings.ToLower(email),
+	} {
+		allowed, _ := a.passwordResetLimiter.Allow(key, passwordResetRequestLimit)
+		if !allowed {
+			limited = true
+		}
+	}
+	if limited {
+		return nil
+	}
+	if !a.mailer.Configured() {
+		return apperr.ErrInvalidRequest.WithMessage("SMTP 未配置, 无法发送密码找回邮件")
+	}
+	siteURL := strings.TrimRight(strings.TrimSpace(a.settings.String("site_url")), "/")
+	if siteURL == "" {
+		return apperr.ErrInvalidRequest.WithMessage("站点地址未配置, 无法生成密码找回链接")
+	}
+
+	var user model.User
+	if err := a.db.Where("LOWER(email) = ?", strings.ToLower(email)).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if user.Status == model.UserStatusDisabled {
+		return nil
+	}
+
+	token := a.signPasswordResetToken(user.ID, user.PasswordHash, time.Now().Add(PasswordResetTTL))
+	siteName := a.settings.String("site_name")
+	link := siteURL + "/reset-password?token=" + token
+	body := fmt.Sprintf(
+		"你好 %s:\n\n请访问以下链接重置 %s 密码 (30 分钟内有效):\n%s\n\n完成重置后, 两步验证 (TOTP) 将被关闭. 如果这不是你的操作, 请忽略本邮件.\n",
+		user.Username, siteName, link,
+	)
+	if err := a.mailer.Send(user.Email, siteName+" 密码找回", body); err != nil {
+		a.log.Warn("发送密码找回邮件失败", "user_id", user.ID, "error", err)
+	}
+	return nil
+}
+
+// ResetPassword 消费密码找回令牌并关闭两步验证.
+func (a *Auth) ResetPassword(token, newPassword, ip, userAgent string) error {
+	userID, credentialTag, err := a.parsePasswordResetToken(token)
+	if err != nil {
+		return apperr.ErrInvalidRequest.WithMessage("密码找回链接无效或已过期")
+	}
+	if err := validatePassword(newPassword); err != nil {
+		return err
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
+	if err != nil {
+		return apperr.ErrInternal.WithMessage("密码散列失败: " + err.Error())
+	}
+
+	now := nowUTC()
+	var user model.User
+	err = a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&user, userID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.ErrInvalidRequest.WithMessage("密码找回链接无效或已过期")
+			}
+			return apperr.ErrInternal.WithMessage(err.Error())
+		}
+		expectedTag := a.passwordResetCredentialTag(user.PasswordHash)
+		if !hmac.Equal([]byte(credentialTag), []byte(expectedTag)) {
+			return apperr.ErrInvalidRequest.WithMessage("密码找回链接无效或已过期")
+		}
+		result := tx.Model(&model.User{}).
+			Where("id = ? AND password_hash = ?", user.ID, user.PasswordHash).
+			Updates(map[string]any{
+				"password_hash": string(hashed),
+				"totp_secret":   "",
+				"updated_at":    now,
+			})
+		if result.Error != nil {
+			return apperr.ErrInternal.WithMessage(result.Error.Error())
+		}
+		if result.RowsAffected != 1 {
+			return apperr.ErrInvalidRequest.WithMessage("密码找回链接无效或已过期")
+		}
+		return nil
+	})
+	if err != nil {
+		return apperr.From(err)
+	}
+	a.audit.Recordf(Entry{UserID: &user.ID, Action: "password_reset", TargetType: "user", TargetID: &user.ID, IP: ip, UserAgent: userAgent})
 	return nil
 }
 
@@ -548,6 +797,54 @@ func (a *Auth) parseToken(token, purpose string) (int64, error) {
 		return 0, errors.New("令牌已过期")
 	}
 	return userID, nil
+}
+func (a *Auth) signPasswordResetToken(userID int64, passwordHash string, expiresAt time.Time) string {
+	payload := strings.Join([]string{
+		purposePasswordReset,
+		strconv.FormatInt(userID, 10),
+		strconv.FormatInt(expiresAt.Unix(), 10),
+		a.passwordResetCredentialTag(passwordHash),
+	}, "|")
+	signature := a.sign(payload)
+	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+func (a *Auth) parsePasswordResetToken(token string) (int64, string, error) {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) != 2 {
+		return 0, "", errors.New("令牌格式非法")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return 0, "", err
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return 0, "", err
+	}
+	if !hmac.Equal(signature, a.sign(string(payload))) {
+		return 0, "", errors.New("令牌签名校验失败")
+	}
+	fields := strings.Split(string(payload), "|")
+	if len(fields) != 4 || fields[0] != purposePasswordReset {
+		return 0, "", errors.New("令牌用途不匹配")
+	}
+	userID, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return 0, "", err
+	}
+	expiresAt, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		return 0, "", err
+	}
+	if time.Now().Unix() > expiresAt {
+		return 0, "", errors.New("令牌已过期")
+	}
+	return userID, fields[3], nil
+}
+
+func (a *Auth) passwordResetCredentialTag(passwordHash string) string {
+	return base64.RawURLEncoding.EncodeToString(a.sign("password-reset|" + passwordHash))
 }
 
 func (a *Auth) sign(payload string) []byte {

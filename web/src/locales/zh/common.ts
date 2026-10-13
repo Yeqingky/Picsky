@@ -1,7 +1,6 @@
 /** 通用文案: 动作, 状态, 表格, 确认框, 配额, 副本格式等 */
 export const common = {
   appName: 'Picsky',
-  appSubtitle: '图片上传中间层',
   loading: '加载中…',
 
   action: {

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Mailer 通过 SMTP 发送邮件; 仅在开启邮箱验证时使用.
+// Mailer 通过 SMTP 发送邮件, 用于邮箱验证与密码找回.
 type Mailer struct {
 	settings *Settings
 }

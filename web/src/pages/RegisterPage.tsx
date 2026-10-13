@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { useSiteName } from '../hooks/useSite';
 import { useAuth } from '../hooks/useAuth';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -27,6 +28,7 @@ interface RegisterFieldErrors {
 /** 注册页: 用户名 / 邮箱 / 密码 + 人机验证 (/register) */
 export default function RegisterPage() {
   const { t } = useTranslation();
+  const siteName = useSiteName();
   const { isLoading, refresh } = useAuth();
   const navigate = useNavigate();
 
@@ -106,7 +108,9 @@ export default function RegisterPage() {
     <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
       <div className="flex flex-col gap-1">
         <h2 className="font-heading text-xl font-semibold">{t('auth.register.title')}</h2>
-        <p className="text-muted-foreground text-sm">{t('auth.register.description')}</p>
+        <p className="text-muted-foreground text-sm">
+          {t('auth.register.description', { siteName })}
+        </p>
       </div>
 
       {registerDisabled && (
@@ -188,9 +192,6 @@ export default function RegisterPage() {
       </Button>
 
       <div className="flex flex-col items-center gap-1">
-        <p className="text-muted-foreground text-center text-xs">
-          {t('auth.register.firstAdminHint')}
-        </p>
         <p className="text-sm">
           {t('auth.register.hasAccount')}{' '}
           <RouterLink to="/login" className="text-primary underline-offset-4 hover:underline">

@@ -66,6 +66,8 @@ Picsky/
 - 存储适配器必须声明能力 (`delete`, `overwrite`, `stat`, `presign`, `multipart`); 新增驱动不得假设后端支持删除或覆盖, 上层按能力降级.
 - Lsky Pro 兼容层是适配层: 不得绕过认证, 权限, 配额与能力降级; 兼容字段有变更时先更新 `docs/lsky-compat.md`.
 - 不实现本地人机验证: 只接入 Cap 与 Cloudflare Turnstile; 注册, 邮箱验证, 人机验证都必须是可开关项.
+- 启用 TOTP 的登录使用两步流程: 首次请求校验用户名/密码与人机验证并返回短时挑战; 前端在模态框自动提交动态口令, 挑战必须一次性消费并绑定来源 IP / User-Agent.
+- 密码找回令牌必须限时、一次性且绑定当前密码散列; 重置密码与清除 TOTP 秘钥必须在同一事务中完成; 登录页仅在公开站点信息报告 SMTP 发信已配置时显示找回入口.
 - 维护任务 (队列) 必须幂等可重试, 不得绕过权限与能力降级; WebDAV 只是内部存储通道, 不得对外暴露.
 - 内置用户组 (`管理员` / `只读`, 由 `groups.is_system` 标记) 的权限位固定, 不可删除, 不可设为默认组; 调整组规则时同步更新 `docs/permissions.md`.
 - 前端样式只使用 Tailwind CSS v4 与 `src/index.css` 的语义令牌 (`background`, `card`, `muted`, `primary`, `destructive`, `success`, `warning`, `info`, `border`, `ring`, `chart-*`), 禁止硬编码色值与 CSS-in-JS.

@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
@@ -11,14 +12,18 @@ import (
 	"io"
 	"log/slog"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pquerna/otp/totp"
 	"golang.org/x/net/webdav"
 	"gorm.io/gorm"
 
@@ -184,6 +189,88 @@ func (s *server) sessionCookie(result *response) *http.Cookie {
 	return nil
 }
 
+// smtpCaptureServer 接收一次纯文本 SMTP 邮件, 用于认证流程测试.
+func smtpCaptureServer(t *testing.T) (string, <-chan string) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("启动 SMTP 测试服务失败: %v", err)
+	}
+	messages := make(chan string, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+		rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+		reply := func(value string) bool {
+			if _, err := rw.WriteString(value); err != nil {
+				return false
+			}
+			return rw.Flush() == nil
+		}
+		if !reply("220 localhost ESMTP\r\n") {
+			return
+		}
+		for {
+			line, err := rw.ReadString('\n')
+			if err != nil {
+				return
+			}
+			command := strings.ToUpper(strings.TrimSpace(line))
+			switch {
+			case strings.HasPrefix(command, "EHLO "), strings.HasPrefix(command, "HELO "):
+				if !reply("250-localhost\r\n250 OK\r\n") {
+					return
+				}
+			case strings.HasPrefix(command, "MAIL FROM:"), strings.HasPrefix(command, "RCPT TO:"):
+				if !reply("250 OK\r\n") {
+					return
+				}
+			case command == "DATA":
+				if !reply("354 End data with <CR><LF>.<CR><LF>\r\n") {
+					return
+				}
+				var message strings.Builder
+				for {
+					dataLine, err := rw.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if dataLine == ".\r\n" || dataLine == ".\n" {
+						break
+					}
+					message.WriteString(dataLine)
+				}
+				messages <- message.String()
+				if !reply("250 queued\r\n") {
+					return
+				}
+			case command == "QUIT":
+				_ = reply("221 bye\r\n")
+				return
+			default:
+				if !reply("250 OK\r\n") {
+					return
+				}
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("SMTP 测试服务未及时停止")
+		}
+	})
+	return strconv.Itoa(listener.Addr().(*net.TCPAddr).Port), messages
+}
+
 // multipartBody 构造上传请求体.
 func multipartBody(t *testing.T, filename string, content []byte, fields map[string]string) (*bytes.Buffer, string) {
 	t.Helper()
@@ -286,6 +373,21 @@ func TestHealthAndAuthFlow(t *testing.T) {
 		t.Errorf("人机验证公开配置不正确: %s", string(captcha.Body))
 	}
 
+	site := s.raw(http.MethodGet, "/api/v1/site", nil, nil, nil)
+	if site.Status != http.StatusOK || s.decode(site)["password_reset_enabled"] != false {
+		t.Errorf("未配置 SMTP 时找回密码应不可用: %s", string(site.Body))
+	}
+	if err := s.svc.Settings.Update(map[string]string{
+		"smtp_host": "smtp.example.com",
+		"smtp_from": "noreply@example.com",
+	}); err != nil {
+		t.Fatalf("配置 SMTP 失败: %v", err)
+	}
+	site = s.raw(http.MethodGet, "/api/v1/site", nil, nil, nil)
+	if site.Status != http.StatusOK || s.decode(site)["password_reset_enabled"] != true {
+		t.Errorf("配置 SMTP 后找回密码应可用: %s", string(site.Body))
+	}
+
 	unauthorized := s.raw(http.MethodGet, "/api/v1/images", nil, nil, nil)
 	if unauthorized.Status != http.StatusUnauthorized {
 		t.Errorf("未认证访问图片列表应返回 401, 实际 %d", unauthorized.Status)
@@ -345,6 +447,169 @@ func TestHealthAndAuthFlow(t *testing.T) {
 	if logout.Status != http.StatusNoContent {
 		t.Errorf("登出失败: %d", logout.Status)
 	}
+}
+
+func TestPasswordResetDisablesTotp(t *testing.T) {
+	s := newServer(t)
+	smtpPort, messages := smtpCaptureServer(t)
+	if err := s.svc.Settings.Update(map[string]string{
+		"smtp_host":       "127.0.0.1",
+		"smtp_port":       smtpPort,
+		"smtp_from":       "noreply@example.com",
+		"smtp_encryption": "none",
+		"site_url":        "https://picsky.example",
+	}); err != nil {
+		t.Fatalf("配置 SMTP 失败: %v", err)
+	}
+
+	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
+		"username": "reset-user",
+		"email":    "reset@example.com",
+		"password": "old-password123",
+	}, nil)
+	if registered.Status != http.StatusCreated {
+		t.Fatalf("注册失败: %d %s", registered.Status, string(registered.Body))
+	}
+	userID := int64(s.decode(registered)["id"].(float64))
+	secret, _, err := s.svc.Auth.TOTPSetup(userID)
+	if err != nil {
+		t.Fatalf("生成 TOTP 秘钥失败: %v", err)
+	}
+	code, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatalf("生成 TOTP 验证码失败: %v", err)
+	}
+	if err := s.svc.Auth.TOTPEnable(userID, secret, code, "127.0.0.1", "test"); err != nil {
+		t.Fatalf("启用 TOTP 失败: %v", err)
+	}
+	beforeResetLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "reset-user",
+		"password":   "old-password123",
+	}, nil)
+	if beforeResetLogin.Status != http.StatusUnauthorized {
+		t.Fatalf("重置前启用的 TOTP 应要求第二步验证, 实际 %d %s", beforeResetLogin.Status, string(beforeResetLogin.Body))
+	}
+	details, ok := s.decode(beforeResetLogin)["details"].(map[string]any)
+	if !ok || details["totp_required"] != true {
+		t.Fatalf("重置前登录应返回 TOTP 挑战: %s", string(beforeResetLogin.Body))
+	}
+
+	request := s.json(http.MethodPost, "/api/v1/auth/password/reset/request", map[string]any{
+		"email": "reset@example.com",
+	}, nil)
+	if request.Status != http.StatusNoContent {
+		t.Fatalf("请求找回邮件失败: %d %s", request.Status, string(request.Body))
+	}
+	unknownEmail := s.json(http.MethodPost, "/api/v1/auth/password/reset/request", map[string]any{
+		"email": "missing@example.com",
+	}, nil)
+	if unknownEmail.Status != http.StatusNoContent {
+		t.Errorf("不存在的邮箱也应返回相同成功状态, 实际 %d %s", unknownEmail.Status, string(unknownEmail.Body))
+	}
+
+	var message string
+	select {
+	case message = <-messages:
+	case <-time.After(10 * time.Second):
+		t.Fatal("SMTP 测试服务未收到找回邮件")
+	}
+	const linkPrefix = "https://picsky.example/reset-password?token="
+	linkStart := strings.Index(message, linkPrefix)
+	if linkStart < 0 {
+		t.Fatalf("邮件缺少密码重置链接: %s", message)
+	}
+	token := strings.TrimSpace(strings.SplitN(message[linkStart+len(linkPrefix):], "\r\n", 2)[0])
+	if token == "" {
+		t.Fatal("邮件中的重置令牌为空")
+	}
+
+	reset := s.json(http.MethodPost, "/api/v1/auth/password/reset", map[string]any{
+		"token":    token,
+		"password": "new-password456",
+	}, nil)
+	if reset.Status != http.StatusNoContent {
+		t.Fatalf("重置密码失败: %d %s", reset.Status, string(reset.Body))
+	}
+	if replay := s.json(http.MethodPost, "/api/v1/auth/password/reset", map[string]any{
+		"token":    token,
+		"password": "replayed-password789",
+	}, nil); replay.Status != http.StatusBadRequest {
+		t.Errorf("重置令牌重放应被拒绝, 实际 %d %s", replay.Status, string(replay.Body))
+	}
+	if oldPassword := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "reset-user",
+		"password":   "old-password123",
+	}, nil); oldPassword.Status != http.StatusUnauthorized {
+		t.Errorf("重置后旧密码应失效, 实际 %d %s", oldPassword.Status, string(oldPassword.Body))
+	}
+	newPassword := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "reset-user",
+		"password":   "new-password456",
+	}, nil)
+	if newPassword.Status != http.StatusOK {
+		t.Errorf("重置后新密码应直接登录且无需 TOTP, 实际 %d %s", newPassword.Status, string(newPassword.Body))
+	}
+}
+func TestLoginTwoStepTotpAPI(t *testing.T) {
+	s := newServer(t)
+	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
+		"username": "two-step",
+		"email":    "two-step@example.com",
+		"password": "password123",
+	}, nil)
+	if registered.Status != http.StatusCreated {
+		t.Fatalf("注册失败: %d %s", registered.Status, string(registered.Body))
+	}
+	cookie := s.sessionCookie(registered)
+
+	setup := s.json(http.MethodPost, "/api/v1/auth/totp/setup", nil, []*http.Cookie{cookie})
+	if setup.Status != http.StatusOK {
+		t.Fatalf("生成 TOTP 秘钥失败: %d %s", setup.Status, string(setup.Body))
+	}
+	secret, ok := s.decode(setup)["secret"].(string)
+	if !ok || secret == "" {
+		t.Fatalf("响应缺少 TOTP 秘钥: %s", string(setup.Body))
+	}
+	code, err := totp.GenerateCode(secret, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("生成 TOTP 验证码失败: %v", err)
+	}
+	enabled := s.json(http.MethodPost, "/api/v1/auth/totp/enable", map[string]any{
+		"secret": secret,
+		"code":   code,
+	}, []*http.Cookie{cookie})
+	if enabled.Status != http.StatusNoContent {
+		t.Fatalf("启用 TOTP 失败: %d %s", enabled.Status, string(enabled.Body))
+	}
+
+	first := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "two-step",
+		"password":   "password123",
+	}, nil)
+	if first.Status != http.StatusUnauthorized {
+		t.Fatalf("首次登录应请求 TOTP: %d %s", first.Status, string(first.Body))
+	}
+	details, ok := s.decode(first)["details"].(map[string]any)
+	if !ok || details["totp_required"] != true {
+		t.Fatalf("首次响应缺少两步验证标记: %s", string(first.Body))
+	}
+	challenge, ok := details["login_challenge"].(string)
+	if !ok || challenge == "" {
+		t.Fatalf("首次响应缺少登录挑战: %s", string(first.Body))
+	}
+
+	code, err = totp.GenerateCode(secret, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("重新生成 TOTP 验证码失败: %v", err)
+	}
+	second := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"login_challenge": challenge,
+		"totp":            code,
+	}, nil)
+	if second.Status != http.StatusOK {
+		t.Fatalf("第二步登录失败: %d %s", second.Status, string(second.Body))
+	}
+	s.sessionCookie(second)
 }
 
 func TestUploadImagesAndKeys(t *testing.T) {

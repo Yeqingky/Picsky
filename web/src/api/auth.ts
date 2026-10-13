@@ -3,6 +3,8 @@ import type {
   CaptchaConfig,
   CurrentUser,
   LoginRequest,
+  PasswordResetRequest,
+  PasswordResetConfirmRequest,
   PasswordChangeRequest,
   ProfileUpdateRequest,
   RegisterRequest,
@@ -22,6 +24,12 @@ export const authApi = {
 
   changePassword: (body: PasswordChangeRequest) =>
     api.patch<void>('/auth/password', body, { silent: true }).then(() => undefined),
+
+  requestPasswordReset: (body: PasswordResetRequest) =>
+    api.post<void>('/auth/password/reset/request', body, { silent: true }).then(() => undefined),
+
+  resetPassword: (body: PasswordResetConfirmRequest) =>
+    api.post<void>('/auth/password/reset', body, { silent: true }).then(() => undefined),
 
   updateProfile: (body: ProfileUpdateRequest) =>
     api.patch<CurrentUser>('/auth/profile', body, { silent: true }).then((r) => r.data),

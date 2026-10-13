@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pquerna/otp/totp"
 	"golang.org/x/net/webdav"
 	"gorm.io/gorm"
 
@@ -1118,6 +1119,76 @@ func TestAuthRegisterLoginAndTotp(t *testing.T) {
 	}
 	if err := f.svc.Auth.TOTPEnable(user.ID, secret, "000000", "127.0.0.1", "test"); err == nil {
 		t.Error("错误的 TOTP 验证码应被拒绝")
+	}
+}
+func TestAuthLoginTwoStepTotpChallenge(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	ip := "127.0.0.1"
+	userAgent := "test-agent"
+
+	secret, _, err := f.svc.Auth.TOTPSetup(f.admin.User.ID)
+	if err != nil {
+		t.Fatalf("生成 TOTP 秘钥失败: %v", err)
+	}
+	code, err := totp.GenerateCode(secret, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("生成 TOTP 验证码失败: %v", err)
+	}
+	if err := f.svc.Auth.TOTPEnable(f.admin.User.ID, secret, code, ip, userAgent); err != nil {
+		t.Fatalf("启用 TOTP 失败: %v", err)
+	}
+
+	_, err = f.svc.Auth.Login(ctx, service.LoginInput{
+		Identifier: "admin",
+		Password:   "password123",
+	}, ip, userAgent)
+	var apiErr *apperr.Error
+	if !errors.As(err, &apiErr) || apiErr.Details["totp_required"] != true {
+		t.Fatalf("首次登录应返回两步验证要求, got %v", err)
+	}
+	challenge, ok := apiErr.Details["login_challenge"].(string)
+	if !ok || challenge == "" {
+		t.Fatalf("首次登录未返回验证挑战: %+v", apiErr.Details)
+	}
+
+	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{
+		LoginChallenge: challenge,
+		TOTPCode:       code,
+	}, "192.0.2.1", userAgent); err == nil {
+		t.Fatal("不同来源 IP 不应使用该登录挑战")
+	}
+
+	wrongCode := "000000"
+	if wrongCode == code {
+		wrongCode = "000001"
+	}
+	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{
+		LoginChallenge: challenge,
+		TOTPCode:       wrongCode,
+	}, ip, userAgent); err == nil {
+		t.Fatal("错误的动态口令应被拒绝")
+	}
+
+	code, err = totp.GenerateCode(secret, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("重新生成 TOTP 验证码失败: %v", err)
+	}
+	user, err := f.svc.Auth.Login(ctx, service.LoginInput{
+		LoginChallenge: challenge,
+		TOTPCode:       code,
+	}, ip, userAgent)
+	if err != nil {
+		t.Fatalf("第二步验证失败: %v", err)
+	}
+	if user.ID != f.admin.User.ID {
+		t.Fatalf("第二步登录返回错误用户: %+v", user)
+	}
+	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{
+		LoginChallenge: challenge,
+		TOTPCode:       code,
+	}, ip, userAgent); err == nil {
+		t.Fatal("成功使用过的登录挑战不应重放")
 	}
 }
 

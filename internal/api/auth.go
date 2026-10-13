@@ -72,11 +72,12 @@ func (s *Server) meResponse(principal *service.Principal) meDTO {
 // login 登录并下发会话 cookie.
 func (s *Server) login(c *gin.Context) {
 	var payload struct {
-		Identifier   string `json:"identifier"`
-		Username     string `json:"username"`
-		Password     string `json:"password"`
-		TOTP         string `json:"totp"`
-		CaptchaToken string `json:"captcha_token"`
+		Identifier     string `json:"identifier"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		TOTP           string `json:"totp"`
+		CaptchaToken   string `json:"captcha_token"`
+		LoginChallenge string `json:"login_challenge"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
@@ -88,10 +89,11 @@ func (s *Server) login(c *gin.Context) {
 	}
 
 	user, err := s.svc.Auth.Login(c.Request.Context(), service.LoginInput{
-		Identifier:   identifier,
-		Password:     payload.Password,
-		TOTPCode:     payload.TOTP,
-		CaptchaToken: payload.CaptchaToken,
+		Identifier:     identifier,
+		Password:       payload.Password,
+		TOTPCode:       payload.TOTP,
+		CaptchaToken:   payload.CaptchaToken,
+		LoginChallenge: payload.LoginChallenge,
 	}, clientIP(c), userAgent(c))
 	if err != nil {
 		s.fail(c, err)
@@ -274,6 +276,40 @@ func (s *Server) verifyEmail(c *gin.Context) {
 		return
 	}
 	if err := s.svc.Auth.VerifyEmail(payload.Token); err != nil {
+		s.fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// requestPasswordReset 请求发送密码找回邮件.
+func (s *Server) requestPasswordReset(c *gin.Context) {
+	var payload struct {
+		Email        string `json:"email"`
+		CaptchaToken string `json:"captcha_token"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	if err := s.svc.Auth.RequestPasswordReset(c.Request.Context(), payload.Email, payload.CaptchaToken, clientIP(c)); err != nil {
+		s.fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// resetPassword 消费邮件令牌并重置密码.
+func (s *Server) resetPassword(c *gin.Context) {
+	var payload struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	if err := s.svc.Auth.ResetPassword(payload.Token, payload.Password, clientIP(c), userAgent(c)); err != nil {
 		s.fail(c, err)
 		return
 	}
