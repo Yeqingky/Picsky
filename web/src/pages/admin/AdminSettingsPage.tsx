@@ -19,6 +19,7 @@ import { adminGroupsApi, adminSettingsApi } from '../../api';
 import type { SettingsPayload } from '../../api';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorState } from '../../components/States';
+import { SizeInput } from '../../components/SizeInput';
 import { FormSkeleton, SkeletonSurface } from '../../components/skeletons';
 import { SITE_QUERY_KEY } from '../../hooks/useSite';
 import { Alert, AlertDescription } from '../../components/ui/alert';
@@ -125,6 +126,7 @@ const TIMEZONES = [
 ] as const;
 
 const CAPTCHA_PROVIDERS = ['none', 'cap', 'turnstile'] as const;
+const FILE_SIZE_UNITS = ['KB', 'MB'] as const;
 const SMTP_ENCRYPTIONS = ['starttls', 'ssl', 'none'] as const;
 const CONFLICT_POLICIES = ['rename', 'skip', 'overwrite', 'fail'] as const;
 
@@ -840,11 +842,15 @@ export default function AdminSettingsPage() {
             }
             error={errors.max_file_size_bytes}
           >
-            <Input
+            <SizeInput
               id="setting-max-file-size"
-              value={draft.max_file_size_bytes}
-              aria-invalid={Boolean(errors.max_file_size_bytes)}
-              onChange={(event) => setField('max_file_size_bytes', event.target.value)}
+              value={maxFileSize}
+              units={FILE_SIZE_UNITS}
+              defaultUnit="MB"
+              invalid={Boolean(errors.max_file_size_bytes)}
+              onChange={(bytes) =>
+                setField('max_file_size_bytes', bytes === null ? '' : String(bytes))
+              }
             />
           </Field>
         </TabsContent>

@@ -16,6 +16,7 @@ import { DataTable } from '../../components/DataTable';
 import type { DataTableColumn } from '../../components/DataTable';
 import { PageHeader } from '../../components/PageHeader';
 import { EmptyState, ErrorState } from '../../components/States';
+import { SizeInput } from '../../components/SizeInput';
 import { FormSkeleton, TableSkeleton } from '../../components/skeletons';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { Badge } from '../../components/ui/badge';
@@ -61,6 +62,10 @@ const FORMAT_OPTIONS = [
 
 /** Radix Select 不支持空字符串值, 用哨兵表示 "不限" */
 const QUOTA_UNLIMITED = '__unlimited__';
+
+/** 体积单位 (1024 进制): 单文件上限用 KB/MB, 存储空间配额用 GB/MB */
+const FILE_SIZE_UNITS = ['KB', 'MB'] as const;
+const STORAGE_UNITS = ['GB', 'MB'] as const;
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
 
@@ -613,21 +618,27 @@ function GroupFormDialog({
                 <Label htmlFor="admin-group-quota-value">
                   {t('admin.groups.field.quotaValue')}
                 </Label>
-                <Input
-                  id="admin-group-quota-value"
-                  value={quotaValue}
-                  inputMode="numeric"
-                  aria-invalid={Boolean(errors.quotaValue)}
-                  onChange={(event) => setQuotaValue(event.target.value)}
-                />
-                <p
-                  className={cn(
-                    'text-sm',
-                    errors.quotaValue ? 'text-destructive' : 'text-muted-foreground',
-                  )}
-                >
-                  {errors.quotaValue || t('admin.groups.quotaValueHint')}
-                </p>
+                {quotaMode === 'bytes' ? (
+                  <SizeInput
+                    id="admin-group-quota-value"
+                    value={parseOptionalNumber(quotaValue)}
+                    units={STORAGE_UNITS}
+                    defaultUnit="GB"
+                    invalid={Boolean(errors.quotaValue)}
+                    onChange={(bytes) => setQuotaValue(bytes === null ? '' : String(bytes))}
+                  />
+                ) : (
+                  <Input
+                    id="admin-group-quota-value"
+                    value={quotaValue}
+                    inputMode="numeric"
+                    aria-invalid={Boolean(errors.quotaValue)}
+                    onChange={(event) => setQuotaValue(event.target.value)}
+                  />
+                )}
+                {errors.quotaValue && (
+                  <p className="text-destructive text-sm">{errors.quotaValue}</p>
+                )}
               </div>
             )}
           </div>
@@ -637,12 +648,13 @@ function GroupFormDialog({
               <Label htmlFor="admin-group-max-file-size">
                 {t('admin.groups.field.maxFileSize')}
               </Label>
-              <Input
+              <SizeInput
                 id="admin-group-max-file-size"
-                value={maxFileSize}
-                inputMode="numeric"
-                aria-invalid={Boolean(errors.maxFileSize)}
-                onChange={(event) => setMaxFileSize(event.target.value)}
+                value={parseOptionalNumber(maxFileSize)}
+                units={FILE_SIZE_UNITS}
+                defaultUnit="MB"
+                invalid={Boolean(errors.maxFileSize)}
+                onChange={(bytes) => setMaxFileSize(bytes === null ? '' : String(bytes))}
               />
               <p
                 className={cn(

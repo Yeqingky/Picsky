@@ -27,6 +27,7 @@ import { DataTable } from '../../components/DataTable';
 import type { DataTableColumn } from '../../components/DataTable';
 import { PageHeader } from '../../components/PageHeader';
 import { EmptyState, ErrorState } from '../../components/States';
+import { SizeInput } from '../../components/SizeInput';
 import { TableSkeleton } from '../../components/skeletons';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -57,6 +58,17 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
 /** Radix Select 不允许空字符串值, 用哨兵表示 "继承" */
 const INHERIT_VALUE = '__inherit__';
+
+/** 存储空间配额单位 (1024 进制) */
+const STORAGE_UNITS = ['GB', 'MB'] as const;
+
+/** 解析体积输入框的字节数值; 空串或非法值返回 null */
+function parseSize(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 type UserDialogState =
   | { kind: 'create' }
@@ -945,20 +957,30 @@ function QuotaDialog({
               </SelectContent>
             </Select>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="admin-user-quota-value">{t('admin.users.field.quotaValue')}</Label>
-            <Input
-              id="admin-user-quota-value"
-              value={value}
-              inputMode="numeric"
-              disabled={mode === ''}
-              onChange={(event) => setValue(event.target.value)}
-              aria-invalid={Boolean(error)}
-            />
-            <p className={error ? 'text-destructive text-sm' : 'text-muted-foreground text-sm'}>
-              {error || t('admin.users.quotaValueHint')}
-            </p>
-          </div>
+          {mode !== '' && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="admin-user-quota-value">{t('admin.users.field.quotaValue')}</Label>
+              {mode === 'bytes' ? (
+                <SizeInput
+                  id="admin-user-quota-value"
+                  value={parseSize(value)}
+                  units={STORAGE_UNITS}
+                  defaultUnit="GB"
+                  invalid={Boolean(error)}
+                  onChange={(bytes) => setValue(bytes === null ? '' : String(bytes))}
+                />
+              ) : (
+                <Input
+                  id="admin-user-quota-value"
+                  value={value}
+                  inputMode="numeric"
+                  aria-invalid={Boolean(error)}
+                  onChange={(event) => setValue(event.target.value)}
+                />
+              )}
+              {error && <p className="text-destructive text-sm">{error}</p>}
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>

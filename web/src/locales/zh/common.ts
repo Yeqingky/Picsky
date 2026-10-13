@@ -132,6 +132,7 @@ export const common = {
     passwordTooShort: '密码至少 8 位',
     passwordMismatch: '两次输入的密码不一致',
     invalidNumber: '请输入有效数字',
+    sizeUnit: '体积单位',
     invalidUrl: '请输入以 http:// 或 https:// 开头的地址',
     selectPlaceholder: '请选择',
     optional: '可选',

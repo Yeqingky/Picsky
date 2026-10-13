@@ -51,7 +51,7 @@ export const adminSystem = {
       allowedFormats: '允许的格式基线',
       allowedFormatsHint: '以逗号分隔, 例如 png,jpg,webp; 系统禁止 SVG',
       allowedFormatsPreview: '共 {{count}} 种: {{formats}}',
-      maxFileSize: '单文件上限 (字节)',
+      maxFileSize: '单文件上限',
       maxFileSizeHint: '当前 {{size}}; 可被用户组覆盖',
       conflictPolicy: '默认冲突策略',
       pathTemplate: '默认路径模板',
