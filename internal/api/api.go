@@ -112,7 +112,6 @@ func (s *Server) Register(router *gin.Engine) {
 
 	tasks := admin.Group("/tasks", middleware.Require(model.PermManageSettings))
 	tasks.GET("", s.adminListTasks)
-	tasks.POST("/purge", s.adminPurgeTasks)
 	tasks.POST("/:id/run", s.adminRunTask)
 
 	logs := admin.Group("/logs", middleware.Require(model.PermViewLogs))
@@ -271,31 +270,30 @@ type policyMeta struct {
 
 // imageDTO 是图片记录的下发结构.
 type imageDTO struct {
-	ID               int64      `json:"id"`
-	UserID           int64      `json:"user_id"`
-	PolicyID         int64      `json:"policy_id"`
-	PolicyName       string     `json:"policy_name"`
-	Kind             string     `json:"kind"`
-	RelPath          string     `json:"rel_path"`
-	ObjectKey        string     `json:"object_key"`
-	URL              string     `json:"url"`
-	URLs             []urlDTO   `json:"urls"`
-	MD5              string     `json:"md5"`
-	SHA1             string     `json:"sha1"`
-	SHA256           string     `json:"sha256"`
-	SHA512           string     `json:"sha512"`
-	Size             int64      `json:"size"`
-	Format           string     `json:"format"`
-	Ext              string     `json:"ext"`
-	MIME             string     `json:"mime"`
-	Width            *int       `json:"width"`
-	Height           *int       `json:"height"`
-	OriginalFilename string     `json:"original_filename"`
-	QuotaCharged     bool       `json:"quota_charged"`
-	Source           string     `json:"source"`
-	ClientIP         string     `json:"client_ip"`
-	ObjectDeletedAt  *time.Time `json:"object_deleted_at"`
-	CreatedAt        time.Time  `json:"created_at"`
+	ID               int64     `json:"id"`
+	UserID           int64     `json:"user_id"`
+	PolicyID         int64     `json:"policy_id"`
+	PolicyName       string    `json:"policy_name"`
+	Kind             string    `json:"kind"`
+	RelPath          string    `json:"rel_path"`
+	ObjectKey        string    `json:"object_key"`
+	URL              string    `json:"url"`
+	URLs             []urlDTO  `json:"urls"`
+	MD5              string    `json:"md5"`
+	SHA1             string    `json:"sha1"`
+	SHA256           string    `json:"sha256"`
+	SHA512           string    `json:"sha512"`
+	Size             int64     `json:"size"`
+	Format           string    `json:"format"`
+	Ext              string    `json:"ext"`
+	MIME             string    `json:"mime"`
+	Width            *int      `json:"width"`
+	Height           *int      `json:"height"`
+	OriginalFilename string    `json:"original_filename"`
+	QuotaCharged     bool      `json:"quota_charged"`
+	Source           string    `json:"source"`
+	ClientIP         string    `json:"client_ip"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // hashDTO 是上传响应中的哈希集合.
@@ -398,7 +396,6 @@ func (s *Server) toImageDTO(record *model.Image, meta *policyMeta) imageDTO {
 		QuotaCharged:     record.QuotaCharged,
 		Source:           record.Source,
 		ClientIP:         record.ClientIP,
-		ObjectDeletedAt:  record.ObjectDeletedAt,
 		CreatedAt:        record.CreatedAt,
 	}
 	if meta != nil {

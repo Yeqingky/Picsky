@@ -18,7 +18,6 @@ import { Input } from '../ui/input';
 import { Skeleton } from '../ui/skeleton';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '../ui/sheet';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
-import { cn } from '../../lib/utils';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { dimensions } from '../../utils/image';
 
@@ -176,19 +175,6 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
                 <Badge variant={data.quota_charged ? 'default' : 'outline'}>
                   {data.quota_charged ? t('gallery.detail.charged') : t('gallery.detail.free')}
                 </Badge>
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    'border-transparent',
-                    data.object_deleted_at
-                      ? 'bg-destructive/10 text-destructive'
-                      : 'bg-success/10 text-success',
-                  )}
-                >
-                  {data.object_deleted_at
-                    ? t('common.object.deleted')
-                    : t('common.object.retained')}
-                </Badge>
                 <Badge variant="outline">
                   {t(`common.source.${data.source}`, { defaultValue: data.source })}
                 </Badge>
@@ -257,11 +243,6 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
                   <FieldRow label={t('gallery.detail.clientIp')}>{data.client_ip ?? '—'}</FieldRow>
                   <FieldRow label={t('gallery.detail.createdAt')}>
                     {formatDateTime(data.created_at)}
-                  </FieldRow>
-                  <FieldRow label={t('gallery.detail.objectStatus')}>
-                    {data.object_deleted_at
-                      ? `${t('common.object.deleted')} · ${formatDateTime(data.object_deleted_at)}`
-                      : t('common.object.retained')}
                   </FieldRow>
                 </dl>
               </section>

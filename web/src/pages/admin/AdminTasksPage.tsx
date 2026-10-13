@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Eye, Play, RefreshCw, Trash2 } from 'lucide-react';
+import { Eye, Play, RefreshCw } from 'lucide-react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -8,7 +8,6 @@ import type { MaintenanceTask } from '../../api';
 import { PageHeader } from '../../components/PageHeader';
 import { EmptyState, ErrorState } from '../../components/States';
 import { TableSkeleton } from '../../components/skeletons';
-import { useConfirm } from '../../components/ConfirmDialog';
 import { DataTable } from '../../components/DataTable';
 import type { DataTableColumn } from '../../components/DataTable';
 import { Alert, AlertDescription } from '../../components/ui/alert';
@@ -29,7 +28,7 @@ import { DEFAULT_TABLE_PAGE_SIZE } from '../../utils/constants';
 import { formatDateTime } from '../../utils/format';
 import { cn } from '../../lib/utils';
 
-const TASK_TYPES = ['object_delete', 'record_purge', 'cdn_purge'] as const;
+const TASK_TYPES = ['object_delete', 'log_purge'] as const;
 const TASK_STATUSES = ['pending', 'running', 'done', 'failed'] as const;
 
 /** Radix Select 不支持空字符串值, 用哨兵表示 "全部" */
@@ -37,8 +36,7 @@ const ALL_VALUE = '__all__';
 
 const TASK_TYPE_LABEL_KEYS: Record<string, string> = {
   object_delete: 'adminSystem.tasks.type.object_delete',
-  record_purge: 'adminSystem.tasks.type.record_purge',
-  cdn_purge: 'adminSystem.tasks.type.cdn_purge',
+  log_purge: 'adminSystem.tasks.type.log_purge',
 };
 
 const TASK_STATUS_LABEL_KEYS: Record<string, string> = {
@@ -76,7 +74,6 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 export default function AdminTasksPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const confirm = useConfirm();
 
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
@@ -111,28 +108,6 @@ export default function AdminTasksPage() {
       toast.success(t('adminSystem.tasks.runSuccess', { id }));
     },
   });
-
-  const purgeMutation = useMutation({
-    mutationFn: () => adminTasksApi.purge(),
-    onSuccess: async (result) => {
-      await queryClient.invalidateQueries({ queryKey: ['admin', 'tasks'] });
-      if (result.created > 0) {
-        toast.success(t('adminSystem.tasks.purged', { count: result.created }));
-      } else {
-        toast.info(t('adminSystem.tasks.purgeEmpty'));
-      }
-    },
-  });
-
-  const handlePurge = async () => {
-    const confirmed = await confirm({
-      description: t('common.confirm.purge'),
-      danger: true,
-      confirmText: t('common.action.purge'),
-    });
-    if (!confirmed) return;
-    purgeMutation.mutate();
-  };
 
   const runTask = runMutation.mutate;
   const running = runMutation.isPending;
@@ -307,17 +282,6 @@ export default function AdminTasksPage() {
           >
             <RefreshCw className="size-4" />
             {t('common.action.refresh')}
-          </Button>
-          <Button
-            variant="outline"
-            className="border-warning/40 text-warning hover:bg-warning/10 hover:text-warning"
-            onClick={() => {
-              void handlePurge();
-            }}
-            disabled={purgeMutation.isPending}
-          >
-            <Trash2 className="size-4" />
-            {t('adminSystem.tasks.purgeNow')}
           </Button>
         </>
       }

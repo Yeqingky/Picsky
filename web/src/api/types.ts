@@ -202,8 +202,6 @@ export interface ImageRecord {
   source: string;
   client_ip: string | null;
   quota_charged: boolean;
-  /** 非空表示外部对象已删除 */
-  object_deleted_at: string | null;
   created_at: string;
 }
 
@@ -432,7 +430,7 @@ export type SettingsPayload = Record<string, string | boolean | undefined> & {
   smtp_password_set?: boolean;
 };
 
-export type MaintenanceTaskType = 'object_delete' | 'record_purge' | 'cdn_purge';
+export type MaintenanceTaskType = 'object_delete' | 'log_purge';
 export type MaintenanceTaskStatus = 'pending' | 'running' | 'done' | 'failed';
 
 export interface MaintenanceTask {

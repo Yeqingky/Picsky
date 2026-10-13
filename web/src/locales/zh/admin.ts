@@ -71,7 +71,7 @@ export const admin = {
     confirm: {
       disable: '确定禁用用户 {{username}}? 禁用后该账号将无法登录。',
       enable: '确定启用用户 {{username}}?',
-      delete: '确定删除用户 {{username}}? 删除会级联软删其图片记录。',
+      delete: '确定删除用户 {{username}}? 删除会级联删除其图片记录。',
     },
     feedback: {
       created: '用户 {{username}} 已创建',

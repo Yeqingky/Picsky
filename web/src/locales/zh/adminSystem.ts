@@ -58,8 +58,6 @@ export const adminSystem = {
       pathTemplateHint: '新建存储策略时预填; 必须包含内容哈希变量 ({md5} / {sha256} / {sha512})',
       deleteObject: '引用归零时删除外部对象',
       deleteObjectHint: '仅在存储后端声明 delete 能力时生效',
-      recordRetention: '软删记录保留天数',
-      recordRetentionHint: '到期后由维护队列物理清除',
       galleryPageSize: '图库每页数量',
       logRetention: '审计日志保留天数',
     },
@@ -78,13 +76,10 @@ export const adminSystem = {
 
   tasks: {
     title: '维护队列',
-    description: '对象删除、记录清理等异步任务; 支持手动执行与立即清理到期记录',
-    purgeNow: '清理到期软删记录',
-    purged: '已生成 {{count}} 个清理任务',
-    purgeEmpty: '没有到期的软删记录',
+    description: '对象删除、日志清理等异步任务; 支持手动执行',
     runSuccess: '任务 #{{id}} 已提交执行',
     emptyTitle: '暂无维护任务',
-    emptyDescription: '软删记录到期或 CDN 刷新时会自动出现在这里',
+    emptyDescription: '对象删除、策略扫描与每日维护任务会自动出现在这里',
     detailTitle: '任务详情 #{{id}}',
     payloadEmpty: '无',
     lastErrorEmpty: '无',
@@ -92,8 +87,7 @@ export const adminSystem = {
     statusAll: '全部状态',
     type: {
       object_delete: '删除对象',
-      record_purge: '清理记录',
-      cdn_purge: 'CDN 刷新',
+      log_purge: '日志清理',
     },
     column: {
       id: 'ID',

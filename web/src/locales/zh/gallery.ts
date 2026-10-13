@@ -56,7 +56,6 @@ export const gallery = {
     createdAt: '上传时间',
     hashes: '完整哈希',
     urls: '各域名 URL',
-    objectStatus: '外部对象状态',
     quotaStatus: '配额状态',
     charged: '首次存储, 计入配额',
     free: '复用或扫描记录, 不计配额',

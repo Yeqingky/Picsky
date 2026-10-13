@@ -14,7 +14,7 @@ import (
 )
 
 // schemaVersion 是当前迁移版本, 每次结构变更递增并追加一个迁移函数.
-const schemaVersion = 3
+const schemaVersion = 4
 
 // SchemaMigration 记录已应用的迁移版本.
 type SchemaMigration struct {
@@ -98,6 +98,31 @@ var steps = map[int]func(*gorm.DB) error{
 			return err
 		}
 		return db.Model(&model.Group{}).Where("id = ?", fallback.ID).Update("is_default", true).Error
+	},
+	4: func(db *gorm.DB) error {
+		// 移除软删除与 CDN 刷新预留: 删除只作用于记录与存储后端, 历史软删记录物理清除.
+		if db.Migrator().HasColumn(&model.Image{}, "deleted_at") {
+			if err := db.Where("deleted_at IS NOT NULL").Delete(&model.Image{}).Error; err != nil {
+				return err
+			}
+			if err := db.Exec("DROP INDEX IF EXISTS idx_images_deleted_at").Error; err != nil {
+				return err
+			}
+		}
+		// 不用 GORM 的 DropColumn: SQLite 驱动重建表时对末列会静默不生效 (返回 nil 但列仍在).
+		for _, column := range []string{"object_deleted_at", "deleted_at"} {
+			if !db.Migrator().HasColumn(&model.Image{}, column) {
+				continue
+			}
+			if err := db.Exec("ALTER TABLE images DROP COLUMN " + column).Error; err != nil {
+				return err
+			}
+		}
+		if err := db.Where("key = ?", "record_retention_days").Delete(&model.Setting{}).Error; err != nil {
+			return err
+		}
+		// 清理已下线的任务类型: 软删记录清理与 CDN 刷新.
+		return db.Where("type IN ?", []string{"record_purge", "cdn_purge"}).Delete(&model.MaintenanceTask{}).Error
 	},
 }
 

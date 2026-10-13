@@ -172,9 +172,9 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	}
 	caps := adapter.Capabilities()
 
-	// 冲突检查第一层: 同策略下相同 sha256 的活动记录.
+	// 冲突检查第一层: 同策略下相同 sha256 的记录.
 	var existing model.Image
-	err = u.db.Where("policy_id = ? AND sha256 = ? AND deleted_at IS NULL AND kind = ?", policy.ID, sums.SHA256, model.KindImage).
+	err = u.db.Where("policy_id = ? AND sha256 = ? AND kind = ?", policy.ID, sums.SHA256, model.KindImage).
 		Order("id ASC").First(&existing).Error
 	switch {
 	case err == nil:
@@ -386,12 +386,12 @@ resolved:
 		if overwriteExisting {
 			var affected []model.Image
 			if err := tx.Select("id", "user_id", "size", "quota_charged").
-				Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL", policy.ID, objectKey).
+				Where("policy_id = ? AND object_key = ?", policy.ID, objectKey).
 				Find(&affected).Error; err != nil {
 				return err
 			}
 			if err := tx.Model(&model.Image{}).
-				Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL", policy.ID, objectKey).
+				Where("policy_id = ? AND object_key = ?", policy.ID, objectKey).
 				Updates(map[string]any{
 					"md5":    sums.MD5,
 					"sha1":   sums.SHA1,
@@ -599,7 +599,7 @@ type CheckRecord struct {
 	Size int64  `json:"size"`
 }
 
-// Check 秒传检查: 同策略下是否存在相同 sha256 的活动记录.
+// Check 秒传检查: 同策略下是否存在相同 sha256 的记录.
 func (u *Upload) Check(principal *Principal, sha256 string, policyID *int64) (*CheckResult, error) {
 	sum := strings.ToLower(strings.TrimSpace(sha256))
 	if len(sum) != 64 || !isHex(sum) {
@@ -613,7 +613,7 @@ func (u *Upload) Check(principal *Principal, sha256 string, policyID *int64) (*C
 		return nil, err
 	}
 	var existing model.Image
-	err = u.db.Where("policy_id = ? AND sha256 = ? AND deleted_at IS NULL AND kind = ?", policy.ID, sum, model.KindImage).
+	err = u.db.Where("policy_id = ? AND sha256 = ? AND kind = ?", policy.ID, sum, model.KindImage).
 		Order("id ASC").First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return &CheckResult{Exists: false}, nil
@@ -633,15 +633,15 @@ func (u *Upload) freshUser(userID int64) (*model.User, error) {
 	return &user, nil
 }
 
-// contentRecord 按内容哈希查询本策略下指定用户的活动记录 (秒传判定).
+// contentRecord 按内容哈希查询本策略下指定用户的记录 (秒传判定).
 func (u *Upload) contentRecord(policyID int64, sha256 string, userID int64) (*model.Image, error) {
 	return contentRecordTx(u.db, policyID, sha256, userID)
 }
 
-// contentRecordTx 在事务内按内容哈希查询当前用户的活动记录.
+// contentRecordTx 在事务内按内容哈希查询当前用户的记录.
 func contentRecordTx(tx *gorm.DB, policyID int64, sha256 string, userID int64) (*model.Image, error) {
 	var record model.Image
-	err := tx.Where("policy_id = ? AND sha256 = ? AND user_id = ? AND deleted_at IS NULL AND kind = ?",
+	err := tx.Where("policy_id = ? AND sha256 = ? AND user_id = ? AND kind = ?",
 		policyID, sha256, userID, model.KindImage).
 		Order("id ASC").First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -653,15 +653,15 @@ func contentRecordTx(tx *gorm.DB, policyID int64, sha256 string, userID int64) (
 	return &record, nil
 }
 
-// recordForKey 查询同一策略下指定对象键的活动记录; 不存在时返回 nil, nil.
+// recordForKey 查询同一策略下指定对象键的记录; 不存在时返回 nil, nil.
 func (u *Upload) recordForKey(policyID int64, objectKey string) (*model.Image, error) {
 	return recordForKeyTx(u.db, policyID, objectKey)
 }
 
-// recordForKeyTx 在事务内查询同一策略下指定对象键的活动记录; 不存在时返回 nil, nil.
+// recordForKeyTx 在事务内查询同一策略下指定对象键的记录; 不存在时返回 nil, nil.
 func recordForKeyTx(tx *gorm.DB, policyID int64, objectKey string) (*model.Image, error) {
 	var record model.Image
-	err := tx.Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL", policyID, objectKey).
+	err := tx.Where("policy_id = ? AND object_key = ?", policyID, objectKey).
 		Order("id ASC").First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil

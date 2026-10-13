@@ -39,8 +39,7 @@ const (
 // 维护任务类型.
 const (
 	TaskObjectDelete   = "object_delete"
-	TaskRecordPurge    = "record_purge"
-	TaskCDNPurge       = "cdn_purge"
+	TaskLogPurge       = "log_purge"
 	TaskPolicyScan     = "policy_scan"
 	TaskQuotaReconcile = "quota_reconcile"
 )
@@ -126,30 +125,28 @@ type User struct {
 
 // Image 是图片元数据与用户记录; 外部对象按 (policy_id, object_key) 复用.
 type Image struct {
-	ID               int64      `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID           int64      `gorm:"not null;index:idx_images_user_kind_created,priority:1;index:idx_images_user_sha256,priority:1" json:"user_id"`
-	PolicyID         int64      `gorm:"not null;index:idx_images_policy_object,priority:1" json:"policy_id"`
-	RelPath          string     `gorm:"size:512;not null" json:"rel_path"`
-	ObjectKey        string     `gorm:"size:512;not null;index:idx_images_policy_object,priority:2" json:"object_key"`
-	MD5              string     `gorm:"size:32;not null" json:"md5"`
-	SHA1             string     `gorm:"size:40;not null" json:"sha1"`
-	SHA256           string     `gorm:"size:64;not null;index:idx_images_sha256;index:idx_images_user_sha256,priority:2" json:"sha256"`
-	SHA512           string     `gorm:"size:128;not null" json:"sha512"`
-	Size             int64      `gorm:"not null" json:"size"`
-	Kind             string     `gorm:"size:8;not null;default:'image';index:idx_images_user_kind_created,priority:2" json:"kind"`
-	Format           string     `gorm:"size:16;not null" json:"format"`
-	Ext              string     `gorm:"size:16;not null" json:"ext"`
-	MIME             string     `gorm:"size:128;not null" json:"mime"`
-	Width            *int       `json:"width"`
-	Height           *int       `json:"height"`
-	OriginalFilename string     `gorm:"size:255;not null" json:"original_filename"`
-	URL              string     `gorm:"size:1024;not null" json:"url"`
-	QuotaCharged     bool       `gorm:"not null" json:"quota_charged"`
-	Source           string     `gorm:"size:16;not null;default:'web'" json:"source"`
-	ClientIP         string     `gorm:"size:45" json:"client_ip"`
-	DeletedAt        *time.Time `gorm:"index:idx_images_deleted_at" json:"deleted_at"`
-	ObjectDeletedAt  *time.Time `json:"object_deleted_at"`
-	CreatedAt        time.Time  `gorm:"not null;index:idx_images_user_kind_created,priority:3" json:"created_at"`
+	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	UserID           int64     `gorm:"not null;index:idx_images_user_kind_created,priority:1;index:idx_images_user_sha256,priority:1" json:"user_id"`
+	PolicyID         int64     `gorm:"not null;index:idx_images_policy_object,priority:1" json:"policy_id"`
+	RelPath          string    `gorm:"size:512;not null" json:"rel_path"`
+	ObjectKey        string    `gorm:"size:512;not null;index:idx_images_policy_object,priority:2" json:"object_key"`
+	MD5              string    `gorm:"size:32;not null" json:"md5"`
+	SHA1             string    `gorm:"size:40;not null" json:"sha1"`
+	SHA256           string    `gorm:"size:64;not null;index:idx_images_sha256;index:idx_images_user_sha256,priority:2" json:"sha256"`
+	SHA512           string    `gorm:"size:128;not null" json:"sha512"`
+	Size             int64     `gorm:"not null" json:"size"`
+	Kind             string    `gorm:"size:8;not null;default:'image';index:idx_images_user_kind_created,priority:2" json:"kind"`
+	Format           string    `gorm:"size:16;not null" json:"format"`
+	Ext              string    `gorm:"size:16;not null" json:"ext"`
+	MIME             string    `gorm:"size:128;not null" json:"mime"`
+	Width            *int      `json:"width"`
+	Height           *int      `json:"height"`
+	OriginalFilename string    `gorm:"size:255;not null" json:"original_filename"`
+	URL              string    `gorm:"size:1024;not null" json:"url"`
+	QuotaCharged     bool      `gorm:"not null" json:"quota_charged"`
+	Source           string    `gorm:"size:16;not null;default:'web'" json:"source"`
+	ClientIP         string    `gorm:"size:45" json:"client_ip"`
+	CreatedAt        time.Time `gorm:"not null;index:idx_images_user_kind_created,priority:3" json:"created_at"`
 }
 
 // APIKey 是 API 密钥; secret 只存散列.

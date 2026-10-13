@@ -31,7 +31,6 @@ export const common = {
     add: '添加',
     remove: '移除',
     run: '执行',
-    purge: '清理',
     test: '测试',
     submit: '提交',
     filter: '筛选',
@@ -80,8 +79,7 @@ export const common = {
     deleteKey: '吊销后使用该密钥的客户端将立即失效, 确定继续?',
     deletePolicy: '删除策略后无法恢复, 引用该策略的记录不会被删除。确定继续?',
     deleteGroup: '删除用户组后无法恢复, 组内用户需重新分配。确定继续?',
-    deleteUser: '删除用户会级联软删其图片记录, 确定继续?',
-    purge: '将立即清理已到期的软删记录, 确定继续?',
+    deleteUser: '删除用户会级联删除其图片记录, 确定继续?',
     objectRetainHint: '外部存储不支持删除或已关闭删除时, 仅从 Picsky 删除记录, 外部文件保留。',
   },
 
@@ -108,12 +106,6 @@ export const common = {
     web: '网页',
     api: '接口',
     scan: '扫描补录',
-  },
-
-  object: {
-    deleted: '外部对象已删除',
-    retained: '外部对象保留',
-    deletedAt: '对象删除时间',
   },
 
   copyFormat: {

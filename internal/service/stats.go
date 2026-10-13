@@ -55,7 +55,7 @@ func (s *Stats) Overview() (*Overview, error) {
 	}
 	if err := s.db.Model(&model.Image{}).
 		Select("COUNT(*) as count, COALESCE(SUM(size), 0) as bytes").
-		Where("deleted_at IS NULL AND kind = ?", model.KindImage).
+		Where("kind = ?", model.KindImage).
 		Scan(&aggregate).Error; err != nil {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
@@ -68,7 +68,7 @@ func (s *Stats) Overview() (*Overview, error) {
 
 	startOfDay := s.startOfToday()
 	if err := s.db.Model(&model.Image{}).
-		Where("deleted_at IS NULL AND kind = ? AND created_at >= ?", model.KindImage, startOfDay).
+		Where("kind = ? AND created_at >= ?", model.KindImage, startOfDay).
 		Count(&overview.TodayUploads).Error; err != nil {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
@@ -76,7 +76,7 @@ func (s *Stats) Overview() (*Overview, error) {
 	var formats []FormatStat
 	if err := s.db.Model(&model.Image{}).
 		Select("format, COUNT(*) as count, COALESCE(SUM(size), 0) as size").
-		Where("deleted_at IS NULL AND kind = ?", model.KindImage).
+		Where("kind = ?", model.KindImage).
 		Group("format").
 		Order("count DESC").
 		Scan(&formats).Error; err != nil {
@@ -90,7 +90,7 @@ func (s *Stats) Overview() (*Overview, error) {
 	if err := s.db.Model(&model.Image{}).
 		Select("images.policy_id as policy_id, storage_policies.name as policy_name, COUNT(*) as count, COALESCE(SUM(images.size), 0) as size").
 		Joins("LEFT JOIN storage_policies ON storage_policies.id = images.policy_id").
-		Where("images.deleted_at IS NULL AND images.kind = ?", model.KindImage).
+		Where("images.kind = ?", model.KindImage).
 		Group("images.policy_id, storage_policies.name").
 		Order("count DESC").
 		Scan(&policies).Error; err != nil {

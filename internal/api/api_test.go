@@ -883,11 +883,6 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 		t.Fatalf("读取任务失败: %d %s", tasks.Status, string(tasks.Body))
 	}
 
-	purge := s.raw(http.MethodPost, "/api/v1/admin/tasks/purge", nil, nil, []*http.Cookie{cookie})
-	if purge.Status != http.StatusOK {
-		t.Errorf("清理任务失败: %d %s", purge.Status, string(purge.Body))
-	}
-
 	preview := s.json(http.MethodPost, "/api/v1/admin/policies/preview", map[string]any{
 		"path_template": "{md5:2}/{md5}.{ext}",
 		"policy_id":     policyID,

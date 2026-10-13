@@ -398,7 +398,7 @@ func (h *Handler) albums(c *gin.Context) {
 	principal := middleware.Principal(c)
 	var count int64
 	if err := h.svc.DB.Model(&model.Image{}).
-		Where("user_id = ? AND deleted_at IS NULL AND kind = ?", principal.User.ID, model.KindImage).
+		Where("user_id = ? AND kind = ?", principal.User.ID, model.KindImage).
 		Count(&count).Error; err != nil {
 		h.writeError(c, apperr.ErrInternal.WithMessage(err.Error()))
 		return
@@ -437,7 +437,7 @@ func (h *Handler) profile(c *gin.Context) {
 
 	var imageNum int64
 	if err := h.svc.DB.Model(&model.Image{}).
-		Where("user_id = ? AND deleted_at IS NULL AND quota_charged = ?", user.ID, true).
+		Where("user_id = ? AND quota_charged = ?", user.ID, true).
 		Count(&imageNum).Error; err != nil {
 		h.writeError(c, apperr.ErrInternal.WithMessage(err.Error()))
 		return

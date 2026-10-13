@@ -158,30 +158,6 @@ func (t *Tasks) RunNow(id int64, actor *Principal) error {
 	return nil
 }
 
-// PurgeExpired 生成到期软删记录的清理任务, 返回入队数量.
-func (t *Tasks) PurgeExpired(actor *Principal) (int, error) {
-	retention := t.settings.Int64("record_retention_days", 30)
-	cutoff := nowUTC().Add(-time.Duration(retention) * 24 * time.Hour)
-	var pending int64
-	if err := t.db.Model(&model.Image{}).
-		Where("deleted_at IS NOT NULL AND deleted_at < ?", cutoff).
-		Count(&pending).Error; err != nil {
-		return 0, apperr.ErrInternal.WithMessage(err.Error())
-	}
-	if pending == 0 {
-		return 0, nil
-	}
-	if _, err := t.Enqueue(model.TaskRecordPurge, map[string]any{"cutoff": cutoff}); err != nil {
-		return 0, err
-	}
-	t.audit.Recordf(Entry{
-		UserID: actorID(actor),
-		Action: "task_purge",
-		Detail: map[string]any{"pending_records": pending, "cutoff": cutoff},
-	})
-	return 1, nil
-}
-
 // Start 启动后台调度循环, 直到 ctx 结束.
 func (t *Tasks) Start(ctx context.Context) {
 	ticker := time.NewTicker(taskWorkerInterval)
@@ -204,7 +180,7 @@ func (t *Tasks) Start(ctx context.Context) {
 // scheduleDaily 按 24 小时周期安排每日任务.
 func (t *Tasks) scheduleDaily() error {
 	now := time.Now()
-	for _, taskType := range []string{model.TaskRecordPurge, model.TaskQuotaReconcile} {
+	for _, taskType := range []string{model.TaskLogPurge, model.TaskQuotaReconcile} {
 		last, ok := t.daily[taskType]
 		if ok && now.Sub(last) < 24*time.Hour {
 			continue
@@ -274,8 +250,8 @@ func (t *Tasks) execute(ctx context.Context, task *model.MaintenanceTask) error 
 		t.log.Info("策略扫描完成", "policy_id", payload.PolicyID, "images", result.Images, "files", result.Files, "skipped", result.Skipped)
 		return nil
 
-	case model.TaskRecordPurge:
-		return t.purgeExpiredRecords()
+	case model.TaskLogPurge:
+		return t.purgeExpiredLogs()
 
 	case model.TaskQuotaReconcile:
 		fixed, err := t.images.ReconcileUsed()
@@ -306,23 +282,13 @@ func (t *Tasks) execute(ctx context.Context, task *model.MaintenanceTask) error 
 		}
 		return adapter.Delete(ctx, payload.ObjectKey)
 
-	case model.TaskCDNPurge:
-		return errors.New("CDN 刷新接口尚未接入, 该任务类型仅作预留")
-
 	default:
 		return fmt.Errorf("未知任务类型: %s", task.Type)
 	}
 }
 
-// purgeExpiredRecords 清除到期软删记录与过期审计日志.
-func (t *Tasks) purgeExpiredRecords() error {
-	retention := t.settings.Int64("record_retention_days", 30)
-	cutoff := nowUTC().Add(-time.Duration(retention) * 24 * time.Hour)
-	result := t.db.Where("deleted_at IS NOT NULL AND deleted_at < ?", cutoff).Delete(&model.Image{})
-	if result.Error != nil {
-		return result.Error
-	}
-
+// purgeExpiredLogs 清除过期审计日志与已结束的维护任务.
+func (t *Tasks) purgeExpiredLogs() error {
 	logRetention := t.settings.Int64("log_retention_days", 90)
 	if logRetention > 0 {
 		logCutoff := nowUTC().Add(-time.Duration(logRetention) * 24 * time.Hour)
@@ -337,7 +303,7 @@ func (t *Tasks) purgeExpiredRecords() error {
 		return err
 	}
 
-	t.log.Info("清理到期软删记录完成", "purged_records", result.RowsAffected)
+	t.log.Info("清理过期日志与已结束任务完成")
 	return nil
 }
 

@@ -64,7 +64,6 @@ const SETTING_KEYS = [
   'default_conflict_policy',
   'default_path_template',
   'delete_object_on_last_reference',
-  'record_retention_days',
   'gallery_page_size',
   'log_retention_days',
 ] as const;
@@ -94,7 +93,6 @@ const DEFAULTS: Record<SettingKey, string> = {
   default_conflict_policy: 'rename',
   default_path_template: '{md5:2}/{md5}.{ext}',
   delete_object_on_last_reference: 'true',
-  record_retention_days: '30',
   gallery_page_size: '40',
   log_retention_days: '90',
 };
@@ -209,7 +207,6 @@ function validateSettings(values: Draft, t: TFunction): Errors {
   integer('smtp_port', 1, 65535, t('adminSystem.settings.validation.port'));
 
   integer('max_file_size_bytes', 1, undefined, t('adminSystem.settings.validation.positive'));
-  integer('record_retention_days', 0, undefined, t('adminSystem.settings.validation.nonNegative'));
   integer('gallery_page_size', 1, undefined, t('adminSystem.settings.validation.positive'));
   integer('log_retention_days', 0, undefined, t('adminSystem.settings.validation.nonNegative'));
 
@@ -898,19 +895,6 @@ export default function AdminSettingsPage() {
               setField('delete_object_on_last_reference', next ? 'true' : 'false')
             }
           />
-          <Field
-            id="setting-record-retention"
-            label={t('adminSystem.settings.field.recordRetention')}
-            hint={t('adminSystem.settings.field.recordRetentionHint')}
-            error={errors.record_retention_days}
-          >
-            <Input
-              id="setting-record-retention"
-              value={draft.record_retention_days}
-              aria-invalid={Boolean(errors.record_retention_days)}
-              onChange={(event) => setField('record_retention_days', event.target.value)}
-            />
-          </Field>
           <Field
             id="setting-gallery-page-size"
             label={t('adminSystem.settings.field.galleryPageSize')}

@@ -81,7 +81,7 @@ func (i *Images) List(principal *Principal, filter ListFilter) (*ListResult, err
 		pageSize = 200
 	}
 
-	query := i.db.Model(&model.Image{}).Where("deleted_at IS NULL AND kind = ?", model.KindImage)
+	query := i.db.Model(&model.Image{}).Where("kind = ?", model.KindImage)
 	if !principal.Has(model.PermViewAll) {
 		query = query.Where("user_id = ?", principal.User.ID)
 	} else if filter.UserID != nil {
@@ -184,7 +184,7 @@ type DeleteResult struct {
 	Reason        string `json:"reason,omitempty"`
 }
 
-// Delete 软删记录, 回补配额, 按引用计数与能力降级决定是否删除外部对象.
+// Delete 删除记录, 回补配额, 按引用计数与能力降级决定是否删除外部对象.
 func (i *Images) Delete(principal *Principal, id int64, ip, userAgent string) (*DeleteResult, error) {
 	record, err := i.find(id)
 	if err != nil {
@@ -195,13 +195,6 @@ func (i *Images) Delete(principal *Principal, id int64, ip, userAgent string) (*
 	}
 	if record.UserID == principal.User.ID && !principal.Has(model.PermDeleteOwn) && !principal.Has(model.PermDeleteAll) {
 		return nil, apperr.ErrForbidden.WithMessage("没有删除权限")
-	}
-	if record.DeletedAt != nil {
-		return &DeleteResult{
-			ID:            record.ID,
-			Deleted:       true,
-			ObjectDeleted: record.ObjectDeletedAt != nil,
-		}, nil
 	}
 	return i.deleteRecord(principal, record, ip, userAgent)
 }
@@ -228,10 +221,6 @@ func (i *Images) BatchDelete(principal *Principal, ids []int64, ip, userAgent st
 			results = append(results, DeleteResult{ID: id, Deleted: false})
 			continue
 		}
-		if record.DeletedAt != nil {
-			results = append(results, DeleteResult{ID: id, Deleted: true, ObjectDeleted: record.ObjectDeletedAt != nil})
-			continue
-		}
 		result, err := i.deleteRecord(principal, record, ip, userAgent)
 		if err != nil {
 			apiErr := apperr.From(err)
@@ -249,10 +238,10 @@ func (i *Images) deleteRecord(principal *Principal, record *model.Image, ip, use
 	now := nowUTC()
 	deleted := false
 
-	// 1. 事务内条件软删, 回补配额并把计费移交给同对象最早的剩余记录.
-	// 条件更新保证并发重复删除只有一次生效, 避免重复回补与重复移交.
+	// 1. 事务内条件删除记录, 回补配额并把计费移交给同对象最早的剩余记录.
+	// 条件删除保证并发重复删除只有一次生效, 避免重复回补与重复移交.
 	if err := i.db.Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&model.Image{}).Where("id = ? AND deleted_at IS NULL", record.ID).Update("deleted_at", now)
+		result := tx.Where("id = ?", record.ID).Delete(&model.Image{})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -266,7 +255,7 @@ func (i *Images) deleteRecord(principal *Principal, record *model.Image, ip, use
 				return err
 			}
 			var next model.Image
-			err := tx.Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL AND quota_charged = ?",
+			err := tx.Where("policy_id = ? AND object_key = ? AND quota_charged = ?",
 				record.PolicyID, record.ObjectKey, false).
 				Order("id ASC").First(&next).Error
 			if err == nil {
@@ -286,18 +275,14 @@ func (i *Images) deleteRecord(principal *Principal, record *model.Image, ip, use
 	}
 
 	if !deleted {
-		// 已被并发删除: 幂等返回当前状态.
-		current, err := i.find(record.ID)
-		if err != nil {
-			return nil, err
-		}
-		return &DeleteResult{ID: current.ID, Deleted: true, ObjectDeleted: current.ObjectDeletedAt != nil}, nil
+		// 已被并发删除: 幂等返回.
+		return &DeleteResult{ID: record.ID, Deleted: true}, nil
 	}
 
 	// 2. 引用计数与外部对象删除.
 	var remaining int64
 	if err := i.db.Model(&model.Image{}).
-		Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL", record.PolicyID, record.ObjectKey).
+		Where("policy_id = ? AND object_key = ?", record.PolicyID, record.ObjectKey).
 		Count(&remaining).Error; err != nil {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
@@ -341,10 +326,6 @@ func (i *Images) deleteRecord(principal *Principal, record *model.Image, ip, use
 			}
 			break
 		}
-		deletedAt := nowUTC()
-		if err := i.db.Model(&model.Image{}).Where("id = ?", record.ID).Update("object_deleted_at", deletedAt).Error; err != nil {
-			return nil, apperr.ErrInternal.WithMessage(err.Error())
-		}
 		result.ObjectDeleted = true
 		result.Reason = DeleteReasonLastReference
 	}
@@ -382,7 +363,7 @@ func (i *Images) ReconcileUsed() (int, error) {
 		}
 		if err := i.db.Model(&model.Image{}).
 			Select("COUNT(*) as count, COALESCE(SUM(size), 0) as bytes").
-			Where("user_id = ? AND deleted_at IS NULL AND quota_charged = ?", user.ID, true).
+			Where("user_id = ? AND quota_charged = ?", user.ID, true).
 			Scan(&aggregate).Error; err != nil {
 			return fixed, apperr.ErrInternal.WithMessage(err.Error())
 		}
@@ -401,7 +382,7 @@ func (i *Images) ReconcileUsed() (int, error) {
 	return fixed, nil
 }
 
-// find 按 ID 读取记录 (含已软删记录, 由调用方判断).
+// find 按 ID 读取记录.
 func (i *Images) find(id int64) (*model.Image, error) {
 	var record model.Image
 	if err := i.db.First(&record, id).Error; err != nil {
@@ -428,7 +409,7 @@ func reconcileUsersTx(tx *gorm.DB, userIDs []int64) error {
 		}
 		if err := tx.Model(&model.Image{}).
 			Select("COUNT(*) as count, COALESCE(SUM(size), 0) as bytes").
-			Where("user_id = ? AND deleted_at IS NULL AND quota_charged = ?", userID, true).
+			Where("user_id = ? AND quota_charged = ?", userID, true).
 			Scan(&aggregate).Error; err != nil {
 			return err
 		}

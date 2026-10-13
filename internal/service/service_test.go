@@ -221,11 +221,11 @@ func pngBytes(t *testing.T, seed int, width, height int) []byte {
 	return buffer.Bytes()
 }
 
-// recordsFor 统计某策略下的活动记录数.
+// recordsFor 统计某策略下的记录数.
 func (f *fixture) recordsFor(policyID int64) int64 {
 	f.t.Helper()
 	var count int64
-	if err := f.database.Model(&model.Image{}).Where("policy_id = ? AND deleted_at IS NULL", policyID).Count(&count).Error; err != nil {
+	if err := f.database.Model(&model.Image{}).Where("policy_id = ?", policyID).Count(&count).Error; err != nil {
 		f.t.Fatalf("统计记录失败: %v", err)
 	}
 	return count
@@ -389,9 +389,10 @@ func TestDeleteRefundAndObjectDeletion(t *testing.T) {
 		t.Error("计费移交后的记录被删除, 配额应回补")
 	}
 
-	repeated, err := f.svc.Images.Delete(f.admin, owner.Record.ID, "127.0.0.1", "test-agent")
-	if err != nil || !repeated.Deleted {
-		t.Errorf("重复删除应幂等成功: %+v, %v", repeated, err)
+	_, repeatErr := f.svc.Images.Delete(f.admin, owner.Record.ID, "127.0.0.1", "test-agent")
+	var repeatAPIErr *apperr.Error
+	if !errors.As(repeatErr, &repeatAPIErr) || repeatAPIErr.Code != "not_found" {
+		t.Errorf("物理删除后重复删除应返回 not_found, 实际 %v", repeatErr)
 	}
 }
 
@@ -990,7 +991,7 @@ func TestCapabilitiesAndDriverRegistry(t *testing.T) {
 	}
 }
 
-func TestTaskQueueScanAndPurge(t *testing.T) {
+func TestTaskQueueScanAndLogPurge(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)
 
@@ -1025,15 +1026,15 @@ func TestTaskQueueScanAndPurge(t *testing.T) {
 		t.Fatalf("任务执行后应补录该文件, 实际 %d", scanned)
 	}
 
-	if _, err := f.svc.Tasks.Enqueue(model.TaskCDNPurge, nil); err != nil {
+	if _, err := f.svc.Tasks.Enqueue(model.TaskLogPurge, nil); err != nil {
 		t.Fatalf("入队失败: %v", err)
 	}
-	var cdnTask model.MaintenanceTask
-	if err := f.database.Where("type = ?", model.TaskCDNPurge).First(&cdnTask).Error; err != nil {
+	var logTask model.MaintenanceTask
+	if err := f.database.Where("type = ?", model.TaskLogPurge).First(&logTask).Error; err != nil {
 		t.Fatalf("读取任务失败: %v", err)
 	}
-	if err := f.svc.Tasks.RunNow(cdnTask.ID, f.admin); err == nil {
-		t.Error("CDN 刷新未接入时应明确失败")
+	if err := f.svc.Tasks.RunNow(logTask.ID, f.admin); err != nil {
+		t.Fatalf("日志清理任务应执行成功: %v", err)
 	}
 }
 
@@ -1386,7 +1387,7 @@ func TestConcurrentSameContentChargedOnce(t *testing.T) {
 
 	var charged int64
 	if err := f.database.Model(&model.Image{}).
-		Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL AND quota_charged = ?", policy.ID, md5RelPath(content), true).
+		Where("policy_id = ? AND object_key = ? AND quota_charged = ?", policy.ID, md5RelPath(content), true).
 		Count(&charged).Error; err != nil {
 		t.Fatalf("统计失败: %v", err)
 	}
@@ -1473,10 +1474,7 @@ func TestBatchDeleteRequiresPermission(t *testing.T) {
 	}
 	var stored model.Image
 	if err := f.database.First(&stored, uploaded.Record.ID).Error; err != nil {
-		t.Fatalf("读取记录失败: %v", err)
-	}
-	if stored.DeletedAt != nil {
-		t.Error("被拒绝的批量删除不应软删记录")
+		t.Fatalf("被拒绝的批量删除不应删除记录: %v", err)
 	}
 }
 

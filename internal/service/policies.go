@@ -524,7 +524,7 @@ func (p *Policies) Delete(id int64, actor *Principal, ip, userAgent string) erro
 		return err
 	}
 	var recordCount int64
-	if err := p.db.Model(&model.Image{}).Where("policy_id = ? AND deleted_at IS NULL", policy.ID).Count(&recordCount).Error; err != nil {
+	if err := p.db.Model(&model.Image{}).Where("policy_id = ?", policy.ID).Count(&recordCount).Error; err != nil {
 		return apperr.ErrInternal.WithMessage(err.Error())
 	}
 	if recordCount > 0 {
@@ -709,7 +709,7 @@ func (p *Policies) Scan(ctx context.Context, policyID int64, ownerID int64, subP
 		key := strings.Trim(object.Key, "/")
 
 		var existing int64
-		if err := p.db.Model(&model.Image{}).Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL", policy.ID, key).Count(&existing).Error; err != nil {
+		if err := p.db.Model(&model.Image{}).Where("policy_id = ? AND object_key = ?", policy.ID, key).Count(&existing).Error; err != nil {
 			return nil, apperr.ErrInternal.WithMessage(err.Error())
 		}
 		if existing > 0 {

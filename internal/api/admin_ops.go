@@ -221,17 +221,6 @@ func (s *Server) adminRunTask(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// adminPurgeTasks 立即清理到期的软删记录.
-func (s *Server) adminPurgeTasks(c *gin.Context) {
-	principal := middleware.Principal(c)
-	created, err := s.svc.Tasks.PurgeExpired(principal)
-	if err != nil {
-		s.fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"created": created})
-}
-
 // adminListLogs 审计日志列表.
 func (s *Server) adminListLogs(c *gin.Context) {
 	page, pageSize := pagination(c, 20, 200)

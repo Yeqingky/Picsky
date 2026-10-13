@@ -23,7 +23,6 @@ var DefaultSettings = map[string]string{
 	"default_conflict_policy":         "rename",
 	"default_path_template":           "{md5:2}/{md5}.{ext}",
 	"delete_object_on_last_reference": "true",
-	"record_retention_days":           "30",
 	"gallery_page_size":               "40",
 	"log_retention_days":              "90",
 }
@@ -80,6 +79,5 @@ var SettingDefinitions = []SettingDefinition{
 	{Key: "default_path_template", Label: "新策略默认魔法路径", Type: "string", Group: "存储默认"},
 	{Key: "delete_object_on_last_reference", Label: "引用归零时删除外部对象", Type: "bool", Group: "存储默认", Help: "仅在策略后端声明 delete 能力时生效"},
 
-	{Key: "record_retention_days", Label: "软删记录保留天数", Type: "int", Group: "维护"},
 	{Key: "log_retention_days", Label: "审计日志保留天数", Type: "int", Group: "维护"},
 }

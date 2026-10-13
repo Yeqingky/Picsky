@@ -282,7 +282,7 @@ func (u *Users) Update(id int64, in UserInput, actor *Principal, ip, userAgent s
 	return u.UserByID(user.ID)
 }
 
-// Delete 删除用户: 其活动记录级联软删并按删除流程处理外部对象, 审计日志保留.
+// Delete 删除用户: 其记录级联删除并按删除流程处理外部对象, 审计日志保留.
 func (u *Users) Delete(id int64, actor *Principal, ip, userAgent string) error {
 	var user model.User
 	if err := u.db.First(&user, id).Error; err != nil {
@@ -296,7 +296,7 @@ func (u *Users) Delete(id int64, actor *Principal, ip, userAgent string) error {
 	}
 
 	var records []model.Image
-	if err := u.db.Where("user_id = ? AND deleted_at IS NULL", user.ID).Find(&records).Error; err != nil {
+	if err := u.db.Where("user_id = ?", user.ID).Find(&records).Error; err != nil {
 		return apperr.ErrInternal.WithMessage(err.Error())
 	}
 	owner := &Principal{User: &user, Permissions: model.AllPermissions()}
