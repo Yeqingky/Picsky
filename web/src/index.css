@@ -132,27 +132,11 @@
   ::selection {
     background-color: color-mix(in oklab, var(--primary) 25%, transparent);
   }
-  /* 简约滚动条: 细滑块 + 透明轨道, 不显示系统箭头按钮 (docs/webui.md 第 1 节) */
+  /* 隐藏滚动条, 保留滚动能力 (docs/webui.md 第 1 节) */
   * {
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 40%, transparent) transparent;
+    scrollbar-width: none;
   }
-  /* 旧版 Chromium 不支持标准属性时的兜底 */
   *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  *::-webkit-scrollbar-track,
-  *::-webkit-scrollbar-corner {
-    background-color: transparent;
-  }
-  *::-webkit-scrollbar-thumb {
-    border: 3px solid transparent;
-    border-radius: 999px;
-    background-clip: content-box;
-    background-color: color-mix(in oklab, var(--muted-foreground) 40%, transparent);
-  }
-  *::-webkit-scrollbar-button {
     display: none;
   }
 }
