@@ -16,6 +16,4 @@ export const nav = {
   adminTasks: '维护队列',
   adminLogs: '操作日志',
   userMenu: '用户菜单',
-  searchPlaceholder: '搜索图片原始文件名…',
-  searchSubmit: '搜索',
 };

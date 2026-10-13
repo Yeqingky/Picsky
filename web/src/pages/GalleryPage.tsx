@@ -81,7 +81,7 @@ export default function GalleryPage() {
   const [searchParams] = useSearchParams();
 
   const [filters, setFilters] = useState<GalleryFiltersValue>(() => ({
-    keyword: searchParams.get('keyword') ?? '',
+    keyword: '',
     format: searchParams.get('format') ?? '',
     from: searchParams.get('from') ? dayjs(searchParams.get('from')) : null,
     to: searchParams.get('to') ? dayjs(searchParams.get('to')) : null,
@@ -96,14 +96,6 @@ export default function GalleryPage() {
   const [detailId, setDetailId] = useState<number | null>(null);
   const { hasPermission } = useAuth();
   const canDelete = hasPermission('delete_own') || hasPermission('delete_all');
-
-  // 顶栏全局搜索通过 /gallery?keyword= 进入; 停留在图库页再次搜索时同路由导航不会重挂载, 需同步 URL
-  const urlKeyword = searchParams.get('keyword') ?? '';
-  useEffect(() => {
-    setFilters((current) =>
-      current.keyword === urlKeyword ? current : { ...current, keyword: urlKeyword },
-    );
-  }, [urlKeyword]);
 
   const debouncedKeyword = useDebouncedValue(filters.keyword, 400);
 

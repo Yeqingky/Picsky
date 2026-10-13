@@ -196,7 +196,6 @@ export const common = {
     sidebar: '主导航',
     openMenu: '打开导航',
     closeMenu: '关闭导航',
-    search: '全局搜索 (在图片库中按原始文件名查找)',
   },
 
   status403: {

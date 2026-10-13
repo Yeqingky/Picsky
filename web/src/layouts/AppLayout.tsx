@@ -12,7 +12,6 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Search,
   Settings,
   ShieldCheck,
   User,
@@ -37,7 +36,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu';
-import { Input } from '../components/ui/input';
 import { Sheet, SheetContent, SheetTitle } from '../components/ui/sheet';
 import { cn } from '../lib/utils';
 
@@ -336,8 +334,6 @@ export function AppLayout() {
   const { t } = useTranslation();
   const siteName = useSiteName();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const navigate = useNavigate();
 
   return (
     <div className="bg-background flex min-h-svh w-full">
@@ -368,25 +364,6 @@ export function AppLayout() {
           >
             <Menu />
           </Button>
-          <form
-            className="flex max-w-[420px] flex-1 items-center"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const keyword = search.trim();
-              navigate(keyword ? `/gallery?keyword=${encodeURIComponent(keyword)}` : '/gallery');
-            }}
-          >
-            <div className="relative w-full">
-              <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('nav.searchPlaceholder')}
-                aria-label={t('common.a11y.search')}
-                className="pl-8"
-              />
-            </div>
-          </form>
           <div className="flex-1" />
           <ThemeModeToggleButton />
         </header>
