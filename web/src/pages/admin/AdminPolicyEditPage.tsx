@@ -130,7 +130,6 @@ interface FormState {
   type: string;
   enabled: boolean;
   sort: string;
-  objectPrefix: string;
   endpoint: string;
   username: string;
   password: string;
@@ -152,7 +151,6 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     type: policy.type,
     enabled: policy.enabled,
     sort: String(policy.sort),
-    objectPrefix: policy.object_prefix ?? '',
     endpoint: typeof policy.config.endpoint === 'string' ? policy.config.endpoint : '',
     username: policy.secrets?.username ?? '',
     password: policy.secrets?.password ?? '',
@@ -371,7 +369,6 @@ export default function AdminPolicyEditPage() {
       type: TYPE_OPTIONS[0],
       enabled: true,
       sort: '0',
-      objectPrefix: '',
       endpoint: '',
       username: '',
       password: '',
@@ -396,7 +393,6 @@ export default function AdminPolicyEditPage() {
   } = useMutation({ mutationFn: adminPoliciesApi.preview });
 
   const debouncedTemplate = useDebouncedValue(form?.pathTemplate ?? '', 400);
-  const debouncedPrefix = useDebouncedValue(form?.objectPrefix ?? '', 400);
   const previewSkeleton = useDelayedLoading(previewPending);
 
   useEffect(() => {
@@ -408,13 +404,12 @@ export default function AdminPolicyEditPage() {
     }
     runPreview({
       path_template: template,
-      object_prefix: debouncedPrefix.trim(),
       md5: PREVIEW_MD5,
       sha256: PREVIEW_SHA256,
       sha512: PREVIEW_SHA512,
       ext: 'png',
     });
-  }, [debouncedPrefix, debouncedTemplate, runPreview, resetPreview]);
+  }, [debouncedTemplate, runPreview, resetPreview]);
 
   /* ---------------------------------------------------------------- 校验 */
 
@@ -496,7 +491,6 @@ export default function AdminPolicyEditPage() {
       name: form.name.trim(),
       type: form.type,
       enabled: form.enabled,
-      object_prefix: form.objectPrefix.trim(),
       path_template: form.pathTemplate.trim(),
       conflict_policy: form.conflictPolicy,
       config: { endpoint: form.endpoint.trim() },
@@ -794,18 +788,6 @@ export default function AdminPolicyEditPage() {
                   {t('adminPolicies.edit.field.enabledHint')}
                 </p>
               </div>
-              <FormField
-                id="policy-object-prefix"
-                label={t('adminPolicies.edit.field.objectPrefix')}
-                hint={t('adminPolicies.edit.field.objectPrefixHint')}
-              >
-                <Input
-                  id="policy-object-prefix"
-                  value={form.objectPrefix}
-                  onChange={(event) => updateForm({ objectPrefix: event.target.value })}
-                  placeholder={t('adminPolicies.edit.field.objectPrefixPlaceholder')}
-                />
-              </FormField>
             </div>
           </PolicySection>
         </TabsContent>

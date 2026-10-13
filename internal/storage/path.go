@@ -218,27 +218,27 @@ func ValidateTemplate(template string) error {
 	return nil
 }
 
-// ValidatePrefix 校验对象前缀: 不允许绝对路径, 空段, "." 与 ".." 段.
+// ValidatePrefix 校验路径前缀: 不允许绝对路径, 空段, "." 与 ".." 段.
 func ValidatePrefix(prefix string) error {
 	trimmed := strings.TrimSpace(prefix)
 	if trimmed == "" {
 		return nil
 	}
 	if strings.HasPrefix(trimmed, "/") {
-		return errors.New("对象前缀不能以 / 开头")
+		return errors.New("路径前缀不能以 / 开头")
 	}
 	if strings.Contains(trimmed, "//") {
-		return errors.New("对象前缀不能包含连续斜杠")
+		return errors.New("路径前缀不能包含连续斜杠")
 	}
 	if len(trimmed) > maxPathLen {
-		return fmt.Errorf("对象前缀超过 %d 字符", maxPathLen)
+		return fmt.Errorf("路径前缀超过 %d 字符", maxPathLen)
 	}
 	for _, segment := range strings.Split(trimmed, "/") {
 		if segment == "" {
-			return errors.New("对象前缀不能包含空路径段")
+			return errors.New("路径前缀不能包含空路径段")
 		}
 		if segment == "." || segment == ".." {
-			return fmt.Errorf("对象前缀不能包含 %q 段", segment)
+			return fmt.Errorf("路径前缀不能包含 %q 段", segment)
 		}
 		if len(segment) > maxPathSegmentLen {
 			return fmt.Errorf("前缀路径段超过 %d 字符: %s", maxPathSegmentLen, segment)

@@ -201,7 +201,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	)
 resolved:
 	for attempt := 0; ; attempt++ {
-		objectKey = storage.NormalizeObjectKey(policy.ObjectPrefix, relPath)
+		objectKey = storage.NormalizeObjectKey("", relPath)
 		conflictRecord, err := u.recordForKey(policy.ID, objectKey)
 		if err != nil {
 			return nil, err

@@ -58,7 +58,7 @@ export const adminPolicies = {
     titleEdit: '编辑存储策略: {{name}}',
     descriptionNew: '新建时预填系统设置中的默认魔法路径与默认冲突策略; 后端类型创建后不可修改。',
     descriptionEdit:
-      '修改分发域名或魔法路径后, 请用页面底部的对照表核对对象前缀与域名路径是否指向同一对象。',
+      '修改分发域名或魔法路径后, 请用页面底部的对照表核对对象键与域名路径是否指向同一对象。',
     back: '返回列表',
     loadFailed: '存储策略加载失败',
     invalidId: '策略 ID 无效',
@@ -81,7 +81,7 @@ export const adminPolicies = {
       scan: '扫描补录',
       scanHint: '递归列举存储路径下的文件入库 (幂等); 已入库路径会跳过。',
       reference: '对象键与域名 URL 对照表',
-      referenceHint: '用于核对对象前缀与各分发域名路径是否指向同一对象。',
+      referenceHint: '用于核对对象键与各分发域名路径是否指向同一对象。',
     },
 
     field: {
@@ -93,9 +93,6 @@ export const adminPolicies = {
       enabledHint: '禁用后不再对用户可见; 已存在记录的直链不受影响。',
       sort: '排序',
       sortHint: '数字越小越靠前。',
-      objectPrefix: '对象前缀',
-      objectPrefixPlaceholder: 'image',
-      objectPrefixHint: '对象键的固定前缀, 例如 image; 留空表示写在服务根目录。',
       endpoint: '服务地址 (endpoint)',
       endpointPlaceholder: 'https://127.0.0.1:5244/dav',
       endpointHint: 'WebDAV 服务地址, 需包含路径部分。',
@@ -108,7 +105,7 @@ export const adminPolicies = {
       pathTemplatePlaceholder: '{md5:2}/{md5}.{ext}',
       conflictPolicy: '冲突策略',
       scanPath: '扫描路径',
-      scanPathOptional: '可选; 留空表示从对象前缀开始扫描。',
+      scanPathOptional: '可选; 留空表示从存储根目录开始扫描。',
       dryRun: '仅试运行 (dry run)',
       dryRunHint: '只统计数量与失败明细, 不写入数据库。',
     },

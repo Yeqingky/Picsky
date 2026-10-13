@@ -82,7 +82,6 @@ type StoragePolicy struct {
 	Name           string    `gorm:"size:64;not null;uniqueIndex" json:"name"`
 	Type           string    `gorm:"size:32;not null" json:"type"`
 	Enabled        bool      `gorm:"not null" json:"enabled"`
-	ObjectPrefix   string    `gorm:"size:255;not null;default:''" json:"object_prefix"`
 	PathTemplate   string    `gorm:"size:255;not null" json:"path_template"`
 	ConflictPolicy string    `gorm:"size:16;not null;default:'rename'" json:"conflict_policy"`
 	Config         string    `gorm:"type:text;not null;default:'{}'" json:"config"`

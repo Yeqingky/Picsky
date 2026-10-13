@@ -254,7 +254,6 @@ func (s *server) bootstrap() (*http.Cookie, int64) {
 		"name":            "主存储",
 		"type":            "webdav",
 		"enabled":         true,
-		"object_prefix":   "image",
 		"path_template":   "{md5:2}/{md5}.{ext}",
 		"conflict_policy": "rename",
 		"config":          map[string]string{"endpoint": s.svc.Cfg.DBDSN},
@@ -626,14 +625,13 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 
 	preview := s.json(http.MethodPost, "/api/v1/admin/policies/preview", map[string]any{
 		"path_template": "{md5:2}/{md5}.{ext}",
-		"object_prefix": "image",
 		"policy_id":     policyID,
 	}, []*http.Cookie{cookie})
 	if preview.Status != http.StatusOK {
 		t.Fatalf("预览失败: %d %s", preview.Status, string(preview.Body))
 	}
 	previewPayload := s.decode(preview)
-	if previewPayload["object_key"] != "image/0f/0f1e2d3c4b5a69788796a5b4c3d2e1f0.png" {
+	if previewPayload["object_key"] != "0f/0f1e2d3c4b5a69788796a5b4c3d2e1f0.png" {
 		t.Errorf("预览对象键不正确: %v", previewPayload["object_key"])
 	}
 

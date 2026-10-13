@@ -339,7 +339,6 @@ export interface AdminPolicy {
   name: string;
   type: string;
   enabled: boolean;
-  object_prefix: string;
   path_template: string;
   conflict_policy: ConflictPolicy;
   config: {
@@ -366,7 +365,6 @@ export interface AdminPolicyWriteRequest {
   name: string;
   type: string;
   enabled: boolean;
-  object_prefix: string;
   path_template: string;
   conflict_policy: ConflictPolicy;
   config: Record<string, unknown>;
@@ -399,7 +397,6 @@ export interface PolicyScanResult {
 
 export interface PolicyPreviewRequest {
   path_template: string;
-  object_prefix?: string;
   md5?: string;
   sha256?: string;
   sha512?: string;

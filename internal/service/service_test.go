@@ -131,17 +131,11 @@ func (f *fixture) davEndpoint() string { return f.cfg.DBDSN }
 
 // createPolicy 创建策略并返回.
 func (f *fixture) createPolicy(name, template, conflict string) *model.StoragePolicy {
-	return f.createPolicyWithPrefix(name, template, conflict, "image")
-}
-
-// createPolicyWithPrefix 创建指定对象前缀的策略.
-func (f *fixture) createPolicyWithPrefix(name, template, conflict, prefix string) *model.StoragePolicy {
 	f.t.Helper()
 	policy, err := f.svc.Policies.Create(service.PolicyInput{
 		Name:           name,
 		Type:           "webdav",
 		Enabled:        new(true),
-		ObjectPrefix:   prefix,
 		PathTemplate:   template,
 		ConflictPolicy: conflict,
 		Config:         map[string]string{"endpoint": f.davEndpoint()},
@@ -272,8 +266,8 @@ func TestUploadDedupAndQuota(t *testing.T) {
 	if !strings.HasPrefix(record.RelPath, record.MD5[:2]+"/") || !strings.HasSuffix(record.RelPath, ".png") {
 		t.Errorf("魔法路径渲染不符合模板: %q", record.RelPath)
 	}
-	if record.ObjectKey != "image/"+record.RelPath {
-		t.Errorf("对象键未加前缀: %q", record.ObjectKey)
+	if record.ObjectKey != record.RelPath {
+		t.Errorf("对象键应等于相对路径: %q", record.ObjectKey)
 	}
 	if record.URL != "https://cdn.example.com/image/"+record.RelPath {
 		t.Errorf("默认分发域名拼接不正确: %q", record.URL)
@@ -343,7 +337,7 @@ func TestCrossUserReuseIsFree(t *testing.T) {
 	if alice.UsedImages != 0 || alice.UsedBytes != 0 {
 		t.Errorf("复用记录不应占用配额: images=%d bytes=%d", alice.UsedImages, alice.UsedBytes)
 	}
-	entries, err := os.ReadDir(filepath.Join(f.davRoot, "image"))
+	entries, err := os.ReadDir(f.davRoot)
 	if err != nil {
 		t.Fatalf("读取存储目录失败: %v", err)
 	}
@@ -487,7 +481,7 @@ func TestConflictFailAndSkip(t *testing.T) {
 		t.Errorf("冲突错误不正确: %v", err)
 	}
 
-	skipPolicy := f.createPolicyWithPrefix("冲突跳过", "{ext}/{sha256:1}.{ext}", model.ConflictSkip, "skip")
+	skipPolicy := f.createPolicy("冲突跳过", "{ext}/skip/{sha256:1}.{ext}", model.ConflictSkip)
 	skipFirst := f.mustUpload(f.admin, &skipPolicy.ID, "c.png", first)
 	_ = skipFirst
 	if _, err := f.upload(f.admin, &skipPolicy.ID, "d.png", second); err == nil {
@@ -719,14 +713,14 @@ func TestScanBackfill(t *testing.T) {
 	policy := f.createPolicy("主存储", "{md5:2}/{md5}.{ext}", model.ConflictRename)
 
 	imageContent := pngBytes(t, 81, 5, 5)
-	imagePath := filepath.Join(f.davRoot, "image", "0a", "existing.png")
+	imagePath := filepath.Join(f.davRoot, "0a", "existing.png")
 	if err := os.MkdirAll(filepath.Dir(imagePath), 0o755); err != nil {
 		t.Fatalf("准备目录失败: %v", err)
 	}
 	if err := os.WriteFile(imagePath, imageContent, 0o600); err != nil {
 		t.Fatalf("准备图片失败: %v", err)
 	}
-	textPath := filepath.Join(f.davRoot, "image", "0a", "notes.txt")
+	textPath := filepath.Join(f.davRoot, "0a", "notes.txt")
 	if err := os.WriteFile(textPath, []byte("plain notes"), 0o600); err != nil {
 		t.Fatalf("准备文本失败: %v", err)
 	}
@@ -751,7 +745,7 @@ func TestScanBackfill(t *testing.T) {
 		if record.QuotaCharged || record.Source != model.SourceScan {
 			t.Errorf("扫描记录不应计费且来源为 scan: %+v", record)
 		}
-		if record.ObjectKey == "image/0a/existing.png" {
+		if record.ObjectKey == "0a/existing.png" {
 			foundImage = true
 			sum := sha256.Sum256(imageContent)
 			if record.SHA256 != hex.EncodeToString(sum[:]) {
@@ -761,7 +755,7 @@ func TestScanBackfill(t *testing.T) {
 				t.Errorf("扫描记录的 URL 拼接不正确: %q", record.URL)
 			}
 		}
-		if record.ObjectKey == "image/0a/notes.txt" {
+		if record.ObjectKey == "0a/notes.txt" {
 			foundFile = true
 			if record.Kind != model.KindFile {
 				t.Errorf("非图片补录记录 kind 应为 file: %q", record.Kind)
@@ -793,7 +787,6 @@ func TestPathPreviewMatchesUpload(t *testing.T) {
 	f := newFixture(t)
 	preview, err := f.svc.Policies.Preview(service.PreviewInput{
 		PathTemplate: "{md5:2}/{md5}.{ext}",
-		ObjectPrefix: "image",
 	})
 	if err != nil {
 		t.Fatalf("预览失败: %v", err)
@@ -801,7 +794,7 @@ func TestPathPreviewMatchesUpload(t *testing.T) {
 	if preview.RelPath != "0f/0f1e2d3c4b5a69788796a5b4c3d2e1f0.png" {
 		t.Errorf("预览 rel_path 不正确: %q", preview.RelPath)
 	}
-	if preview.ObjectKey != "image/0f/0f1e2d3c4b5a69788796a5b4c3d2e1f0.png" {
+	if preview.ObjectKey != "0f/0f1e2d3c4b5a69788796a5b4c3d2e1f0.png" {
 		t.Errorf("预览 object_key 不正确: %q", preview.ObjectKey)
 	}
 
@@ -902,7 +895,7 @@ func TestTaskQueueScanAndPurge(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)
 
-	imagePath := filepath.Join(f.davRoot, "image", "queued.png")
+	imagePath := filepath.Join(f.davRoot, "queued.png")
 	if err := os.MkdirAll(filepath.Dir(imagePath), 0o755); err != nil {
 		t.Fatalf("准备目录失败: %v", err)
 	}
@@ -926,7 +919,7 @@ func TestTaskQueueScanAndPurge(t *testing.T) {
 	}
 
 	var scanned int64
-	if err := f.database.Model(&model.Image{}).Where("policy_id = ? AND object_key = ?", policy.ID, "image/queued.png").Count(&scanned).Error; err != nil {
+	if err := f.database.Model(&model.Image{}).Where("policy_id = ? AND object_key = ?", policy.ID, "queued.png").Count(&scanned).Error; err != nil {
 		t.Fatalf("统计失败: %v", err)
 	}
 	if scanned != 1 {
@@ -1139,24 +1132,10 @@ func TestUploadRejectsTruncatedContent(t *testing.T) {
 	}
 }
 
-func TestPolicyRejectsUnsafeObjectPrefix(t *testing.T) {
+func TestScanRejectsUnsafeSubPath(t *testing.T) {
 	f := newFixture(t)
-	for _, prefix := range []string{"../shared", "/absolute", "a/../b", "a/./b", "a//b", "a/"} {
-		_, err := f.svc.Policies.Create(service.PolicyInput{
-			Name:           "非法前缀",
-			Type:           "webdav",
-			ObjectPrefix:   prefix,
-			PathTemplate:   "{md5}.{ext}",
-			ConflictPolicy: model.ConflictRename,
-			Config:         map[string]string{"endpoint": f.davEndpoint()},
-			URLs:           []service.URLInput{{Alias: "CDN", URL: "https://cdn.example.com/", IsDefault: true}},
-		}, f.admin, "127.0.0.1", "test-agent")
-		if err == nil {
-			t.Errorf("对象前缀 %q 应被拒绝", prefix)
-		}
-	}
-
-	if _, err := f.svc.Policies.Scan(context.Background(), 1, f.admin.User.ID, new("../etc"), false); err == nil {
+	policy := f.createPolicy("扫描校验", "{md5}.{ext}", model.ConflictRename)
+	if _, err := f.svc.Policies.Scan(context.Background(), policy.ID, f.admin.User.ID, new("../etc"), false); err == nil {
 		t.Error("扫描子路径包含 .. 时应被拒绝")
 	}
 }
@@ -1238,7 +1217,7 @@ func TestConcurrentSameContentChargedOnce(t *testing.T) {
 
 	var charged int64
 	if err := f.database.Model(&model.Image{}).
-		Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL AND quota_charged = ?", policy.ID, "image/"+md5RelPath(content), true).
+		Where("policy_id = ? AND object_key = ? AND deleted_at IS NULL AND quota_charged = ?", policy.ID, md5RelPath(content), true).
 		Count(&charged).Error; err != nil {
 		t.Fatalf("统计失败: %v", err)
 	}
@@ -1338,7 +1317,7 @@ func TestDanglingDefaultPolicyFallsBack(t *testing.T) {
 	f.authorize(mainPolicy.ID)
 	alice := f.register("alice")
 
-	temporary := f.createPolicyWithPrefix("临时策略", "{md5}.{ext}", model.ConflictRename, "tmp")
+	temporary := f.createPolicy("临时策略", "{md5}.{ext}", model.ConflictRename)
 	defaultPolicyID := temporary.ID
 	if _, err := f.svc.Users.Update(alice.User.ID, service.UserInput{
 		DefaultPolicyID: &defaultPolicyID,

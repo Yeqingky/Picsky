@@ -61,7 +61,6 @@ type PolicyInput struct {
 	Name           string            `json:"name"`
 	Type           string            `json:"type"`
 	Enabled        *bool             `json:"enabled"`
-	ObjectPrefix   string            `json:"object_prefix"`
 	PathTemplate   string            `json:"path_template"`
 	ConflictPolicy string            `json:"conflict_policy"`
 	Config         map[string]string `json:"config"`
@@ -312,11 +311,6 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 			return apperr.ErrInvalidRequest.WithMessage("缺少必填后端配置: " + field.Label)
 		}
 	}
-	if err := storage.ValidatePrefix(in.ObjectPrefix); err != nil {
-		return apperr.ErrInvalidRequest.WithMessage(err.Error())
-	}
-	in.ObjectPrefix = storage.NormalizeObjectKey(in.ObjectPrefix, "")
-
 	if len(in.URLs) == 0 {
 		return apperr.ErrInvalidRequest.WithMessage("至少配置一个分发域名")
 	}
@@ -378,7 +372,6 @@ func (p *Policies) Create(in PolicyInput, actor *Principal, ip, userAgent string
 		Name:           in.Name,
 		Type:           in.Type,
 		Enabled:        enabled,
-		ObjectPrefix:   in.ObjectPrefix,
 		PathTemplate:   in.PathTemplate,
 		ConflictPolicy: in.ConflictPolicy,
 		Config:         string(configJSON),
@@ -492,7 +485,6 @@ func (p *Policies) Update(id int64, in PolicyInput, actor *Principal, ip, userAg
 		"name":            in.Name,
 		"type":            in.Type,
 		"enabled":         enabled,
-		"object_prefix":   in.ObjectPrefix,
 		"path_template":   in.PathTemplate,
 		"conflict_policy": in.ConflictPolicy,
 		"config":          string(configJSON),
@@ -577,7 +569,7 @@ func (p *Policies) Test(ctx context.Context, id int64) (time.Duration, error) {
 		return 0, err
 	}
 	start := time.Now()
-	if err := adapter.Test(ctx, policy.ObjectPrefix); err != nil {
+	if err := adapter.Test(ctx, ""); err != nil {
 		return time.Since(start), apperr.ErrBackend.WithMessage(err.Error())
 	}
 	return time.Since(start), nil
@@ -586,7 +578,6 @@ func (p *Policies) Test(ctx context.Context, id int64) (time.Duration, error) {
 // PreviewInput 是路径预览入参.
 type PreviewInput struct {
 	PathTemplate string  `json:"path_template"`
-	ObjectPrefix string  `json:"object_prefix"`
 	MD5          *string `json:"md5"`
 	SHA256       *string `json:"sha256"`
 	SHA512       *string `json:"sha512"`
@@ -620,9 +611,6 @@ func (p *Policies) Preview(in PreviewInput) (*PreviewResult, error) {
 		if template == "" {
 			template = policy.PathTemplate
 		}
-		if in.ObjectPrefix == "" {
-			in.ObjectPrefix = policy.ObjectPrefix
-		}
 		urls, err = p.URLs(policy.ID)
 		if err != nil {
 			return nil, err
@@ -654,7 +642,7 @@ func (p *Policies) Preview(in PreviewInput) (*PreviewResult, error) {
 	if err != nil {
 		return nil, apperr.ErrInvalidRequest.WithMessage(err.Error())
 	}
-	objectKey := storage.NormalizeObjectKey(in.ObjectPrefix, relPath)
+	objectKey := storage.NormalizeObjectKey("", relPath)
 	result := &PreviewResult{RelPath: relPath, ObjectKey: objectKey, URLs: []PreviewURLItem{}}
 	for _, url := range urls {
 		result.URLs = append(result.URLs, PreviewURLItem{
@@ -695,12 +683,12 @@ func (p *Policies) Scan(ctx context.Context, policyID int64, ownerID int64, subP
 		return nil, apperr.ErrInvalidRequest.WithMessage("该存储后端不支持列举与读取能力, 无法扫描补录")
 	}
 
-	prefix := policy.ObjectPrefix
+	prefix := ""
 	if subPath != nil && strings.TrimSpace(*subPath) != "" {
 		if err := storage.ValidatePrefix(*subPath); err != nil {
 			return nil, apperr.ErrInvalidRequest.WithMessage(err.Error())
 		}
-		prefix = storage.NormalizeObjectKey(policy.ObjectPrefix, strings.TrimSpace(*subPath))
+		prefix = storage.NormalizeObjectKey("", strings.TrimSpace(*subPath))
 	}
 	objects, err := adapter.List(ctx, prefix)
 	if err != nil {
@@ -806,9 +794,6 @@ func (p *Policies) scanObject(ctx context.Context, adapter storage.Adapter, poli
 		kind = model.KindImage
 	}
 	relPath := key
-	if policy.ObjectPrefix != "" {
-		relPath = strings.TrimPrefix(strings.TrimPrefix(key, strings.Trim(policy.ObjectPrefix, "/")), "/")
-	}
 	ext := ExtensionOf(key)
 	if ext == "" {
 		ext = detected.Ext
