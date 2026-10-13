@@ -132,9 +132,16 @@ const CONFLICT_POLICIES = ['rename', 'skip', 'overwrite', 'fail'] as const;
 const GROUP_UNSET = 'unset';
 
 const TAB_ICON_CLASS = 'size-4 shrink-0';
+/** 控件按字段内容限宽, 小屏仍占满可用宽度 */
+const SETTING_FIELD_WIDTH = {
+  compact: 'w-full sm:max-w-[10rem]',
+  short: 'w-full sm:max-w-xs',
+  medium: 'w-full sm:max-w-sm',
+  wide: 'w-full sm:max-w-lg',
+} as const;
 
 /** 面板容器: 单列窄栏 */
-const TAB_PANEL_CLASS = 'mt-6 flex max-w-3xl flex-col gap-5';
+const TAB_PANEL_CLASS = 'mt-6 flex max-w-2xl flex-col gap-5';
 
 /**
  * 顶部标签页: 每个标签对应一组设置项, 布局是单列窄栏;
@@ -233,6 +240,7 @@ function Field({
   label,
   hint,
   error,
+  className,
   children,
 }: {
   id: string;
@@ -240,10 +248,11 @@ function Field({
   hint?: ReactNode;
   error?: string;
   children: ReactNode;
+  className?: string;
 }) {
   const message = error ?? hint;
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className={cn('flex flex-col gap-1.5', className)}>
       <Label htmlFor={id}>{label}</Label>
       {children}
       {message !== undefined && (
@@ -291,6 +300,7 @@ function SecretField({
   isSet,
   onChange,
   onClear,
+  className,
 }: {
   id: string;
   label: string;
@@ -299,11 +309,12 @@ function SecretField({
   isSet: boolean;
   onChange: (next: string) => void;
   onClear: () => void;
+  className?: string;
 }) {
   const { t } = useTranslation();
   const clearLabel = t('adminSystem.settings.clearSecret');
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className={cn('flex flex-col gap-1.5', className)}>
       <Label htmlFor={id}>{label}</Label>
       <div className="flex items-center gap-1.5">
         <Input
@@ -351,7 +362,7 @@ function SettingsSkeleton() {
           <Skeleton key={tab.id} className="h-9 w-24 rounded-sm" />
         ))}
       </div>
-      <div className="mt-6 max-w-3xl">
+      <div className="mt-6 max-w-2xl">
         <FormSkeleton fields={6} />
       </div>
     </SkeletonSurface>
@@ -571,7 +582,11 @@ export default function AdminSettingsPage() {
         </TabsList>
 
         <TabsContent value="site" className={TAB_PANEL_CLASS}>
-          <Field id="setting-site-name" label={t('adminSystem.settings.field.siteName')}>
+          <Field
+            id="setting-site-name"
+            label={t('adminSystem.settings.field.siteName')}
+            className={SETTING_FIELD_WIDTH.short}
+          >
             <Input
               id="setting-site-name"
               value={draft.site_name}
@@ -581,6 +596,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-site-url"
             label={t('adminSystem.settings.field.siteUrl')}
+            className={SETTING_FIELD_WIDTH.wide}
             hint={t('adminSystem.settings.field.siteUrlHint')}
             error={errors.site_url}
           >
@@ -595,6 +611,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-timezone"
             label={t('adminSystem.settings.field.timezone')}
+            className={SETTING_FIELD_WIDTH.short}
             hint={t('adminSystem.settings.field.timezoneHint')}
           >
             <Select value={draft.timezone} onValueChange={(value) => setField('timezone', value)}>
@@ -631,6 +648,7 @@ export default function AdminSettingsPage() {
             <Field
               id="setting-default-group"
               label={t('adminSystem.settings.field.defaultGroup')}
+              className={SETTING_FIELD_WIDTH.medium}
               hint={
                 groupsQuery.error instanceof Error
                   ? groupsQuery.error.message
@@ -649,6 +667,7 @@ export default function AdminSettingsPage() {
             <Field
               id="setting-default-group"
               label={t('adminSystem.settings.field.defaultGroup')}
+              className={SETTING_FIELD_WIDTH.medium}
               hint={t('adminSystem.settings.field.defaultGroupHint')}
               error={errors.default_group_id}
             >
@@ -687,6 +706,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-captcha-provider"
             label={t('adminSystem.settings.field.captchaProvider')}
+            className={SETTING_FIELD_WIDTH.short}
           >
             <Select
               value={draft.captcha_provider}
@@ -704,41 +724,54 @@ export default function AdminSettingsPage() {
               </SelectContent>
             </Select>
           </Field>
-          <Field
-            id="setting-captcha-site-key"
-            label={t('adminSystem.settings.field.captchaSiteKey')}
-            hint={t('adminSystem.settings.field.captchaSiteKeyHint')}
-          >
-            <Input
-              id="setting-captcha-site-key"
-              value={draft.captcha_site_key}
-              onChange={(event) => setField('captcha_site_key', event.target.value)}
-            />
-          </Field>
-          <Field
-            id="setting-captcha-endpoint"
-            label={t('adminSystem.settings.field.captchaEndpoint')}
-            hint={t('adminSystem.settings.field.captchaEndpointHint')}
-          >
-            <Input
-              id="setting-captcha-endpoint"
-              value={draft.captcha_endpoint}
-              onChange={(event) => setField('captcha_endpoint', event.target.value)}
-            />
-          </Field>
-          <SecretField
-            id="setting-captcha-secret"
-            label={t('adminSystem.settings.field.captchaSecret')}
-            hint={t('adminSystem.settings.field.captchaSecretHint')}
-            value={draft.captcha_secret}
-            isSet={secretIsSet('captcha_secret')}
-            onChange={(next) => setSecretField('captcha_secret', next)}
-            onClear={() => setSecretField('captcha_secret', '')}
-          />
+          {draft.captcha_provider !== 'none' && (
+            <>
+              <Field
+                id="setting-captcha-site-key"
+                label={t('adminSystem.settings.field.captchaSiteKey')}
+                className={SETTING_FIELD_WIDTH.wide}
+                hint={t('adminSystem.settings.field.captchaSiteKeyHint')}
+              >
+                <Input
+                  id="setting-captcha-site-key"
+                  value={draft.captcha_site_key}
+                  onChange={(event) => setField('captcha_site_key', event.target.value)}
+                />
+              </Field>
+              {draft.captcha_provider === 'cap' && (
+                <Field
+                  id="setting-captcha-endpoint"
+                  label={t('adminSystem.settings.field.captchaEndpoint')}
+                  className={SETTING_FIELD_WIDTH.wide}
+                  hint={t('adminSystem.settings.field.captchaEndpointHint')}
+                >
+                  <Input
+                    id="setting-captcha-endpoint"
+                    value={draft.captcha_endpoint}
+                    onChange={(event) => setField('captcha_endpoint', event.target.value)}
+                  />
+                </Field>
+              )}
+              <SecretField
+                id="setting-captcha-secret"
+                label={t('adminSystem.settings.field.captchaSecret')}
+                hint={t('adminSystem.settings.field.captchaSecretHint')}
+                value={draft.captcha_secret}
+                isSet={secretIsSet('captcha_secret')}
+                onChange={(next) => setSecretField('captcha_secret', next)}
+                onClear={() => setSecretField('captcha_secret', '')}
+                className={SETTING_FIELD_WIDTH.medium}
+              />
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="email" className={TAB_PANEL_CLASS}>
-          <Field id="setting-smtp-host" label={t('adminSystem.settings.field.smtpHost')}>
+          <Field
+            id="setting-smtp-host"
+            label={t('adminSystem.settings.field.smtpHost')}
+            className={SETTING_FIELD_WIDTH.medium}
+          >
             <Input
               id="setting-smtp-host"
               value={draft.smtp_host}
@@ -748,6 +781,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-smtp-port"
             label={t('adminSystem.settings.field.smtpPort')}
+            className={SETTING_FIELD_WIDTH.compact}
             error={errors.smtp_port}
           >
             <Input
@@ -757,7 +791,11 @@ export default function AdminSettingsPage() {
               onChange={(event) => setField('smtp_port', event.target.value)}
             />
           </Field>
-          <Field id="setting-smtp-username" label={t('adminSystem.settings.field.smtpUsername')}>
+          <Field
+            id="setting-smtp-username"
+            label={t('adminSystem.settings.field.smtpUsername')}
+            className={SETTING_FIELD_WIDTH.medium}
+          >
             <Input
               id="setting-smtp-username"
               value={draft.smtp_username}
@@ -767,6 +805,7 @@ export default function AdminSettingsPage() {
           <SecretField
             id="setting-smtp-password"
             label={t('adminSystem.settings.field.smtpPassword')}
+            className={SETTING_FIELD_WIDTH.medium}
             hint={t('adminSystem.settings.field.smtpPasswordHint')}
             value={draft.smtp_password}
             isSet={secretIsSet('smtp_password')}
@@ -776,6 +815,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-smtp-from"
             label={t('adminSystem.settings.field.smtpFrom')}
+            className={SETTING_FIELD_WIDTH.medium}
             hint={t('adminSystem.settings.field.smtpFromHint')}
           >
             <Input
@@ -787,6 +827,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-smtp-encryption"
             label={t('adminSystem.settings.field.smtpEncryption')}
+            className={SETTING_FIELD_WIDTH.short}
           >
             <Select
               value={draft.smtp_encryption}
@@ -810,6 +851,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-allowed-formats"
             label={t('adminSystem.settings.field.allowedFormats')}
+            className={SETTING_FIELD_WIDTH.wide}
             hint={
               formatTokens.length > 0
                 ? t('adminSystem.settings.field.allowedFormatsPreview', {
@@ -830,6 +872,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-max-file-size"
             label={t('adminSystem.settings.field.maxFileSize')}
+            className={SETTING_FIELD_WIDTH.compact}
             hint={
               maxFileSize !== null
                 ? t('adminSystem.settings.field.maxFileSizeHint', {
@@ -856,6 +899,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-conflict-policy"
             label={t('adminSystem.settings.field.conflictPolicy')}
+            className={SETTING_FIELD_WIDTH.short}
           >
             <Select
               value={draft.default_conflict_policy}
@@ -876,6 +920,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-path-template"
             label={t('adminSystem.settings.field.pathTemplate')}
+            className={SETTING_FIELD_WIDTH.wide}
             hint={t('adminSystem.settings.field.pathTemplateHint')}
             error={errors.default_path_template}
           >
@@ -898,6 +943,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-gallery-page-size"
             label={t('adminSystem.settings.field.galleryPageSize')}
+            className={SETTING_FIELD_WIDTH.compact}
             error={errors.gallery_page_size}
           >
             <Input
@@ -910,6 +956,7 @@ export default function AdminSettingsPage() {
           <Field
             id="setting-log-retention"
             label={t('adminSystem.settings.field.logRetention')}
+            className={SETTING_FIELD_WIDTH.compact}
             error={errors.log_retention_days}
           >
             <Input
