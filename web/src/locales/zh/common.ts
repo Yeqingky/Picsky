@@ -87,16 +87,10 @@ export const common = {
   },
 
   quota: {
-    title: '配额',
     modeCount: '图片数量',
     modeBytes: '存储空间',
     unlimited: '不限',
     unset: '未设置',
-    inherit: '继承上级',
-    used: '已用',
-    limit: '上限',
-    remaining: '剩余',
-    override: '用户级覆盖',
     empty: '不限',
   },
 

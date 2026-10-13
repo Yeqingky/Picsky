@@ -71,20 +71,26 @@ var steps = map[int]func(*gorm.DB) error{
 	},
 }
 
+// defaultUploadRateLimit 是初始化阶段写入默认用户组的上传速率 (次/分钟):
+// 该限额原先由系统设置承载, 现在随用户组参数一起落库.
+const defaultUploadRateLimit = 60
+
 // seed 写入默认用户组与系统设置默认值.
 func seed(db *gorm.DB) error {
 	admin := model.Group{
-		Name:        "管理员",
-		Description: "全部权限",
-		Permissions: model.AllPermissions(),
-		Sort:        0,
+		Name:            "管理员",
+		Description:     "全部权限",
+		Permissions:     model.AllPermissions(),
+		UploadRateLimit: new(defaultUploadRateLimit),
+		Sort:            0,
 	}
 	normal := model.Group{
-		Name:        "普通用户",
-		Description: "常规用户",
-		IsDefault:   true,
-		Permissions: model.PermUpload | model.PermDeleteOwn | model.PermManageKeys,
-		Sort:        1,
+		Name:            "普通用户",
+		Description:     "常规用户",
+		IsDefault:       true,
+		Permissions:     model.PermUpload | model.PermDeleteOwn | model.PermManageKeys,
+		UploadRateLimit: new(defaultUploadRateLimit),
+		Sort:            1,
 	}
 	readonly := model.Group{
 		Name:        "只读",

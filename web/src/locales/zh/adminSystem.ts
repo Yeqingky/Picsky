@@ -2,7 +2,7 @@
 export const adminSystem = {
   settings: {
     title: '系统设置',
-    description: '站点信息、注册与人机验证、邮件发送、配额默认值与维护策略',
+    description: '站点信息、注册与人机验证、邮件发送、上传限制与维护策略',
     saved: '设置已保存',
     resetDone: '已恢复到最近保存的设置',
     invalidForm: '请先修正表单中标红的字段',
@@ -17,7 +17,7 @@ export const adminSystem = {
       register: '注册',
       captcha: '人机验证',
       email: '邮箱',
-      quota: '配额默认',
+      quota: '格式与大小',
       other: '其他',
     },
 
@@ -48,18 +48,11 @@ export const adminSystem = {
       smtpFrom: '发件人地址',
       smtpFromHint: '例如 Picsky <no-reply@example.com>',
       smtpEncryption: '加密方式',
-      quotaMode: '默认配额方式',
-      quotaModeHint: '留空表示不限; 用户组可覆盖此默认值',
-      quotaValue: '默认配额数值',
-      quotaValueCount: '单位: 图片数量',
-      quotaValueBytes: '单位: 字节',
       allowedFormats: '允许的格式基线',
       allowedFormatsHint: '以逗号分隔, 例如 png,jpg,webp; 系统禁止 SVG',
       allowedFormatsPreview: '共 {{count}} 种: {{formats}}',
       maxFileSize: '单文件上限 (字节)',
       maxFileSizeHint: '当前 {{size}}; 可被用户组覆盖',
-      uploadRateLimit: '上传频率上限 (次/分钟)',
-      uploadRateLimitHint: '0 表示不限',
       conflictPolicy: '默认冲突策略',
       pathTemplate: '默认路径模板',
       pathTemplateHint: '新建存储策略时预填; 必须包含内容哈希变量 ({md5} / {sha256} / {sha512})',
@@ -75,7 +68,6 @@ export const adminSystem = {
       port: '端口需为 1-65535 之间的整数',
       positive: '请输入大于 0 的整数',
       nonNegative: '请输入不小于 0 的整数',
-      quotaValueRequired: '请填写默认配额数值',
       formatsRequired: '至少保留一种格式',
       formatsSvg: '系统禁止 SVG 格式',
       formatsToken: '格式仅可包含字母与数字, 请以逗号分隔',
@@ -137,11 +129,6 @@ export const adminSystem = {
   },
 
   options: {
-    quotaMode: {
-      unlimited: '不限',
-      count: '图片数量',
-      bytes: '存储空间',
-    },
     captcha: {
       none: '关闭',
       cap: 'Cap',

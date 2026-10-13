@@ -59,8 +59,8 @@ const FORMAT_OPTIONS = [
   'heic',
 ] as const;
 
-/** Radix Select 不支持空字符串值, 用哨兵表示 "继承系统默认" */
-const QUOTA_INHERIT = '__inherit__';
+/** Radix Select 不支持空字符串值, 用哨兵表示 "不限" */
+const QUOTA_UNLIMITED = '__unlimited__';
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
 
@@ -202,7 +202,9 @@ export default function AdminGroupsPage() {
       className: 'w-[180px]',
       cell: (row) => {
         if (row.quota_mode === null || row.quota_value === null) {
-          return <span className="text-muted-foreground text-sm">{t('admin.groups.inherit')}</span>;
+          return (
+            <span className="text-muted-foreground text-sm">{t('admin.groups.unlimited')}</span>
+          );
         }
         return (
           <span className="text-sm">
@@ -243,11 +245,9 @@ export default function AdminGroupsPage() {
       className: 'w-[140px]',
       cell: (row) => (
         <span className={cn('text-sm', row.upload_rate_limit === null && 'text-muted-foreground')}>
-          {row.upload_rate_limit === null
-            ? t('admin.groups.inherit')
-            : row.upload_rate_limit === 0
-              ? t('admin.groups.unlimited')
-              : t('admin.groups.perMinute', { count: formatNumber(row.upload_rate_limit) })}
+          {row.upload_rate_limit === null || row.upload_rate_limit === 0
+            ? t('admin.groups.unlimited')
+            : t('admin.groups.perMinute', { count: formatNumber(row.upload_rate_limit) })}
         </span>
       ),
     },
@@ -593,16 +593,16 @@ function GroupFormDialog({
             <div className="flex flex-1 flex-col gap-1.5">
               <Label htmlFor="admin-group-quota-mode">{t('admin.groups.field.quotaMode')}</Label>
               <Select
-                value={quotaMode === '' ? QUOTA_INHERIT : quotaMode}
+                value={quotaMode === '' ? QUOTA_UNLIMITED : quotaMode}
                 onValueChange={(next) =>
-                  setQuotaMode(next === QUOTA_INHERIT ? '' : (next as QuotaMode))
+                  setQuotaMode(next === QUOTA_UNLIMITED ? '' : (next as QuotaMode))
                 }
               >
                 <SelectTrigger id="admin-group-quota-mode" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={QUOTA_INHERIT}>{t('admin.groups.inherit')}</SelectItem>
+                  <SelectItem value={QUOTA_UNLIMITED}>{t('admin.groups.unlimited')}</SelectItem>
                   <SelectItem value="count">{t('common.quota.modeCount')}</SelectItem>
                   <SelectItem value="bytes">{t('common.quota.modeBytes')}</SelectItem>
                 </SelectContent>

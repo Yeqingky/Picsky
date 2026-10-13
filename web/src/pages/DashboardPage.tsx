@@ -18,7 +18,6 @@ import { useAuth } from '../hooks/useAuth';
 import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import { PageHeader } from '../components/PageHeader';
 import { EmptyState, ErrorState } from '../components/States';
-import { QuotaBar } from '../components/QuotaBar';
 import {
   FormSkeleton,
   ListRowsSkeleton,
@@ -71,25 +70,14 @@ function UsageRing({ percent, label }: { percent: number | null; label: string }
   );
 }
 
-/** 概览数字格: 图标 + 名称 + 数值 + 说明 */
-function StatTile({
-  icon,
-  label,
-  value,
-  hint,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-  hint: string;
-}) {
+/** 概览数字格: 图标 + 名称 + 数值 */
+function StatTile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-start gap-3">
       <span className="text-primary mt-0.5 shrink-0 [&_svg]:size-4">{icon}</span>
       <div className="min-w-0">
         <p className="text-muted-foreground text-xs">{label}</p>
         <p className="font-heading mt-0.5 truncate text-lg font-semibold">{value}</p>
-        <p className="text-muted-foreground mt-0.5 text-xs">{hint}</p>
       </div>
     </div>
   );
@@ -139,22 +127,21 @@ export default function DashboardPage() {
   const quota = user.quota;
   const isByteQuota = quota.mode === 'bytes';
   const formatQuota = (value: number) => (isByteQuota ? formatBytes(value) : formatNumber(value));
-  const percent =
-    quota.limit !== null && quota.limit > 0
-      ? Math.min(100, (quota.used / quota.limit) * 100)
-      : null;
-  const remaining = quota.limit === null ? null : Math.max(0, quota.limit - quota.used);
+  const limit = quota.limit;
+  const percent = limit !== null && limit > 0 ? Math.min(100, (quota.used / limit) * 100) : null;
+  const remaining = limit === null ? null : Math.max(0, limit - quota.used);
+  const storedImages = imagesQuery.data ? formatNumber(imagesQuery.data.total) : '—';
 
-  const usageAmount = remaining === null ? t('common.quota.unlimited') : formatQuota(remaining);
+  // 未设置存储限额时展示已存储的图片数量 (docs/webui.md 第 5 节)
+  const usageValue = remaining === null ? storedImages : formatQuota(remaining);
   const usageSuffix =
-    quota.mode !== null && remaining !== null ? t('dashboard.usage.available') : null;
-  const usageValue = usageSuffix ? `${usageAmount} ${usageSuffix}` : usageAmount;
+    remaining === null ? t('dashboard.usage.imagesUnit') : t('dashboard.usage.available');
   const usageDetail =
     remaining === null
-      ? t('dashboard.usage.detailUnlimited', { used: formatQuota(quota.used) })
+      ? t('dashboard.usage.noQuota')
       : t('dashboard.usage.detail', {
           used: formatQuota(quota.used),
-          total: formatQuota(quota.limit ?? 0),
+          total: formatQuota(limit ?? 0),
         });
 
   const policies = policiesQuery.data ?? [];
@@ -167,24 +154,23 @@ export default function DashboardPage() {
       key: 'assets',
       icon: <Images />,
       label: t('dashboard.stats.assetsLabel'),
-      value: imagesQuery.data ? formatNumber(imagesQuery.data.total) : '—',
-      hint: t('dashboard.stats.assetsHint'),
+      value: storedImages,
     },
-    {
-      key: 'remaining',
-      icon: <HardDrive />,
-      label: t('dashboard.stats.remainingLabel'),
-      value: usageValue,
-      hint: isByteQuota
-        ? t('dashboard.stats.remainingHintBytes')
-        : t('dashboard.stats.remainingHintCount'),
-    },
+    ...(remaining === null
+      ? []
+      : [
+          {
+            key: 'remaining',
+            icon: <HardDrive />,
+            label: t('dashboard.stats.remainingLabel'),
+            value: `${usageValue} ${usageSuffix}`,
+          },
+        ]),
     {
       key: 'policies',
       icon: <Server />,
       label: t('dashboard.stats.policiesLabel'),
       value: policiesQuery.data ? formatNumber(policies.length) : '—',
-      hint: t('dashboard.stats.policiesHint'),
     },
     ...(canManageKeys
       ? [
@@ -193,7 +179,6 @@ export default function DashboardPage() {
             icon: <KeyRound />,
             label: t('dashboard.stats.keysLabel'),
             value: activeKeys === undefined ? '—' : formatNumber(activeKeys),
-            hint: t('dashboard.stats.keysHint'),
           },
         ]
       : []),
@@ -202,14 +187,12 @@ export default function DashboardPage() {
       icon: <Mail />,
       label: t('dashboard.stats.emailLabel'),
       value: user.email_verified ? t('dashboard.stats.verified') : t('dashboard.stats.unverified'),
-      hint: t('dashboard.stats.emailHint'),
     },
     {
       key: 'totp',
       icon: <ShieldCheck />,
       label: t('dashboard.stats.totpLabel'),
       value: user.totp_enabled ? t('dashboard.stats.enabled') : t('dashboard.stats.disabled'),
-      hint: t('dashboard.stats.totpHint'),
     },
   ];
 
@@ -243,24 +226,18 @@ export default function DashboardPage() {
               <CardTitle>{t('dashboard.usage.title')}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col items-center gap-4 sm:flex-row">
-              <UsageRing
-                percent={percent}
-                label={
-                  quota.mode === null
-                    ? t('common.quota.title')
-                    : isByteQuota
-                      ? t('dashboard.usage.ringBytes')
-                      : t('dashboard.usage.ringCount')
-                }
-              />
+              {remaining !== null && (
+                <UsageRing
+                  percent={percent}
+                  label={
+                    isByteQuota ? t('dashboard.usage.ringBytes') : t('dashboard.usage.ringCount')
+                  }
+                />
+              )}
               <div className="min-w-0 self-stretch">
                 <p className="font-heading flex flex-wrap items-baseline gap-x-1.5 text-2xl font-semibold tabular-nums">
-                  <span className="whitespace-nowrap">{usageAmount}</span>
-                  {usageSuffix && (
-                    <span className="text-muted-foreground text-base font-normal">
-                      {usageSuffix}
-                    </span>
-                  )}
+                  <span className="whitespace-nowrap">{usageValue}</span>
+                  <span className="text-muted-foreground text-base font-normal">{usageSuffix}</span>
                 </p>
                 <p className="text-muted-foreground mt-1 text-sm">{usageDetail}</p>
               </div>
@@ -288,7 +265,6 @@ export default function DashboardPage() {
                       icon={tile.icon}
                       label={tile.label}
                       value={tile.value}
-                      hint={tile.hint}
                     />
                   ))}
                 </div>
@@ -347,8 +323,14 @@ export default function DashboardPage() {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between gap-3 [.border-b]:pb-0">
               <CardTitle>{t('dashboard.account.title')}</CardTitle>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/profile">
+                  <User className="size-4" />
+                  {t('dashboard.account.profile')}
+                </Link>
+              </Button>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <InfoRow label={t('dashboard.account.name')}>
@@ -374,24 +356,6 @@ export default function DashboardPage() {
               <InfoRow label={t('dashboard.account.policy')}>
                 {defaultPolicy?.name ?? t('dashboard.account.policyUnset')}
               </InfoRow>
-              <div className="flex min-w-0 flex-col gap-1.5 pt-1">
-                <span className="text-muted-foreground text-xs">
-                  {t('dashboard.account.quota')}
-                </span>
-                {quota.mode === null ? (
-                  <p className="text-sm">{t('common.quota.unlimited')}</p>
-                ) : (
-                  <QuotaBar quota={quota} compact />
-                )}
-              </div>
-              <div>
-                <Button variant="outline" size="sm" asChild>
-                  <Link to="/profile">
-                    <User className="size-4" />
-                    {t('dashboard.account.profile')}
-                  </Link>
-                </Button>
-              </div>
             </CardContent>
           </Card>
         </div>

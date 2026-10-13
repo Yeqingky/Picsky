@@ -58,11 +58,8 @@ const SETTING_KEYS = [
   'smtp_password',
   'smtp_from',
   'smtp_encryption',
-  'default_quota_mode',
-  'default_quota_value',
   'default_allowed_formats',
   'max_file_size_bytes',
-  'upload_rate_limit',
   'default_conflict_policy',
   'default_path_template',
   'delete_object_on_last_reference',
@@ -91,11 +88,8 @@ const DEFAULTS: Record<SettingKey, string> = {
   smtp_password: '',
   smtp_from: '',
   smtp_encryption: 'starttls',
-  default_quota_mode: '',
-  default_quota_value: '',
   default_allowed_formats: 'png,jpg,jpeg,gif,webp,bmp,avif,tiff,ico,heic',
   max_file_size_bytes: '10485760',
-  upload_rate_limit: '60',
   default_conflict_policy: 'rename',
   default_path_template: '{md5:2}/{md5}.{ext}',
   delete_object_on_last_reference: 'true',
@@ -133,10 +127,8 @@ const TIMEZONES = [
 const CAPTCHA_PROVIDERS = ['none', 'cap', 'turnstile'] as const;
 const SMTP_ENCRYPTIONS = ['starttls', 'ssl', 'none'] as const;
 const CONFLICT_POLICIES = ['rename', 'skip', 'overwrite', 'fail'] as const;
-const QUOTA_MODES = ['', 'count', 'bytes'] as const;
 
-/** Select 不接受空字符串值: 用哨兵表示"不限/未设置", 提交前映射回空串 */
-const QUOTA_MODE_UNLIMITED = 'unlimited';
+/** Select 不接受空字符串值: 用哨兵表示"未设置", 提交前映射回空串 */
 const GROUP_UNSET = 'unset';
 
 const TAB_ICON_CLASS = 'size-4 shrink-0';
@@ -214,18 +206,7 @@ function validateSettings(values: Draft, t: TFunction): Errors {
 
   integer('smtp_port', 1, 65535, t('adminSystem.settings.validation.port'));
 
-  if (values.default_quota_mode === '') {
-    if (values.default_quota_value.trim().length > 0) {
-      integer('default_quota_value', 1, undefined, t('adminSystem.settings.validation.positive'));
-    }
-  } else if (values.default_quota_value.trim().length === 0) {
-    errors.default_quota_value = t('adminSystem.settings.validation.quotaValueRequired');
-  } else {
-    integer('default_quota_value', 1, undefined, t('adminSystem.settings.validation.positive'));
-  }
-
   integer('max_file_size_bytes', 1, undefined, t('adminSystem.settings.validation.positive'));
-  integer('upload_rate_limit', 0, undefined, t('adminSystem.settings.validation.nonNegative'));
   integer('record_retention_days', 0, undefined, t('adminSystem.settings.validation.nonNegative'));
   integer('gallery_page_size', 1, undefined, t('adminSystem.settings.validation.positive'));
   integer('log_retention_days', 0, undefined, t('adminSystem.settings.validation.nonNegative'));
@@ -828,53 +809,6 @@ export default function AdminSettingsPage() {
 
         <TabsContent value="quota" className={TAB_PANEL_CLASS}>
           <Field
-            id="setting-quota-mode"
-            label={t('adminSystem.settings.field.quotaMode')}
-            hint={t('adminSystem.settings.field.quotaModeHint')}
-          >
-            <Select
-              value={
-                draft.default_quota_mode === '' ? QUOTA_MODE_UNLIMITED : draft.default_quota_mode
-              }
-              onValueChange={(value) =>
-                setField('default_quota_mode', value === QUOTA_MODE_UNLIMITED ? '' : value)
-              }
-            >
-              <SelectTrigger id="setting-quota-mode" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {QUOTA_MODES.map((mode) => (
-                  <SelectItem
-                    key={mode || QUOTA_MODE_UNLIMITED}
-                    value={mode === '' ? QUOTA_MODE_UNLIMITED : mode}
-                  >
-                    {mode === ''
-                      ? t('adminSystem.options.quotaMode.unlimited')
-                      : t(`adminSystem.options.quotaMode.${mode}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field
-            id="setting-quota-value"
-            label={t('adminSystem.settings.field.quotaValue')}
-            hint={
-              draft.default_quota_mode === 'bytes'
-                ? t('adminSystem.settings.field.quotaValueBytes')
-                : t('adminSystem.settings.field.quotaValueCount')
-            }
-            error={errors.default_quota_value}
-          >
-            <Input
-              id="setting-quota-value"
-              value={draft.default_quota_value}
-              aria-invalid={Boolean(errors.default_quota_value)}
-              onChange={(event) => setField('default_quota_value', event.target.value)}
-            />
-          </Field>
-          <Field
             id="setting-allowed-formats"
             label={t('adminSystem.settings.field.allowedFormats')}
             hint={
@@ -911,19 +845,6 @@ export default function AdminSettingsPage() {
               value={draft.max_file_size_bytes}
               aria-invalid={Boolean(errors.max_file_size_bytes)}
               onChange={(event) => setField('max_file_size_bytes', event.target.value)}
-            />
-          </Field>
-          <Field
-            id="setting-upload-rate-limit"
-            label={t('adminSystem.settings.field.uploadRateLimit')}
-            hint={t('adminSystem.settings.field.uploadRateLimitHint')}
-            error={errors.upload_rate_limit}
-          >
-            <Input
-              id="setting-upload-rate-limit"
-              value={draft.upload_rate_limit}
-              aria-invalid={Boolean(errors.upload_rate_limit)}
-              onChange={(event) => setField('upload_rate_limit', event.target.value)}
             />
           </Field>
         </TabsContent>

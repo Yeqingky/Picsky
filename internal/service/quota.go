@@ -7,7 +7,7 @@ import (
 	"github.com/yeqingky/Picsky/internal/model"
 )
 
-// Quota 是生效配额: 用户级覆盖 -> 组级 -> 系统默认.
+// Quota 是生效配额: 用户级覆盖 -> 组级 -> 不限.
 type Quota struct {
 	Mode  string `json:"mode"`
 	Limit *int64 `json:"limit"`
@@ -15,7 +15,7 @@ type Quota struct {
 }
 
 // EffectiveQuota 计算用户生效配额.
-func EffectiveQuota(settings *Settings, group *model.Group, user *model.User) Quota {
+func EffectiveQuota(group *model.Group, user *model.User) Quota {
 	mode := ""
 	var limit *int64
 	used := int64(0)
@@ -27,10 +27,6 @@ func EffectiveQuota(settings *Settings, group *model.Group, user *model.User) Qu
 	case group != nil && group.QuotaMode != nil && *group.QuotaMode != "":
 		mode = *group.QuotaMode
 		limit = group.QuotaValue
-	default:
-		if mode = strings.TrimSpace(settings.String("default_quota_mode")); mode != "" {
-			limit = settings.OptionalInt64("default_quota_value")
-		}
 	}
 
 	if user != nil {
@@ -107,11 +103,11 @@ func EffectiveAllowedFormats(settings *Settings, group *model.Group) []string {
 }
 
 // EffectiveUploadRateLimit 计算每分钟上传次数上限; 0 表示不限.
-func EffectiveUploadRateLimit(settings *Settings, group *model.Group) int {
-	if group != nil && group.UploadRateLimit != nil {
-		return *group.UploadRateLimit
+func EffectiveUploadRateLimit(group *model.Group) int {
+	if group == nil || group.UploadRateLimit == nil {
+		return 0
 	}
-	return int(settings.Int64("upload_rate_limit", 60))
+	return *group.UploadRateLimit
 }
 
 // splitFormats 拆分并规范化格式列表 (小写, 去空项).

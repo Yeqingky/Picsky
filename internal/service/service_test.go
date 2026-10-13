@@ -627,6 +627,30 @@ func TestFormatAndSizeValidation(t *testing.T) {
 	}
 }
 
+// TestSeedWritesGroupLimits 校验初始化阶段把限额参数写入默认用户组 (不再由系统设置承载).
+func TestSeedWritesGroupLimits(t *testing.T) {
+	f := newFixture(t)
+	groups, err := f.svc.Groups.List()
+	if err != nil {
+		t.Fatalf("读取用户组失败: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, group := range groups {
+		switch group.Name {
+		case "管理员", "普通用户":
+			seen[group.Name] = true
+			if group.UploadRateLimit == nil || *group.UploadRateLimit != 60 {
+				t.Errorf("用户组 %s 应写入上传速率 60: %v", group.Name, group.UploadRateLimit)
+			}
+		}
+	}
+	for _, name := range []string{"管理员", "普通用户"} {
+		if !seen[name] {
+			t.Errorf("缺少默认用户组 %s", name)
+		}
+	}
+}
+
 func TestRateLimit(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)

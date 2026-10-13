@@ -422,7 +422,7 @@ func (h *Handler) profile(c *gin.Context) {
 	principal := middleware.Principal(c)
 	user := principal.User
 
-	quota := service.EffectiveQuota(h.svc.Settings, principal.Group, user)
+	quota := service.EffectiveQuota(principal.Group, user)
 	var capacity any
 	var usedCapacity any
 	if quota.Mode == model.QuotaModeBytes {

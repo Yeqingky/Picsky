@@ -147,7 +147,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if req.Spooled.Truncated || (maxSize > 0 && sums.Size > maxSize) {
 		return nil, apperr.ErrFileTooLarge.WithDetails(map[string]any{"size": sums.Size, "limit": maxSize})
 	}
-	if rateLimit := EffectiveUploadRateLimit(u.settings, req.Principal.Group); rateLimit > 0 {
+	if rateLimit := EffectiveUploadRateLimit(req.Principal.Group); rateLimit > 0 {
 		if allowed, retryAfter := u.limiter.Allow(fmt.Sprintf("upload:%d", user.ID), rateLimit); !allowed {
 			seconds := int(retryAfter.Seconds()) + 1
 			return nil, apperr.ErrRateLimited.WithDetails(map[string]any{"retry_after_seconds": seconds})
@@ -267,7 +267,7 @@ resolved:
 		if err != nil {
 			return nil, err
 		}
-		if err := CheckQuota(EffectiveQuota(u.settings, req.Principal.Group, quotaUser), 1, sums.Size); err != nil {
+		if err := CheckQuota(EffectiveQuota(req.Principal.Group, quotaUser), 1, sums.Size); err != nil {
 			return nil, err
 		}
 	}
@@ -377,7 +377,7 @@ resolved:
 			if err != nil {
 				return err
 			}
-			if err := CheckQuota(EffectiveQuota(u.settings, req.Principal.Group, locked), 1, sums.Size); err != nil {
+			if err := CheckQuota(EffectiveQuota(req.Principal.Group, locked), 1, sums.Size); err != nil {
 				return err
 			}
 		}

@@ -43,7 +43,7 @@ type meDTO struct {
 // meResponse 组装当前用户视图.
 func (s *Server) meResponse(principal *service.Principal) meDTO {
 	user := principal.User
-	quota := service.EffectiveQuota(s.svc.Settings, principal.Group, user)
+	quota := service.EffectiveQuota(principal.Group, user)
 	dto := meDTO{
 		ID:              user.ID,
 		Username:        user.Username,
