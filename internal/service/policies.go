@@ -76,6 +76,7 @@ type PolicyView struct {
 	URLs           []model.PolicyURL `json:"urls"`
 	Capabilities   []string          `json:"capabilities"`
 	ConfigValues   map[string]string `json:"config"`
+	Secrets        map[string]string `json:"secrets,omitempty"`
 	SecretsPresent bool              `json:"secrets_present"`
 	DriverLabel    string            `json:"driver_label"`
 	ConfigFields   []storage.Field   `json:"config_fields"`
@@ -174,12 +175,19 @@ func (p *Policies) View(policy *model.StoragePolicy) (*PolicyView, error) {
 	if err != nil {
 		return nil, err
 	}
+	secrets, err := p.SecretsMap(policy)
+	if err != nil {
+		// 凭据损坏时不影响管理列表读取, 仅记录日志
+		p.log.Warn("策略凭据解密失败", "policy_id", policy.ID, "error", err)
+		secrets = map[string]string{}
+	}
 	spec, _ := storage.SpecOf(policy.Type)
 	view := &PolicyView{
 		StoragePolicy:  policy,
 		URLs:           urls,
 		Capabilities:   spec.Capabilities,
 		ConfigValues:   config,
+		Secrets:        secrets,
 		SecretsPresent: strings.TrimSpace(policy.Secrets) != "",
 		DriverLabel:    spec.Label,
 		ConfigFields:   spec.ConfigFields,

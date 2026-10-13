@@ -5,6 +5,8 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Eye,
+  EyeOff,
   FolderTree,
   Globe,
   Info,
@@ -68,8 +70,8 @@ const DEFAULT_NEW_CAPABILITIES = NEW_TYPE_CAPABILITIES.webdav;
 
 const TAB_ICON_CLASS = 'size-4 shrink-0';
 
-/** 面板容器: 保持本页原有的全宽字段布局 */
-const TAB_PANEL_CLASS = 'mt-6 flex flex-col gap-5';
+/** 面板容器: 与系统设置页一致, 字段单列且整体限宽 */
+const TAB_PANEL_CLASS = 'mt-6 flex max-w-3xl flex-col gap-5';
 
 /**
  * 顶部标签页: 每个标签对应一组策略配置;
@@ -152,8 +154,8 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     sort: String(policy.sort),
     objectPrefix: policy.object_prefix ?? '',
     endpoint: typeof policy.config.endpoint === 'string' ? policy.config.endpoint : '',
-    username: '',
-    password: '',
+    username: policy.secrets?.username ?? '',
+    password: policy.secrets?.password ?? '',
     pathTemplate: policy.path_template,
     conflictPolicy: policy.conflict_policy,
     urls: policy.urls.map((item) => ({
@@ -316,6 +318,7 @@ export default function AdminPolicyEditPage() {
   const [savedOnce, setSavedOnce] = useState(false);
   const [scanPath, setScanPath] = useState('');
   const [dryRun, setDryRun] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // 标签写入 ?tab=: 刷新与深链保持当前分组; 默认标签不落 URL, 扫描补录仅编辑模式可见
   const [searchParams, setSearchParams] = useSearchParams();
@@ -723,73 +726,74 @@ export default function AdminPolicyEditPage() {
         <TabsContent value="basic" className={TAB_PANEL_CLASS}>
           <PolicySection hint={t('adminPolicies.edit.section.basicHint')}>
             <div className="flex flex-col gap-5">
-              <div className="flex flex-col gap-4 sm:flex-row">
-                <FormField
+              <FormField
+                id="policy-name"
+                label={t('adminPolicies.edit.field.name')}
+                error={errorFor('name')}
+                className="sm:w-80"
+              >
+                <Input
                   id="policy-name"
-                  label={t('adminPolicies.edit.field.name')}
-                  error={errorFor('name')}
-                  className="flex-1"
+                  value={form.name}
+                  onChange={(event) => updateForm({ name: event.target.value })}
+                  placeholder={t('adminPolicies.edit.field.namePlaceholder')}
+                  aria-invalid={errorFor('name') !== undefined}
+                  required
+                />
+              </FormField>
+              <FormField
+                id="policy-type"
+                label={t('adminPolicies.edit.field.type')}
+                hint={isEdit ? t('adminPolicies.edit.field.typeReadonly') : undefined}
+                className="sm:w-[240px]"
+              >
+                <Select
+                  value={form.type}
+                  onValueChange={(value) => updateForm({ type: value })}
+                  disabled={isEdit}
                 >
-                  <Input
-                    id="policy-name"
-                    value={form.name}
-                    onChange={(event) => updateForm({ name: event.target.value })}
-                    placeholder={t('adminPolicies.edit.field.namePlaceholder')}
-                    aria-invalid={errorFor('name') !== undefined}
-                    required
-                  />
-                </FormField>
-                <FormField
-                  id="policy-type"
-                  label={t('adminPolicies.edit.field.type')}
-                  hint={isEdit ? t('adminPolicies.edit.field.typeReadonly') : undefined}
-                  className="sm:w-[240px]"
-                >
-                  <Select
-                    value={form.type}
-                    onValueChange={(value) => updateForm({ type: value })}
-                    disabled={isEdit}
-                  >
-                    <SelectTrigger id="policy-type" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TYPE_OPTIONS.map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {t(`adminPolicies.type.${option}`)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </FormField>
-              </div>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-                <FormField
+                  <SelectTrigger id="policy-type" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {t(`adminPolicies.type.${option}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField
+                id="policy-sort"
+                label={t('adminPolicies.edit.field.sort')}
+                error={errorFor('sort')}
+                hint={t('adminPolicies.edit.field.sortHint')}
+                className="sm:w-[160px]"
+              >
+                <Input
                   id="policy-sort"
-                  label={t('adminPolicies.edit.field.sort')}
-                  error={errorFor('sort')}
-                  hint={t('adminPolicies.edit.field.sortHint')}
-                  className="sm:w-[160px]"
-                >
-                  <Input
-                    id="policy-sort"
-                    value={form.sort}
-                    onChange={(event) => updateForm({ sort: event.target.value })}
-                    inputMode="numeric"
-                    aria-invalid={errorFor('sort') !== undefined}
-                  />
-                </FormField>
-                <label className="flex h-8 items-center gap-2 text-sm">
+                  value={form.sort}
+                  onChange={(event) => updateForm({ sort: event.target.value })}
+                  inputMode="numeric"
+                  aria-invalid={errorFor('sort') !== undefined}
+                />
+              </FormField>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
                   <Switch
+                    id="policy-enabled"
                     checked={form.enabled}
                     onCheckedChange={(checked) => updateForm({ enabled: checked })}
                   />
-                  {t('adminPolicies.edit.field.enabled')}
-                </label>
+                  <Label htmlFor="policy-enabled" className="font-normal">
+                    {t('adminPolicies.edit.field.enabled')}
+                  </Label>
+                </div>
+                <p className="text-muted-foreground pl-10 text-xs">
+                  {t('adminPolicies.edit.field.enabledHint')}
+                </p>
               </div>
-              <p className="text-muted-foreground text-sm">
-                {t('adminPolicies.edit.field.enabledHint')}
-              </p>
               <FormField
                 id="policy-object-prefix"
                 label={t('adminPolicies.edit.field.objectPrefix')}
@@ -845,43 +849,42 @@ export default function AdminPolicyEditPage() {
                   required
                 />
               </FormField>
-              <div className="flex flex-col gap-4 sm:flex-row">
-                <FormField
+              <FormField id="policy-username" label={t('adminPolicies.edit.field.username')}>
+                <Input
                   id="policy-username"
-                  label={t('adminPolicies.edit.field.username')}
-                  className="flex-1"
-                >
-                  <Input
-                    id="policy-username"
-                    value={form.username}
-                    onChange={(event) => updateForm({ username: event.target.value })}
-                    autoComplete="off"
-                  />
-                </FormField>
-                <FormField
-                  id="policy-password"
-                  label={t('adminPolicies.edit.field.password')}
-                  hint={
-                    policy?.secrets_present === true
-                      ? t('adminPolicies.edit.field.passwordSaved')
-                      : t('adminPolicies.edit.field.passwordHint')
-                  }
-                  className="flex-1"
-                >
+                  value={form.username}
+                  onChange={(event) => updateForm({ username: event.target.value })}
+                  autoComplete="off"
+                />
+              </FormField>
+              <FormField
+                id="policy-password"
+                label={t('adminPolicies.edit.field.password')}
+                hint={t('adminPolicies.edit.field.passwordHint')}
+              >
+                <div className="relative">
                   <Input
                     id="policy-password"
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     value={form.password}
                     onChange={(event) => updateForm({ password: event.target.value })}
-                    placeholder={
-                      policy?.secrets_present === true
-                        ? t('adminPolicies.edit.field.passwordSaved')
-                        : undefined
-                    }
                     autoComplete="new-password"
+                    className="pr-9"
                   />
-                </FormField>
-              </div>
+                  <button
+                    type="button"
+                    aria-label={t(
+                      showPassword
+                        ? 'adminPolicies.edit.field.passwordHide'
+                        : 'adminPolicies.edit.field.passwordShow',
+                    )}
+                    className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 transition-colors"
+                    onClick={() => setShowPassword((current) => !current)}
+                  >
+                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </FormField>
               {testMutation.data !== undefined &&
                 (testMutation.data.ok ? (
                   <Alert className="border-transparent bg-success/10 text-success">

@@ -350,6 +350,11 @@ export interface AdminPolicy {
     [key: string]: unknown;
   };
   secrets_present: boolean;
+  /** 读: 解密后的凭据 (仅管理接口返回) */
+  secrets?: {
+    username?: string;
+    password?: string;
+  };
   urls: AdminPolicyUrl[];
   sort: number;
   capabilities: string[];
