@@ -151,6 +151,7 @@ export default function AdminGroupsPage() {
               {t('admin.groups.isDefault')}
             </Badge>
           )}
+          {row.is_system && <Badge variant="secondary">{t('admin.groups.isSystem')}</Badge>}
         </div>
       ),
     },
@@ -283,7 +284,7 @@ export default function AdminGroupsPage() {
                   variant="ghost"
                   size="icon-sm"
                   className="text-destructive"
-                  disabled={row.is_default || row.user_count > 0}
+                  disabled={row.is_system || row.is_default || row.user_count > 0}
                   aria-label={t('admin.groups.action.delete')}
                   onClick={() => void handleDelete(row)}
                 >
@@ -292,11 +293,13 @@ export default function AdminGroupsPage() {
               </span>
             </TooltipTrigger>
             <TooltipContent>
-              {row.is_default
-                ? t('admin.groups.deleteDefaultBlocked')
-                : row.user_count > 0
-                  ? t('admin.groups.deleteInUseBlocked')
-                  : t('admin.groups.action.delete')}
+              {row.is_system
+                ? t('admin.groups.deleteSystemBlocked')
+                : row.is_default
+                  ? t('admin.groups.deleteDefaultBlocked')
+                  : row.user_count > 0
+                    ? t('admin.groups.deleteInUseBlocked')
+                    : t('admin.groups.action.delete')}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -418,6 +421,7 @@ function GroupFormDialog({
   onSubmit: (body: AdminGroupWriteRequest) => void;
 }) {
   const { t } = useTranslation();
+  const isSystem = group?.is_system ?? false;
   const grantedPermissions = group?.permissions ?? [];
   const [name, setName] = useState(group?.name ?? '');
   const [description, setDescription] = useState(group?.description ?? '');
@@ -425,6 +429,8 @@ function GroupFormDialog({
   const [permissions, setPermissions] = useState<PermissionName[]>(
     PERMISSION_NAMES.filter((permission) => grantedPermissions.includes(permission)),
   );
+  // 没有上传权限时, 配额与上传限额不显示, 提交时按未设置处理
+  const canUpload = permissions.includes('upload');
   const [quotaMode, setQuotaMode] = useState<QuotaMode | ''>(group?.quota_mode ?? '');
   const [quotaValue, setQuotaValue] = useState(
     group?.quota_value === null || group?.quota_value === undefined
@@ -461,18 +467,18 @@ function GroupFormDialog({
     const trimmedName = name.trim();
     if (trimmedName === '') next.name = t('common.form.required');
 
-    if (quotaMode !== '') {
+    if (canUpload && quotaMode !== '') {
       const value = quotaValue.trim();
       if (value === '' || Number.isNaN(Number(value)) || Number(value) < 0) {
         next.quotaValue = t('admin.groups.quotaValueRequired');
       }
     }
 
-    for (const [field, raw] of [
-      ['maxFileSize', maxFileSize],
-      ['uploadRateLimit', uploadRateLimit],
-      ['sort', sort],
-    ] as const) {
+    const numericFields: [string, string][] = [['sort', sort]];
+    if (canUpload) {
+      numericFields.push(['maxFileSize', maxFileSize], ['uploadRateLimit', uploadRateLimit]);
+    }
+    for (const [field, raw] of numericFields) {
       const trimmed = raw.trim();
       if (trimmed === '') continue;
       if (Number.isNaN(Number(trimmed)) || Number(trimmed) < 0) {
@@ -486,12 +492,12 @@ function GroupFormDialog({
     onSubmit({
       name: trimmedName,
       description: description.trim(),
-      is_default: isDefault,
+      is_default: isSystem ? false : isDefault,
       permissions: permissions,
-      quota_mode: quotaMode === '' ? null : quotaMode,
-      quota_value: quotaMode === '' ? null : Number(quotaValue.trim()),
-      max_file_size_bytes: parseOptionalNumber(maxFileSize),
-      upload_rate_limit: parseOptionalNumber(uploadRateLimit),
+      quota_mode: canUpload && quotaMode !== '' ? quotaMode : null,
+      quota_value: canUpload && quotaMode !== '' ? Number(quotaValue.trim()) : null,
+      max_file_size_bytes: canUpload ? parseOptionalNumber(maxFileSize) : null,
+      upload_rate_limit: canUpload ? parseOptionalNumber(uploadRateLimit) : null,
       sort: sort.trim() === '' ? 0 : Number(sort.trim()),
     });
   };
@@ -537,6 +543,7 @@ function GroupFormDialog({
           <label className="flex items-center gap-2 text-sm">
             <Switch
               checked={isDefault}
+              disabled={isSystem}
               onCheckedChange={(checked) => setIsDefault(checked === true)}
               aria-label={t('admin.groups.field.isDefault')}
             />
@@ -550,6 +557,7 @@ function GroupFormDialog({
                 <label key={permission} className="flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={permissions.includes(permission)}
+                    disabled={isSystem}
                     onCheckedChange={(checked) => togglePermission(permission, checked === true)}
                     aria-label={t(`permissions.name.${permission}`)}
                   />
@@ -559,98 +567,106 @@ function GroupFormDialog({
             </div>
           </fieldset>
 
-          <div className="flex flex-col gap-4 sm:flex-row">
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Label htmlFor="admin-group-quota-mode">{t('admin.groups.field.quotaMode')}</Label>
-              <Select
-                value={quotaMode === '' ? QUOTA_UNLIMITED : quotaMode}
-                onValueChange={(next) =>
-                  setQuotaMode(next === QUOTA_UNLIMITED ? '' : (next as QuotaMode))
-                }
-              >
-                <SelectTrigger id="admin-group-quota-mode" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={QUOTA_UNLIMITED}>{t('admin.groups.unlimited')}</SelectItem>
-                  <SelectItem value="count">{t('common.quota.modeCount')}</SelectItem>
-                  <SelectItem value="bytes">{t('common.quota.modeBytes')}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {quotaMode !== '' && (
-              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                <Label htmlFor="admin-group-quota-value">
-                  {t('admin.groups.field.quotaValue')}
-                </Label>
-                {quotaMode === 'bytes' ? (
-                  <SizeInput
-                    id="admin-group-quota-value"
-                    value={parseOptionalNumber(quotaValue)}
-                    units={STORAGE_UNITS}
-                    defaultUnit="GB"
-                    invalid={Boolean(errors.quotaValue)}
-                    onChange={(bytes) => setQuotaValue(bytes === null ? '' : String(bytes))}
-                  />
-                ) : (
-                  <Input
-                    id="admin-group-quota-value"
-                    value={quotaValue}
-                    inputMode="numeric"
-                    aria-invalid={Boolean(errors.quotaValue)}
-                    onChange={(event) => setQuotaValue(event.target.value)}
-                  />
-                )}
-                {errors.quotaValue && (
-                  <p className="text-destructive text-sm">{errors.quotaValue}</p>
-                )}
-              </div>
-            )}
-          </div>
+          {isSystem && (
+            <p className="text-muted-foreground text-sm">{t('admin.groups.systemLocked')}</p>
+          )}
 
-          <div className="flex flex-col gap-4 sm:flex-row">
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Label htmlFor="admin-group-max-file-size">
-                {t('admin.groups.field.maxFileSize')}
-              </Label>
-              <SizeInput
-                id="admin-group-max-file-size"
-                value={parseOptionalNumber(maxFileSize)}
-                units={FILE_SIZE_UNITS}
-                defaultUnit="MB"
-                invalid={Boolean(errors.maxFileSize)}
-                onChange={(bytes) => setMaxFileSize(bytes === null ? '' : String(bytes))}
-              />
-              <p
-                className={cn(
-                  'text-sm',
-                  errors.maxFileSize ? 'text-destructive' : 'text-muted-foreground',
-                )}
-              >
-                {errors.maxFileSize || t('admin.groups.inheritHint')}
-              </p>
+          {canUpload && (
+            <div className="flex flex-col gap-4 sm:flex-row">
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <Label htmlFor="admin-group-quota-mode">{t('admin.groups.field.quotaMode')}</Label>
+                <Select
+                  value={quotaMode === '' ? QUOTA_UNLIMITED : quotaMode}
+                  onValueChange={(next) =>
+                    setQuotaMode(next === QUOTA_UNLIMITED ? '' : (next as QuotaMode))
+                  }
+                >
+                  <SelectTrigger id="admin-group-quota-mode" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={QUOTA_UNLIMITED}>{t('admin.groups.unlimited')}</SelectItem>
+                    <SelectItem value="count">{t('common.quota.modeCount')}</SelectItem>
+                    <SelectItem value="bytes">{t('common.quota.modeBytes')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {quotaMode !== '' && (
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <Label htmlFor="admin-group-quota-value">
+                    {t('admin.groups.field.quotaValue')}
+                  </Label>
+                  {quotaMode === 'bytes' ? (
+                    <SizeInput
+                      id="admin-group-quota-value"
+                      value={parseOptionalNumber(quotaValue)}
+                      units={STORAGE_UNITS}
+                      defaultUnit="GB"
+                      invalid={Boolean(errors.quotaValue)}
+                      onChange={(bytes) => setQuotaValue(bytes === null ? '' : String(bytes))}
+                    />
+                  ) : (
+                    <Input
+                      id="admin-group-quota-value"
+                      value={quotaValue}
+                      inputMode="numeric"
+                      aria-invalid={Boolean(errors.quotaValue)}
+                      onChange={(event) => setQuotaValue(event.target.value)}
+                    />
+                  )}
+                  {errors.quotaValue && (
+                    <p className="text-destructive text-sm">{errors.quotaValue}</p>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <Label htmlFor="admin-group-rate-limit">
-                {t('admin.groups.field.uploadRateLimit')}
-              </Label>
-              <Input
-                id="admin-group-rate-limit"
-                value={uploadRateLimit}
-                inputMode="numeric"
-                aria-invalid={Boolean(errors.uploadRateLimit)}
-                onChange={(event) => setUploadRateLimit(event.target.value)}
-              />
-              <p
-                className={cn(
-                  'text-sm',
-                  errors.uploadRateLimit ? 'text-destructive' : 'text-muted-foreground',
-                )}
-              >
-                {errors.uploadRateLimit || t('admin.groups.rateLimitHint')}
-              </p>
+          )}
+
+          {canUpload && (
+            <div className="flex flex-col gap-4 sm:flex-row">
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <Label htmlFor="admin-group-max-file-size">
+                  {t('admin.groups.field.maxFileSize')}
+                </Label>
+                <SizeInput
+                  id="admin-group-max-file-size"
+                  value={parseOptionalNumber(maxFileSize)}
+                  units={FILE_SIZE_UNITS}
+                  defaultUnit="MB"
+                  invalid={Boolean(errors.maxFileSize)}
+                  onChange={(bytes) => setMaxFileSize(bytes === null ? '' : String(bytes))}
+                />
+                <p
+                  className={cn(
+                    'text-sm',
+                    errors.maxFileSize ? 'text-destructive' : 'text-muted-foreground',
+                  )}
+                >
+                  {errors.maxFileSize || t('admin.groups.inheritHint')}
+                </p>
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <Label htmlFor="admin-group-rate-limit">
+                  {t('admin.groups.field.uploadRateLimit')}
+                </Label>
+                <Input
+                  id="admin-group-rate-limit"
+                  value={uploadRateLimit}
+                  inputMode="numeric"
+                  aria-invalid={Boolean(errors.uploadRateLimit)}
+                  onChange={(event) => setUploadRateLimit(event.target.value)}
+                />
+                <p
+                  className={cn(
+                    'text-sm',
+                    errors.uploadRateLimit ? 'text-destructive' : 'text-muted-foreground',
+                  )}
+                >
+                  {errors.uploadRateLimit || t('admin.groups.rateLimitHint')}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="admin-group-sort">{t('admin.groups.field.sort')}</Label>

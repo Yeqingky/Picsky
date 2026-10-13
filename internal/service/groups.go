@@ -186,6 +186,9 @@ func (g *Groups) Delete(id int64, actor *Principal, ip, userAgent string) error 
 	if err != nil {
 		return err
 	}
+	if group.IsSystem {
+		return apperr.ErrInvalidRequest.WithMessage("内置用户组不能删除")
+	}
 	var userCount int64
 	if err := g.db.Model(&model.User{}).Where("group_id = ?", group.ID).Count(&userCount).Error; err != nil {
 		return apperr.ErrInternal.WithMessage(err.Error())
@@ -291,6 +294,14 @@ func (g *Groups) validate(in *GroupInput, group *model.Group) (model.Permission,
 	permissions, err := model.PermissionsFromNames(in.Permissions)
 	if err != nil {
 		return 0, apperr.ErrInvalidRequest.WithMessage(err.Error())
+	}
+	if group != nil && group.IsSystem {
+		if permissions != group.Permissions {
+			return 0, apperr.ErrInvalidRequest.WithMessage("内置用户组的权限位不可修改")
+		}
+		if in.IsDefault != nil && *in.IsDefault {
+			return 0, apperr.ErrInvalidRequest.WithMessage("内置用户组不能设为默认组")
+		}
 	}
 	if in.QuotaMode != nil {
 		mode := strings.TrimSpace(*in.QuotaMode)

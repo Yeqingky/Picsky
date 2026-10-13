@@ -489,16 +489,18 @@ func (a *Auth) adminGroup() (*model.Group, error) {
 
 // defaultGroup 返回新用户默认组.
 func (a *Auth) defaultGroup() (*model.Group, error) {
+	// 内置用户组不能作为默认组: 配置指向内置组时按未设置处理.
 	if id := a.settings.OptionalInt64("default_group_id"); id != nil {
 		var group model.Group
-		if err := a.db.First(&group, *id).Error; err == nil {
+		if err := a.db.First(&group, *id).Error; err == nil && !group.IsSystem {
 			return &group, nil
 		}
 	}
 	var group model.Group
 	err := a.db.Where("is_default = ?", true).Order("sort ASC, id ASC").First(&group).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = a.db.Order("id ASC").First(&group).Error
+		// 没有默认组时退回编号最小的非内置组, 内置组 (管理员 / 只读) 永远不作为新用户默认组.
+		err = a.db.Where("is_system = ?", false).Order("id ASC").First(&group).Error
 	}
 	if err != nil {
 		return nil, apperr.ErrInternal.WithMessage("默认用户组不存在: " + err.Error())

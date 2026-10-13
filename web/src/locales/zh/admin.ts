@@ -114,6 +114,7 @@ export const admin = {
       sort: '排序',
     },
     isDefault: '默认组',
+    isSystem: '内置组',
     permissionCount: '{{count}} 项',
     inherit: '继承系统默认',
     unlimited: '不限',
@@ -123,7 +124,9 @@ export const admin = {
     perMinute: '{{count}} 次/分钟',
     policiesEmpty: '暂无可用策略',
     deleteDefaultBlocked: '默认用户组不能删除',
+    deleteSystemBlocked: '内置用户组不能删除',
     deleteInUseBlocked: '该用户组仍有用户, 不能删除',
+    systemLocked: '内置用户组的权限位与默认组标记不可修改',
     policiesHint: '未选中的策略对该组不可见',
     policiesSelected: '已选 {{count}} 项',
     action: {

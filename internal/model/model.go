@@ -59,6 +59,7 @@ type Group struct {
 	Name             string     `gorm:"size:64;not null;uniqueIndex" json:"name"`
 	Description      string     `gorm:"size:255" json:"description"`
 	IsDefault        bool       `gorm:"not null;default:false" json:"is_default"`
+	IsSystem         bool       `gorm:"not null;default:false" json:"is_system"` // 内置组: 权限位固定, 不可删除, 不可设为默认组
 	Permissions      Permission `gorm:"not null;default:0" json:"-"`
 	QuotaMode        *string    `gorm:"size:8" json:"quota_mode"`
 	QuotaValue       *int64     `json:"quota_value"`

@@ -671,7 +671,7 @@ export default function AdminSettingsPage() {
                 <SelectContent>
                   <SelectItem value={GROUP_UNSET}>{t('common.quota.unset')}</SelectItem>
                   {groups.map((group) => (
-                    <SelectItem key={group.id} value={String(group.id)}>
+                    <SelectItem key={group.id} value={String(group.id)} disabled={group.is_system}>
                       {group.name}
                     </SelectItem>
                   ))}

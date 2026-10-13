@@ -4,6 +4,7 @@
 package migrations
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 )
 
 // schemaVersion 是当前迁移版本, 每次结构变更递增并追加一个迁移函数.
-const schemaVersion = 2
+const schemaVersion = 3
 
 // SchemaMigration 记录已应用的迁移版本.
 type SchemaMigration struct {
@@ -69,6 +70,35 @@ var steps = map[int]func(*gorm.DB) error{
 		}
 		return db.Exec("ALTER TABLE storage_policies DROP COLUMN thumbnail_rule").Error
 	},
+	3: func(db *gorm.DB) error {
+		// 内置用户组: 权限位固定, 不可删除, 不可设为默认组. 按名称标记初始化阶段写入的管理员与只读组.
+		if err := db.AutoMigrate(&model.Group{}); err != nil {
+			return err
+		}
+		if err := db.Model(&model.Group{}).Where("name IN ?", []string{"管理员", "只读"}).Update("is_system", true).Error; err != nil {
+			return err
+		}
+		if err := db.Model(&model.Group{}).Where("is_system = ? AND is_default = ?", true, true).Update("is_default", false).Error; err != nil {
+			return err
+		}
+		// 清除内置组的默认标记后可能没有任何默认组: 此时把编号最小的非内置组设为默认,
+		// 避免注册流程退回 "编号最小的组" (通常是管理员组).
+		var defaults int64
+		if err := db.Model(&model.Group{}).Where("is_default = ?", true).Count(&defaults).Error; err != nil {
+			return err
+		}
+		if defaults > 0 {
+			return nil
+		}
+		var fallback model.Group
+		switch err := db.Where("is_system = ?", false).Order("id ASC").First(&fallback).Error; {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			return nil
+		case err != nil:
+			return err
+		}
+		return db.Model(&model.Group{}).Where("id = ?", fallback.ID).Update("is_default", true).Error
+	},
 }
 
 // defaultUploadRateLimit 是初始化阶段写入默认用户组的上传速率 (次/分钟):
@@ -80,6 +110,7 @@ func seed(db *gorm.DB) error {
 	admin := model.Group{
 		Name:            "管理员",
 		Description:     "全部权限",
+		IsSystem:        true,
 		Permissions:     model.AllPermissions(),
 		UploadRateLimit: new(defaultUploadRateLimit),
 		Sort:            0,
@@ -95,6 +126,7 @@ func seed(db *gorm.DB) error {
 	readonly := model.Group{
 		Name:        "只读",
 		Description: "只读用户",
+		IsSystem:    true,
 		Permissions: 0,
 		Sort:        2,
 	}

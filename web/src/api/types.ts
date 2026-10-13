@@ -300,6 +300,7 @@ export interface AdminGroup {
   name: string;
   description: string;
   is_default: boolean;
+  is_system: boolean;
   permissions: string[];
   permission_bits: number;
   quota_mode: QuotaMode | null;

@@ -2,6 +2,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -144,6 +145,11 @@ func (s *Settings) Update(values map[string]string) error {
 		if _, known := migrations.DefaultSettings[key]; !known {
 			return apperr.ErrInvalidRequest.WithMessage("未知设置项: " + key)
 		}
+		if key == "default_group_id" {
+			if err := s.checkDefaultGroup(value); err != nil {
+				return err
+			}
+		}
 		if migrations.IsSecretSetting(key) {
 			encrypted, err := s.cipher.Encrypt(strings.TrimSpace(value))
 			if err != nil {
@@ -166,6 +172,25 @@ func (s *Settings) Update(values map[string]string) error {
 		return fmt.Errorf("写入系统设置失败: %w", err)
 	}
 	return s.Reload()
+}
+
+// checkDefaultGroup 拒绝把内置用户组写为新用户默认组; 非数字与不存在的组沿用读取时的静默回退行为.
+func (s *Settings) checkDefaultGroup(value string) error {
+	id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return nil
+	}
+	var group model.Group
+	switch err := s.db.First(&group, id).Error; {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		return nil
+	case err != nil:
+		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if group.IsSystem {
+		return apperr.ErrInvalidRequest.WithMessage("内置用户组不能设为默认组")
+	}
+	return nil
 }
 
 // Set 写入单个非秘密设置项.

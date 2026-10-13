@@ -651,6 +651,81 @@ func TestSeedWritesGroupLimits(t *testing.T) {
 	}
 }
 
+// TestBuiltinGroupGuards 校验内置用户组不可删除, 不可修改权限位, 不可设为新用户默认组.
+func TestBuiltinGroupGuards(t *testing.T) {
+	f := newFixture(t)
+	groups, err := f.svc.Groups.List()
+	if err != nil {
+		t.Fatalf("读取用户组失败: %v", err)
+	}
+	var adminGroupID, readonlyID int64
+	for _, group := range groups {
+		if !group.IsSystem {
+			continue
+		}
+		switch group.Name {
+		case "管理员":
+			adminGroupID = group.ID
+		case "只读":
+			readonlyID = group.ID
+		}
+	}
+	if adminGroupID == 0 || readonlyID == 0 {
+		t.Fatalf("管理员与只读组应标记 is_system: %+v", groups)
+	}
+
+	rejected := func(err error, action string) {
+		t.Helper()
+		var apiErr *apperr.Error
+		if !errors.As(err, &apiErr) || apiErr.Code != "invalid_request" {
+			t.Errorf("%s 应返回 invalid_request, 实际 %v", action, err)
+		}
+	}
+
+	readonly, err := f.svc.Groups.Get(readonlyID)
+	if err != nil {
+		t.Fatalf("读取只读组失败: %v", err)
+	}
+	original := service.GroupInput{
+		Name:        readonly.Name,
+		Sort:        readonly.Sort,
+		Permissions: readonly.Permissions.Names(),
+	}
+	if _, err := f.svc.Groups.Update(readonlyID, original, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("内置用户组原样更新应通过: %v", err)
+	}
+
+	changed := original
+	changed.Permissions = []string{"upload"}
+	_, err = f.svc.Groups.Update(readonlyID, changed, f.admin, "127.0.0.1", "test-agent")
+	rejected(err, "修改内置用户组权限位")
+
+	asDefault := original
+	asDefault.IsDefault = new(true)
+	_, err = f.svc.Groups.Update(readonlyID, asDefault, f.admin, "127.0.0.1", "test-agent")
+	rejected(err, "把内置用户组设为默认组")
+
+	rejected(f.svc.Groups.Delete(adminGroupID, f.admin, "127.0.0.1", "test-agent"), "删除内置用户组")
+	rejected(f.svc.Settings.Set("default_group_id", fmt.Sprintf("%d", readonlyID)), "把内置用户组写为新用户默认组")
+
+	// 绕过校验直接写库: 注册仍不落在内置组.
+	if err := f.database.Model(&model.Setting{}).Where("key = ?", "default_group_id").
+		Update("value", fmt.Sprintf("%d", readonlyID)).Error; err != nil {
+		t.Fatalf("写入默认组设置失败: %v", err)
+	}
+	if err := f.svc.Settings.Reload(); err != nil {
+		t.Fatalf("重载设置失败: %v", err)
+	}
+	member := f.register("bob")
+	joined, err := f.svc.Groups.Get(member.User.GroupID)
+	if err != nil {
+		t.Fatalf("读取注册账号的用户组失败: %v", err)
+	}
+	if joined.IsSystem {
+		t.Errorf("新用户不应进入内置用户组: %s", joined.Name)
+	}
+}
+
 func TestRateLimit(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)
