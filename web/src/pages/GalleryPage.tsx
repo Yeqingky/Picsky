@@ -12,7 +12,7 @@ import {
 import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { imagesApi } from '../api';
+import { imagesApi, policiesApi } from '../api/images';
 import type { ImageRecord } from '../api/types';
 import type { GalleryView } from '../utils/constants';
 import { PageHeader } from '../components/PageHeader';
@@ -35,7 +35,6 @@ import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group';
 import { useAuth } from '../hooks/useAuth';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useDelayedLoading } from '../hooks/useDelayedLoading';
-import { dayjs, toRfc3339 } from '../utils/format';
 import {
   APPEND_SKELETON_COUNT,
   DEFAULT_GALLERY_PAGE_SIZE,
@@ -74,17 +73,28 @@ function chunkRecords(records: ImageRecord[], size: number): ImageRecord[][] {
   return chunks;
 }
 
+function readPolicyId(searchParams: URLSearchParams): number | null {
+  const value = searchParams.get('policy_id');
+  if (value === null) return null;
+  const policyId = Number(value);
+  return Number.isSafeInteger(policyId) && policyId > 0 ? policyId : null;
+}
+
 export default function GalleryPage() {
   const { t } = useTranslation();
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const policiesQuery = useQuery({
+    queryKey: ['policies', 'mine'],
+    queryFn: policiesApi.listMine,
+    staleTime: 5 * 60 * 1000,
+  });
 
   const [filters, setFilters] = useState<GalleryFiltersValue>(() => ({
     keyword: '',
     format: searchParams.get('format') ?? '',
-    from: searchParams.get('from') ? dayjs(searchParams.get('from')) : null,
-    to: searchParams.get('to') ? dayjs(searchParams.get('to')) : null,
+    policyId: readPolicyId(searchParams),
   }));
   const [view, setViewState] = useState<GalleryView>(readStoredView);
   const [paginationModel, setPaginationModel] = useState({
@@ -103,10 +113,9 @@ export default function GalleryPage() {
     () => ({
       keyword: debouncedKeyword.trim() === '' ? undefined : debouncedKeyword.trim(),
       format: filters.format === '' ? undefined : filters.format,
-      from: toRfc3339(filters.from),
-      to: toRfc3339(filters.to, true),
+      policy_id: filters.policyId ?? undefined,
     }),
-    [debouncedKeyword, filters.format, filters.from, filters.to],
+    [debouncedKeyword, filters.format, filters.policyId],
   );
 
   const infinite = useInfiniteQuery({
@@ -299,7 +308,6 @@ export default function GalleryPage() {
     <div>
       <PageHeader
         title={t('gallery.title')}
-        description={t('gallery.description')}
         actions={
           <>
             <ToggleGroup
@@ -338,8 +346,9 @@ export default function GalleryPage() {
 
       <GalleryFilters
         value={filters}
+        policies={policiesQuery.data ?? []}
         onChange={(patch) => setFilters((current) => ({ ...current, ...patch }))}
-        onClear={() => setFilters({ keyword: '', format: '', from: null, to: null })}
+        onClear={() => setFilters({ keyword: '', format: '', policyId: null })}
       />
 
       {showSkeleton && <MasonrySkeleton />}

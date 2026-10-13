@@ -1,8 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import type { Dayjs } from 'dayjs';
+import type { PolicySummary } from '../../api/types';
 import { Search as SearchIcon } from 'lucide-react';
 import { IMAGE_FORMATS } from '../../utils/constants';
-import { DatePicker } from '../DatePicker';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -11,26 +10,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 export interface GalleryFiltersValue {
   keyword: string;
   format: string;
-  from: Dayjs | null;
-  to: Dayjs | null;
+  policyId: number | null;
 }
 
-/** Radix Select 不支持空字符串值, 用哨兵表示 "全部格式" */
-const ALL_FORMATS = '__all__';
+/** Radix Select 不支持空字符串值, 用哨兵表示 "全部" */
+const ALL_FORMATS = '__all_formats__';
+const ALL_POLICIES = '__all_policies__';
 
-/** 图库筛选: 只做 原始文件名关键字 / 格式 / 时间段 (docs/open-questions.md Q10) */
+/** 图库筛选: 原始文件名 / 格式 / 存储策略 */
 export function GalleryFilters({
   value,
+  policies,
   onChange,
   onClear,
 }: {
   value: GalleryFiltersValue;
+  policies: PolicySummary[];
   onChange: (patch: Partial<GalleryFiltersValue>) => void;
   onClear: () => void;
 }) {
   const { t } = useTranslation();
-  const hasFilters =
-    value.keyword !== '' || value.format !== '' || value.from !== null || value.to !== null;
+  const hasFilters = value.keyword !== '' || value.format !== '' || value.policyId !== null;
 
   return (
     <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -67,21 +67,27 @@ export function GalleryFilters({
           </SelectContent>
         </Select>
       </div>
-
-      <DatePicker
-        label={t('common.time.from')}
-        value={value.from}
-        onChange={(next) => onChange({ from: next })}
-        clearable
-        className="w-full md:w-44"
-      />
-      <DatePicker
-        label={t('common.time.to')}
-        value={value.to}
-        onChange={(next) => onChange({ to: next })}
-        clearable
-        className="w-full md:w-44"
-      />
+      <div className="flex w-full flex-col gap-1.5 md:w-44">
+        <Label htmlFor="gallery-filter-policy">{t('gallery.filters.storagePolicy')}</Label>
+        <Select
+          value={value.policyId === null ? ALL_POLICIES : String(value.policyId)}
+          onValueChange={(next) =>
+            onChange({ policyId: next === ALL_POLICIES ? null : Number(next) })
+          }
+        >
+          <SelectTrigger id="gallery-filter-policy" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_POLICIES}>{t('gallery.filters.allPolicies')}</SelectItem>
+            {policies.map((policy) => (
+              <SelectItem key={policy.id} value={String(policy.id)}>
+                {policy.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       <Button variant="ghost" size="sm" onClick={onClear} disabled={!hasFilters}>
         {t('gallery.filters.clear')}

@@ -214,6 +214,7 @@ export interface ImageListParams {
   from?: string;
   /** RFC3339 */
   to?: string;
+  policy_id?: number;
 }
 
 export interface ImageUpdateRequest {

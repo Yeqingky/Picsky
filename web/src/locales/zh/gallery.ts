@@ -1,8 +1,6 @@
 /** 图库文案 */
 export const gallery = {
   title: '图库',
-  description:
-    '只显示图片记录; 非图片的扫描占位记录不会出现在这里。预览由浏览器直连分发域名, 本服务不代理图片内容。',
   view: {
     label: '视图',
     masonry: '瀑布流',
@@ -13,7 +11,8 @@ export const gallery = {
     keywordPlaceholder: '按原始文件名搜索',
     format: '格式',
     allFormats: '全部格式',
-    timeRange: '时间段',
+    storagePolicy: '存储策略',
+    allPolicies: '全部策略',
     apply: '查询',
     clear: '清空筛选',
     activeCount: '已启用 {{count}} 个筛选条件',

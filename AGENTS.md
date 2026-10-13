@@ -73,6 +73,7 @@ Picsky/
 - 前端样式只使用 Tailwind CSS v4 与 `src/index.css` 的语义令牌 (`background`, `card`, `muted`, `primary`, `destructive`, `success`, `warning`, `info`, `border`, `ring`, `chart-*`), 禁止硬编码色值与 CSS-in-JS.
 - 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 不引入 MUI, Emotion, 其它 UI 库或图标库, 图标统一 lucide-react, 全局提示统一 sonner.
 - 表格统一用 `src/components/DataTable.tsx`, 日期选择统一用 `src/components/DatePicker.tsx`, 空/错状态统一用 `src/components/States.tsx`; 需要新交互时先扩展这些共享组件.
+- 图库筛选使用原始文件名, 格式与存储策略; 不提供开始时间和结束时间筛选.
 - 前端验证顺序: `npm run typecheck` -> `npm run lint` -> `npm run format:check` -> `npm run build`; 代码逻辑变更后必须同步更新 `docs/webui.md` 与 `docs/tech-stack.md` 的对应描述.
 
 ## 构建与运行
