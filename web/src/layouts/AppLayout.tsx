@@ -23,10 +23,11 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
 import { useSiteName } from '../hooks/useSite';
+import { cravatarAvatarUrl } from '../utils/avatar';
 import { isAdminVisible, hasPermission } from '../utils/permissions';
 import type { PermissionName } from '../api/types';
 import { ThemeModeToggleButton } from '../components/ThemeModeToggleButton';
-import { Avatar, AvatarFallback } from '../components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import {
@@ -39,7 +40,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from '../components/ui/sheet';
 import { cn } from '../lib/utils';
 
-const DRAWER_WIDTH = 236;
+const DRAWER_WIDTH = 208;
 
 interface NavItem {
   key: string;
@@ -156,7 +157,7 @@ function buildNavItems(permissions: readonly string[]): NavItem[] {
 
 const navLinkClass = (selected: boolean) =>
   cn(
-    'flex min-h-10 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors',
+    'flex min-h-9 items-center gap-2.5 rounded-lg px-3 text-sm transition-colors',
     'hover:bg-accent hover:text-accent-foreground',
     selected ? 'bg-accent font-medium text-accent-foreground' : 'text-foreground',
   );
@@ -233,7 +234,7 @@ function NavGroup({
               onClick={onNavigate}
               className={cn(
                 navLinkClass(location.pathname === child.path),
-                'min-h-9 text-muted-foreground hover:text-accent-foreground',
+                'min-h-8 text-muted-foreground hover:text-accent-foreground',
                 location.pathname === child.path && 'text-accent-foreground',
               )}
             >
@@ -252,6 +253,7 @@ function UserMenu() {
   const { user, logout, permissions } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const avatarUrl = useMemo(() => cravatarAvatarUrl(user?.email), [user?.email]);
 
   const handleLogout = async () => {
     setOpen(false);
@@ -264,20 +266,18 @@ function UserMenu() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="hover:bg-accent flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors"
+          aria-label={t('nav.userMenu')}
+          className="hover:bg-accent rounded-full p-0.5 transition-colors"
         >
-          <Avatar className="size-7">
+          <Avatar className="size-8">
+            {avatarUrl && <AvatarImage src={avatarUrl} alt="" />}
             <AvatarFallback className="text-xs">
               {(user?.nickname || user?.username || '?').slice(0, 1).toUpperCase()}
             </AvatarFallback>
           </Avatar>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm">{user?.nickname || user?.username}</span>
-            <span className="text-muted-foreground block truncate text-xs">{user?.group.name}</span>
-          </span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-52">
+      <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuItem
           onClick={() => {
             setOpen(false);
@@ -322,10 +322,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div className="flex-1 overflow-y-auto py-2">
         <NavList items={navItems} onNavigate={onNavigate} />
       </div>
-      <div className="border-t" />
-      <div className="p-2">
-        <UserMenu />
-      </div>
     </div>
   );
 }
@@ -347,7 +343,7 @@ export function AppLayout() {
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-[236px] gap-0 p-0">
+        <SheetContent side="left" className="gap-0 p-0" style={{ width: DRAWER_WIDTH }}>
           <SheetTitle className="sr-only">{siteName}</SheetTitle>
           <SidebarContent onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
@@ -366,6 +362,7 @@ export function AppLayout() {
           </Button>
           <div className="flex-1" />
           <ThemeModeToggleButton />
+          <UserMenu />
         </header>
 
         <main className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col p-4 md:p-6">
