@@ -16,7 +16,6 @@ export const upload = {
   },
   policy: {
     label: '存储策略',
-    rememberHint: '已记住上次选择',
     defaultHint: '默认策略',
     none: '当前用户组没有可用策略, 请联系管理员授权。',
   },

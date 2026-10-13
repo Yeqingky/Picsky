@@ -9,8 +9,6 @@ import { uploadApi } from '../api/upload';
 import type { PolicySummary } from '../api/types';
 import { useAuth } from '../hooks/useAuth';
 import { PageHeader } from '../components/PageHeader';
-import { QuotaBar } from '../components/QuotaBar';
-import { SkeletonSurface } from '../components/skeletons';
 import { UploadQueueRow } from '../components/upload/UploadQueueRow';
 import { UploadResultCard } from '../components/upload/UploadResultCard';
 import { createUploadItem } from '../components/upload/types';
@@ -19,7 +17,6 @@ import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
-import { Label } from '../components/ui/label';
 import {
   Select,
   SelectContent,
@@ -211,49 +208,33 @@ export default function UploadPage() {
 
   return (
     <div className="flex min-h-[calc(100svh-9rem)] flex-1 flex-col">
-      <PageHeader title={t('upload.title')} description={t('upload.description')} />
-
       <div className="flex flex-1 flex-col gap-4">
-        <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:justify-end">
-          <SkeletonSurface dense className="w-full sm:w-72">
-            <Label htmlFor="upload-policy" className="mb-1.5">
-              {t('upload.policy.label')}
-            </Label>
-            <Select
-              value={policyId === null ? undefined : String(policyId)}
-              onValueChange={(value) => {
-                selectPolicy(policies?.find((policy) => policy.id === Number(value)));
-              }}
-              disabled={policiesPending || policyUnavailable}
-            >
-              <SelectTrigger id="upload-policy" className="w-full">
-                <SelectValue placeholder={t('upload.policy.label')} />
-              </SelectTrigger>
-              <SelectContent>
-                {(policies ?? []).map((policy) => (
-                  <SelectItem key={policy.id} value={String(policy.id)}>
-                    {policy.name}
-                    {policy.is_default ? ` · ${t('upload.policy.defaultHint')}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-muted-foreground mt-1.5 text-xs">
-              {policyUnavailable
-                ? t('upload.policy.none')
-                : policyId !== null && user?.default_policy_id === policyId
-                  ? t('upload.policy.defaultHint')
-                  : t('upload.policy.rememberHint')}
-            </p>
-          </SkeletonSurface>
-          {user && (
-            <div className="w-full sm:w-52">
-              <QuotaBar quota={user.quota} compact />
-            </div>
+        <div className="flex items-center justify-end gap-2">
+          {policyUnavailable && (
+            <p className="text-muted-foreground text-xs">{t('upload.policy.none')}</p>
           )}
+          <Select
+            value={policyId === null ? undefined : String(policyId)}
+            onValueChange={(value) => {
+              selectPolicy(policies?.find((policy) => policy.id === Number(value)));
+            }}
+            disabled={policiesPending || policyUnavailable}
+          >
+            <SelectTrigger aria-label={t('upload.policy.label')} className="w-[115px]">
+              <SelectValue placeholder={t('upload.policy.label')} />
+            </SelectTrigger>
+            <SelectContent>
+              {(policies ?? []).map((policy) => (
+                <SelectItem key={policy.id} value={String(policy.id)}>
+                  {policy.name}
+                  {policy.is_default ? ` · ${t('upload.policy.defaultHint')}` : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
-        <div className="flex flex-1 items-center justify-center">
+        <div className="flex justify-center">
           <div
             onClick={() => inputRef.current?.click()}
             onKeyDown={(event) => {
