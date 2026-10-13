@@ -149,6 +149,9 @@ export default function DashboardPage() {
   const defaultPolicy = policies.find((policy) => policy.id === user.default_policy_id);
   const recent = imagesQuery.data?.items ?? [];
 
+  // 骨架格数与真实数字格一致, 避免加载完成后跳动 (docs/webui.md 第 3 节)
+  const tileCount = 4 + (remaining === null ? 0 : 1) + (canManageKeys ? 1 : 0);
+
   const tiles = [
     {
       key: 'assets',
@@ -252,7 +255,7 @@ export default function DashboardPage() {
               {showStatsSkeleton ? (
                 <SkeletonSurface label={t('common.skeleton.stats')}>
                   <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {Array.from({ length: 6 }, (_, index) => (
+                    {Array.from({ length: tileCount }, (_, index) => (
                       <TextLinesSkeleton key={index} lines={2} lastWidth="40%" />
                     ))}
                   </div>
