@@ -608,25 +608,28 @@ function GroupFormDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="admin-group-quota-value">{t('admin.groups.field.quotaValue')}</Label>
-              <Input
-                id="admin-group-quota-value"
-                value={quotaValue}
-                inputMode="numeric"
-                disabled={quotaMode === ''}
-                aria-invalid={Boolean(errors.quotaValue)}
-                onChange={(event) => setQuotaValue(event.target.value)}
-              />
-              <p
-                className={cn(
-                  'text-sm',
-                  errors.quotaValue ? 'text-destructive' : 'text-muted-foreground',
-                )}
-              >
-                {errors.quotaValue || t('admin.groups.quotaValueHint')}
-              </p>
-            </div>
+            {quotaMode !== '' && (
+              <div className="flex flex-1 flex-col gap-1.5">
+                <Label htmlFor="admin-group-quota-value">
+                  {t('admin.groups.field.quotaValue')}
+                </Label>
+                <Input
+                  id="admin-group-quota-value"
+                  value={quotaValue}
+                  inputMode="numeric"
+                  aria-invalid={Boolean(errors.quotaValue)}
+                  onChange={(event) => setQuotaValue(event.target.value)}
+                />
+                <p
+                  className={cn(
+                    'text-sm',
+                    errors.quotaValue ? 'text-destructive' : 'text-muted-foreground',
+                  )}
+                >
+                  {errors.quotaValue || t('admin.groups.quotaValueHint')}
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-4 sm:flex-row">
