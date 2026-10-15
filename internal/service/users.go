@@ -150,7 +150,9 @@ func (u *Users) Create(in UserInput, actor *Principal, ip, userAgent string) (*m
 	if err := u.db.First(&group, groupID).Error; err != nil {
 		return nil, apperr.ErrInvalidRequest.WithMessage("用户组不存在")
 	}
-
+	if permissionsExceedActor(actor, group.Permissions) {
+		return nil, apperr.ErrInvalidRequest.WithMessage("用户组权限不能超出当前用户权限")
+	}
 	quotaMode := normalizeQuotaMode(in.QuotaMode)
 	if quotaMode != nil && *quotaMode != model.QuotaModeCount && *quotaMode != model.QuotaModeBytes {
 		return nil, apperr.ErrInvalidRequest.WithMessage("配额方式只能是 count 或 bytes")
@@ -216,6 +218,9 @@ func (u *Users) Update(id int64, in UserInput, actor *Principal, ip, userAgent s
 		var group model.Group
 		if err := u.db.First(&group, *in.GroupID).Error; err != nil {
 			return nil, apperr.ErrInvalidRequest.WithMessage("用户组不存在")
+		}
+		if permissionsExceedActor(actor, group.Permissions) {
+			return nil, apperr.ErrInvalidRequest.WithMessage("用户组权限不能超出当前用户权限")
 		}
 		updates["group_id"] = *in.GroupID
 	}

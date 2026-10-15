@@ -83,6 +83,9 @@ func (g *Groups) Create(in GroupInput, actor *Principal, ip, userAgent string) (
 	if err != nil {
 		return nil, err
 	}
+	if permissionsExceedActor(actor, permissions) {
+		return nil, apperr.ErrInvalidRequest.WithMessage("用户组权限不能超出当前用户权限")
+	}
 	group := model.Group{
 		Name:             in.Name,
 		Description:      strings.TrimSpace(in.Description),
@@ -134,6 +137,9 @@ func (g *Groups) Update(id int64, in GroupInput, actor *Principal, ip, userAgent
 	permissions, err := g.validate(&in, group)
 	if err != nil {
 		return nil, err
+	}
+	if permissionsExceedActor(actor, permissions) {
+		return nil, apperr.ErrInvalidRequest.WithMessage("用户组权限不能超出当前用户权限")
 	}
 	isDefault := group.IsDefault
 	if in.IsDefault != nil {
@@ -353,6 +359,13 @@ func normalizeQuotaMode(mode *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func permissionsExceedActor(actor *Principal, permissions model.Permission) bool {
+	if actor == nil {
+		return permissions != 0
+	}
+	return permissions & ^actor.Permissions != 0
 }
 
 func actorID(actor *Principal) *int64 {

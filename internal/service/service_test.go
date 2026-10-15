@@ -688,6 +688,105 @@ func TestBuiltinGroupGuards(t *testing.T) {
 	}
 }
 
+func TestPermissionDelegationIsBoundToActor(t *testing.T) {
+	f := newFixture(t)
+	managerGroup, err := f.svc.Groups.Create(service.GroupInput{
+		Name:        "受限管理组",
+		Permissions: []string{"manage_users", "manage_groups", "manage_settings"},
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("创建受限管理组失败: %v", err)
+	}
+	manager, err := f.svc.Users.Create(service.UserInput{
+		Username: "delegator",
+		Email:    "delegator@example.com",
+		Password: "password123",
+		GroupID:  &managerGroup.ID,
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("创建受限管理用户失败: %v", err)
+	}
+	scopes := int64(model.PermManageUsers | model.PermManageGroups)
+	actor, err := f.svc.Auth.PrincipalFor(manager.ID, nil, &scopes)
+	if err != nil {
+		t.Fatalf("加载受限管理主体失败: %v", err)
+	}
+
+	var adminGroup model.Group
+	if err := f.database.Where("name = ?", "管理员").First(&adminGroup).Error; err != nil {
+		t.Fatalf("读取管理员组失败: %v", err)
+	}
+	rejectExcess := func(err error, action string) {
+		t.Helper()
+		var apiErr *apperr.Error
+		if !errors.As(err, &apiErr) || apiErr.Code != "invalid_request" {
+			t.Errorf("%s 应因超出当前权限而返回 invalid_request, 实际: %v", action, err)
+		}
+	}
+
+	_, err = f.svc.Users.Update(manager.ID, service.UserInput{GroupID: &adminGroup.ID}, actor, "127.0.0.1", "test-agent")
+	rejectExcess(err, "将自己移入管理员组")
+
+	_, err = f.svc.Users.Create(service.UserInput{
+		Username: "promoted",
+		Email:    "promoted@example.com",
+		Password: "password123",
+		GroupID:  &adminGroup.ID,
+	}, actor, "127.0.0.1", "test-agent")
+	rejectExcess(err, "创建管理员用户")
+
+	isDefault := true
+	_, err = f.svc.Groups.Create(service.GroupInput{
+		Name:        "越权默认组",
+		IsDefault:   &isDefault,
+		Permissions: model.AllPermissions().Names(),
+	}, actor, "127.0.0.1", "test-agent")
+	rejectExcess(err, "创建超出权限的默认组")
+	var defaultGroup model.Group
+	if err := f.database.Where("is_default = ?", true).First(&defaultGroup).Error; err != nil {
+		t.Fatalf("读取默认组失败: %v", err)
+	}
+	if defaultGroup.ID != f.normalGID {
+		t.Errorf("越权请求不应替换默认组: got %d, want %d", defaultGroup.ID, f.normalGID)
+	}
+
+	ordinaryGroup, err := f.svc.Groups.Get(f.normalGID)
+	if err != nil {
+		t.Fatalf("读取普通用户组失败: %v", err)
+	}
+	_, err = f.svc.Groups.Update(ordinaryGroup.ID, service.GroupInput{
+		Name:        ordinaryGroup.Name,
+		Permissions: model.AllPermissions().Names(),
+	}, actor, "127.0.0.1", "test-agent")
+	rejectExcess(err, "更新用户组以增加越权权限")
+
+	_, err = f.svc.Groups.Create(service.GroupInput{
+		Name:        "超出 API 密钥范围",
+		Permissions: []string{"manage_settings"},
+	}, actor, "127.0.0.1", "test-agent")
+	rejectExcess(err, "委派 API 密钥未授权的权限")
+
+	delegatedGroup, err := f.svc.Groups.Create(service.GroupInput{
+		Name:        "可委派管理组",
+		Permissions: []string{"manage_groups"},
+	}, actor, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("委派自身已有权限应成功: %v", err)
+	}
+	member, err := f.svc.Users.Create(service.UserInput{
+		Username: "member",
+		Email:    "member@example.com",
+		Password: "password123",
+		GroupID:  &ordinaryGroup.ID,
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("创建普通用户失败: %v", err)
+	}
+	if _, err := f.svc.Users.Update(member.ID, service.UserInput{GroupID: &delegatedGroup.ID}, actor, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("分配权限子集内的用户组应成功: %v", err)
+	}
+}
+
 func TestRateLimit(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)

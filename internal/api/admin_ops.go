@@ -182,7 +182,7 @@ func (s *Server) adminUpdateSettings(c *gin.Context) {
 		}
 		values[key] = value
 	}
-	if err := s.svc.Settings.Update(values); err != nil {
+	if err := s.svc.Settings.UpdateAs(principal, values); err != nil {
 		s.fail(c, err)
 		return
 	}

@@ -136,6 +136,53 @@ func (s *Settings) Definitions() []migrations.SettingDefinition {
 	return migrations.SettingDefinitions
 }
 
+// UpdateAs 按主体权限更新设置; 新用户默认组不得超出主体当前有效权限.
+func (s *Settings) UpdateAs(actor *Principal, values map[string]string) error {
+	if value, ok := values["default_group_id"]; ok {
+		if err := s.validateDefaultGroupPermissions(value, actor); err != nil {
+			return err
+		}
+	}
+	return s.Update(values)
+}
+
+func (s *Settings) validateDefaultGroupPermissions(value string, actor *Principal) error {
+	id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err == nil && id > 0 {
+		var group model.Group
+		lookupErr := s.db.First(&group, id).Error
+		if lookupErr == nil {
+			if group.IsSystem {
+				return nil
+			}
+			if permissionsExceedActor(actor, group.Permissions) {
+				return apperr.ErrInvalidRequest.WithMessage("默认用户组权限不能超出当前用户权限")
+			}
+			return nil
+		}
+		if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return nil
+		}
+	}
+
+	var group model.Group
+	err = s.db.Where("is_default = ? AND is_system = ?", true, false).
+		Order("sort ASC, id ASC").First(&group).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = s.db.Where("is_system = ?", false).Order("id ASC").First(&group).Error
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if permissionsExceedActor(actor, group.Permissions) {
+		return apperr.ErrInvalidRequest.WithMessage("默认用户组权限不能超出当前用户权限")
+	}
+	return nil
+}
+
 // Update 批量写入设置: 秘密字段自动加密, 空串表示清空.
 func (s *Settings) Update(values map[string]string) error {
 	if len(values) == 0 {

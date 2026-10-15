@@ -1219,6 +1219,99 @@ func TestLskyRateLimitRejectsBeforeReadingFileBody(t *testing.T) {
 	}
 }
 
+func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
+	s := newServer(t)
+	adminCookie, _ := s.bootstrap()
+
+	highGroup := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+		"name":        "自定义全权组",
+		"permissions": model.AllPermissions().Names(),
+	}, []*http.Cookie{adminCookie})
+	if highGroup.Status != http.StatusCreated {
+		t.Fatalf("创建全权组失败: %d %s", highGroup.Status, string(highGroup.Body))
+	}
+	highGroupID := int64(s.decode(highGroup)["id"].(float64))
+
+	settingsGroup := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+		"name":        "设置管理员组",
+		"permissions": []string{"manage_policies", "manage_users", "manage_groups", "manage_settings", "view_logs", "view_all", "delete_all"},
+	}, []*http.Cookie{adminCookie})
+	if settingsGroup.Status != http.StatusCreated {
+		t.Fatalf("创建设置管理员组失败: %d %s", settingsGroup.Status, string(settingsGroup.Body))
+	}
+	settingsGroupID := int64(s.decode(settingsGroup)["id"].(float64))
+	createdUser := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
+		"username": "settings-manager",
+		"email":    "settings-manager@example.com",
+		"password": "password123",
+		"group_id": settingsGroupID,
+	}, []*http.Cookie{adminCookie})
+	if createdUser.Status != http.StatusCreated {
+		t.Fatalf("创建设置管理员失败: %d %s", createdUser.Status, string(createdUser.Body))
+	}
+	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "settings-manager",
+		"password":   "password123",
+	}, nil)
+	if login.Status != http.StatusOK {
+		t.Fatalf("设置管理员登录失败: %d %s", login.Status, string(login.Body))
+	}
+	managerCookie := s.sessionCookie(login)
+	managerID := int64(s.decode(createdUser)["id"].(float64))
+	var adminGroup model.Group
+	if err := s.db.Where("name = ?", "管理员").First(&adminGroup).Error; err != nil {
+		t.Fatalf("读取管理员组失败: %v", err)
+	}
+	selfPromotion := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/users/%d", managerID), map[string]any{
+		"group_id": adminGroup.ID,
+	}, []*http.Cookie{managerCookie})
+	if selfPromotion.Status != http.StatusBadRequest {
+		t.Fatalf("将自己移入管理员组应返回 400, 实际 %d %s", selfPromotion.Status, string(selfPromotion.Body))
+	}
+	overprivilegedGroup := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+		"name":        "越权默认组",
+		"is_default":  true,
+		"permissions": model.AllPermissions().Names(),
+	}, []*http.Cookie{managerCookie})
+	if overprivilegedGroup.Status != http.StatusBadRequest {
+		t.Fatalf("创建超出主体权限的默认组应返回 400, 实际 %d %s", overprivilegedGroup.Status, string(overprivilegedGroup.Body))
+	}
+
+	safeDefault := s.json(http.MethodPatch, "/api/v1/admin/settings", map[string]any{
+		"default_group_id": settingsGroupID,
+	}, []*http.Cookie{managerCookie})
+	if safeDefault.Status != http.StatusOK {
+		t.Fatalf("设置权限子集内的默认组应成功: %d %s", safeDefault.Status, string(safeDefault.Body))
+	}
+
+	overprivilegedDefault := s.json(http.MethodPatch, "/api/v1/admin/settings", map[string]any{
+		"default_group_id": highGroupID,
+	}, []*http.Cookie{managerCookie})
+	if overprivilegedDefault.Status != http.StatusBadRequest {
+		t.Fatalf("设置超出主体权限的默认组应返回 400, 实际 %d %s", overprivilegedDefault.Status, string(overprivilegedDefault.Body))
+	}
+	clearToMorePrivilegedFallback := s.json(http.MethodPatch, "/api/v1/admin/settings", map[string]any{
+		"default_group_id": "",
+	}, []*http.Cookie{managerCookie})
+	if clearToMorePrivilegedFallback.Status != http.StatusBadRequest {
+		t.Fatalf("回退到权限超出主体的默认组应返回 400, 实际 %d %s", clearToMorePrivilegedFallback.Status, string(clearToMorePrivilegedFallback.Body))
+	}
+
+	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
+		"username": "new-member",
+		"email":    "new-member@example.com",
+		"password": "password123",
+	}, nil)
+	if registered.Status != http.StatusCreated {
+		t.Fatalf("注册新用户失败: %d %s", registered.Status, string(registered.Body))
+	}
+	newMember := s.decode(registered)
+	group := newMember["group"].(map[string]any)
+	if int64(group["id"].(float64)) != settingsGroupID {
+		t.Errorf("新用户应进入权限受限的默认组: got %v, want %d", group["id"], settingsGroupID)
+	}
+}
+
 func TestLskyCompatibilityLayer(t *testing.T) {
 	s := newServer(t)
 	cookie, policyID := s.bootstrap()

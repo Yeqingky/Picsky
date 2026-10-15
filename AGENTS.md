@@ -75,6 +75,7 @@ Picsky/
 - 密码找回令牌必须限时、一次性且绑定当前密码散列; 重置密码与清除 TOTP 秘钥必须在同一事务中完成; 登录页仅在公开站点信息报告 SMTP 发信已配置时显示找回入口.
 - 维护任务 (队列) 必须幂等可重试, 已完成任务可手动重跑, 不得绕过权限与能力降级; WebDAV 只是内部存储通道, 不得对外暴露.
 - 内置用户组 (`管理员` / `只读`, 由 `groups.is_system` 标记) 的权限位固定, 不可删除, 不可设为默认组; 调整组规则时同步更新 `docs/permissions.md`.
+- 用户组权限委派必须是调用者当前有效权限的子集; 创建用户/改组、创建/更新用户组与设置新用户默认组都校验此约束; API 密钥调用按 `scopes` 裁剪后的权限计算.
 - 前端样式只使用 Tailwind CSS v4 与 `src/index.css` 的语义令牌 (`background`, `card`, `muted`, `primary`, `destructive`, `success`, `warning`, `info`, `border`, `ring`, `chart-*`), 禁止硬编码色值与 CSS-in-JS.
 - 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示; 注册邮箱白名单按完整域名精确匹配, 留空时不限制; 列表输入复用 `TagsInput`.
 - 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 不引入 MUI, Emotion, 其它 UI 库或图标库, 图标统一 lucide-react, 全局提示统一 sonner.
