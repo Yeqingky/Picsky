@@ -1071,6 +1071,15 @@ func TestTaskQueueScanAndLogPurge(t *testing.T) {
 	if err := f.svc.Tasks.RunNow(logTask.ID, f.admin); err != nil {
 		t.Fatalf("日志清理任务应执行成功: %v", err)
 	}
+	if err := f.svc.Tasks.RunNow(logTask.ID, f.admin); err != nil {
+		t.Fatalf("已完成任务应支持再次执行: %v", err)
+	}
+	if err := f.database.First(&logTask, logTask.ID).Error; err != nil {
+		t.Fatalf("读取重跑后的任务失败: %v", err)
+	}
+	if logTask.Status != model.TaskDone || logTask.Attempts != 2 {
+		t.Fatalf("重跑后的任务应为 done 且尝试次数为 2: %+v", logTask)
+	}
 }
 
 func TestUsedBytesReconcile(t *testing.T) {

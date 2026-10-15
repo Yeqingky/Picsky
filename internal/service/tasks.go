@@ -140,7 +140,7 @@ func (t *Tasks) RunNow(id int64, actor *Principal) error {
 	}
 	ctx, cancel := contextWithTimeout(30 * time.Minute)
 	defer cancel()
-	if err := t.execute(ctx, &task); err != nil {
+	if err := t.execute(ctx, &task, true); err != nil {
 		if errors.Is(err, errTaskClaimed) {
 			return apperr.ErrInvalidRequest.WithMessage("任务正在执行中")
 		}
@@ -204,7 +204,7 @@ func (t *Tasks) runPending(ctx context.Context) error {
 			return ctx.Err()
 		}
 		task := tasks[idx]
-		if err := t.execute(ctx, &task); err != nil {
+		if err := t.execute(ctx, &task, false); err != nil {
 			t.markFailed(&task, err)
 			continue
 		}
@@ -217,10 +217,14 @@ func (t *Tasks) runPending(ctx context.Context) error {
 var errTaskClaimed = errors.New("task already claimed")
 
 // execute 执行单个任务; 任务必须幂等可重试.
-func (t *Tasks) execute(ctx context.Context, task *model.MaintenanceTask) error {
-	// 原子认领: 只有 pending / failed 的任务能被执行, 避免调度与手动执行重复运行同一任务.
+func (t *Tasks) execute(ctx context.Context, task *model.MaintenanceTask, allowCompleted bool) error {
+	// 已完成任务仅允许手动重跑, 调度路径不能认领 done, 避免从过期任务快照重复执行.
+	claimableStatuses := []string{model.TaskPending, model.TaskFailed}
+	if allowCompleted {
+		claimableStatuses = append(claimableStatuses, model.TaskDone)
+	}
 	claim := t.db.Model(&model.MaintenanceTask{}).
-		Where("id = ? AND status IN ?", task.ID, []string{model.TaskPending, model.TaskFailed}).
+		Where("id = ? AND status IN ?", task.ID, claimableStatuses).
 		Updates(map[string]any{
 			"status":      model.TaskRunning,
 			"attempts":    gorm.Expr("attempts + 1"),

@@ -437,7 +437,7 @@ export type SettingsPayload = Record<string, string | boolean | undefined> & {
   smtp_password_set?: boolean;
 };
 
-export type MaintenanceTaskType = 'object_delete' | 'log_purge';
+export type MaintenanceTaskType = 'object_delete' | 'log_purge' | 'policy_scan' | 'quota_reconcile';
 export type MaintenanceTaskStatus = 'pending' | 'running' | 'done' | 'failed';
 
 export interface MaintenanceTask {

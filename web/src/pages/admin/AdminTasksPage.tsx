@@ -28,7 +28,7 @@ import { DEFAULT_TABLE_PAGE_SIZE } from '../../utils/constants';
 import { formatDateTime } from '../../utils/format';
 import { cn } from '../../lib/utils';
 
-const TASK_TYPES = ['object_delete', 'log_purge'] as const;
+const TASK_TYPES = ['object_delete', 'log_purge', 'policy_scan', 'quota_reconcile'] as const;
 const TASK_STATUSES = ['pending', 'running', 'done', 'failed'] as const;
 
 /** Radix Select 不支持空字符串值, 用哨兵表示 "全部" */
@@ -37,6 +37,8 @@ const ALL_VALUE = '__all__';
 const TASK_TYPE_LABEL_KEYS: Record<string, string> = {
   object_delete: 'adminSystem.tasks.type.object_delete',
   log_purge: 'adminSystem.tasks.type.log_purge',
+  policy_scan: 'adminSystem.tasks.type.policy_scan',
+  quota_reconcile: 'adminSystem.tasks.type.quota_reconcile',
 };
 
 const TASK_STATUS_LABEL_KEYS: Record<string, string> = {

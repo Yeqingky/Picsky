@@ -30,6 +30,7 @@ import (
 	"github.com/yeqingky/Picsky/internal/api"
 	"github.com/yeqingky/Picsky/internal/config"
 	"github.com/yeqingky/Picsky/internal/db"
+	"github.com/yeqingky/Picsky/internal/model"
 	"github.com/yeqingky/Picsky/internal/service"
 	"github.com/yeqingky/Picsky/migrations"
 
@@ -992,6 +993,25 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 	tasks := s.raw(http.MethodGet, "/api/v1/admin/tasks", nil, nil, []*http.Cookie{cookie})
 	if tasks.Status != http.StatusOK {
 		t.Fatalf("读取任务失败: %d %s", tasks.Status, string(tasks.Body))
+	}
+
+	task, err := s.svc.Tasks.Enqueue(model.TaskLogPurge, nil)
+	if err != nil {
+		t.Fatalf("创建维护任务失败: %v", err)
+	}
+	runTaskPath := fmt.Sprintf("/api/v1/admin/tasks/%d/run", task.ID)
+	for attempt := 1; attempt <= 2; attempt++ {
+		run := s.raw(http.MethodPost, runTaskPath, nil, nil, []*http.Cookie{cookie})
+		if run.Status != http.StatusNoContent {
+			t.Fatalf("第 %d 次运行任务失败: %d %s", attempt, run.Status, string(run.Body))
+		}
+	}
+	var rerunTask model.MaintenanceTask
+	if err := s.db.First(&rerunTask, task.ID).Error; err != nil {
+		t.Fatalf("读取重跑后的任务失败: %v", err)
+	}
+	if rerunTask.Status != model.TaskDone || rerunTask.Attempts != 2 {
+		t.Fatalf("重跑后的任务状态或尝试次数不正确: %+v", rerunTask)
 	}
 
 	preview := s.json(http.MethodPost, "/api/v1/admin/policies/preview", map[string]any{

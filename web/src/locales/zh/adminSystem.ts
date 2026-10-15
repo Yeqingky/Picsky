@@ -97,6 +97,8 @@ export const adminSystem = {
     type: {
       object_delete: '删除对象',
       log_purge: '日志清理',
+      policy_scan: '策略扫描',
+      quota_reconcile: '配额对账',
     },
     column: {
       id: 'ID',
