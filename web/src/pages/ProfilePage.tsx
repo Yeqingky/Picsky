@@ -176,6 +176,28 @@ export default function ProfilePage() {
 
       <div className="flex flex-col gap-4">
         <SectionCard title={t('account.profile.accountSection')}>
+          <div className="flex min-w-0 items-center gap-2">
+            <Label
+              htmlFor="profile-nickname"
+              className="text-muted-foreground w-20 shrink-0 text-xs whitespace-nowrap"
+            >
+              {t('account.profile.nickname')}
+            </Label>
+            <Input
+              id="profile-nickname"
+              className="min-w-0 max-w-48 flex-1"
+              value={nickname}
+              onChange={(event) => setNickname(event.target.value)}
+              placeholder={t('account.profile.nicknamePlaceholder')}
+            />
+            <Button
+              className="shrink-0"
+              disabled={nicknameMutation.isPending || nickname.trim() === ''}
+              onClick={() => nicknameMutation.mutate(nickname.trim())}
+            >
+              {t('common.action.save')}
+            </Button>
+          </div>
           <ReadonlyField label={t('account.profile.username')}>
             <span className="text-sm">{user.username}</span>
           </ReadonlyField>
@@ -193,6 +215,11 @@ export default function ProfilePage() {
           </ReadonlyField>
           <ReadonlyField label={t('account.profile.group')}>
             <span className="text-sm">{user.group.name}</span>
+          </ReadonlyField>
+          <ReadonlyField label={t('account.profile.quotaSection')}>
+            <div className="min-w-0 flex-1">
+              <QuotaBar quota={user.quota} />
+            </div>
           </ReadonlyField>
 
           {!user.email_verified && (
@@ -214,29 +241,6 @@ export default function ProfilePage() {
               )}
             </div>
           )}
-
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="flex min-w-0 flex-1 flex-col gap-2 sm:max-w-[260px]">
-              <Label htmlFor="profile-nickname">{t('account.profile.nickname')}</Label>
-              <Input
-                id="profile-nickname"
-                value={nickname}
-                onChange={(event) => setNickname(event.target.value)}
-                placeholder={t('account.profile.nicknamePlaceholder')}
-              />
-            </div>
-            <Button
-              className="self-start sm:self-end"
-              disabled={nicknameMutation.isPending || nickname.trim() === ''}
-              onClick={() => nicknameMutation.mutate(nickname.trim())}
-            >
-              {t('common.action.save')}
-            </Button>
-          </div>
-        </SectionCard>
-
-        <SectionCard title={t('account.profile.quotaSection')}>
-          <QuotaBar quota={user.quota} />
         </SectionCard>
 
         <SectionCard title={t('account.profile.passwordSection')}>
@@ -250,52 +254,56 @@ export default function ProfilePage() {
               </AlertDescription>
             </Alert>
           )}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="profile-old-password">{t('account.profile.oldPassword')}</Label>
-            <Input
-              id="profile-old-password"
-              type="password"
-              value={oldPassword}
-              onChange={(event) => setOldPassword(event.target.value)}
-              aria-invalid={Boolean(passwordErrors.oldPassword)}
-              autoComplete="current-password"
-            />
-            {passwordErrors.oldPassword && (
-              <p className="text-destructive text-sm">{passwordErrors.oldPassword}</p>
-            )}
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="profile-new-password">{t('account.profile.newPassword')}</Label>
-            <Input
-              id="profile-new-password"
-              type="password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              aria-invalid={Boolean(passwordErrors.newPassword)}
-              autoComplete="new-password"
-            />
-            {passwordErrors.newPassword && (
-              <p className="text-destructive text-sm">{passwordErrors.newPassword}</p>
-            )}
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="profile-confirm-password">{t('account.profile.confirmPassword')}</Label>
-            <Input
-              id="profile-confirm-password"
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              aria-invalid={Boolean(passwordErrors.confirmPassword)}
-              autoComplete="new-password"
-            />
-            {passwordErrors.confirmPassword && (
-              <p className="text-destructive text-sm">{passwordErrors.confirmPassword}</p>
-            )}
-          </div>
-          <div>
-            <Button disabled={passwordMutation.isPending} onClick={handlePasswordSubmit}>
-              {t('common.action.save')}
-            </Button>
+          <div className="flex max-w-md flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="profile-old-password">{t('account.profile.oldPassword')}</Label>
+              <Input
+                id="profile-old-password"
+                type="password"
+                value={oldPassword}
+                onChange={(event) => setOldPassword(event.target.value)}
+                aria-invalid={Boolean(passwordErrors.oldPassword)}
+                autoComplete="current-password"
+              />
+              {passwordErrors.oldPassword && (
+                <p className="text-destructive text-sm">{passwordErrors.oldPassword}</p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="profile-new-password">{t('account.profile.newPassword')}</Label>
+              <Input
+                id="profile-new-password"
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                aria-invalid={Boolean(passwordErrors.newPassword)}
+                autoComplete="new-password"
+              />
+              {passwordErrors.newPassword && (
+                <p className="text-destructive text-sm">{passwordErrors.newPassword}</p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="profile-confirm-password">
+                {t('account.profile.confirmPassword')}
+              </Label>
+              <Input
+                id="profile-confirm-password"
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                aria-invalid={Boolean(passwordErrors.confirmPassword)}
+                autoComplete="new-password"
+              />
+              {passwordErrors.confirmPassword && (
+                <p className="text-destructive text-sm">{passwordErrors.confirmPassword}</p>
+              )}
+            </div>
+            <div>
+              <Button disabled={passwordMutation.isPending} onClick={handlePasswordSubmit}>
+                {t('common.action.save')}
+              </Button>
+            </div>
           </div>
         </SectionCard>
 

@@ -315,10 +315,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-14 min-w-0 items-center px-4 md:h-16">
+      <div className="flex h-14 min-w-0 items-center border-b px-4 md:h-16">
         <span className="font-heading truncate text-base font-bold">{siteName}</span>
       </div>
-      <div className="border-b" />
       <div className="flex-1 overflow-y-auto py-2">
         <NavList items={navItems} onNavigate={onNavigate} />
       </div>
@@ -333,7 +332,7 @@ export function AppLayout() {
 
   return (
     <div className="bg-background flex min-h-svh w-full">
-      <div className="hidden md:block md:w-[236px] md:shrink-0">
+      <div className="hidden md:block md:shrink-0" style={{ width: DRAWER_WIDTH }}>
         <div
           className="fixed inset-y-0 left-0 hidden shrink-0 border-r bg-background md:block"
           style={{ width: DRAWER_WIDTH }}

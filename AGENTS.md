@@ -78,6 +78,8 @@ Picsky/
 - 表格统一用 `src/components/DataTable.tsx`, 日期选择统一用 `src/components/DatePicker.tsx`, 空/错状态统一用 `src/components/States.tsx`; 需要新交互时先扩展这些共享组件.
 - 图库筛选使用原始文件名, 格式与存储策略; 不提供开始时间和结束时间筛选; 仅存在筛选条件时渲染清空筛选按钮.
 - `LazyImage` 的加载与失败状态必须绑定当前图片直链; 直链变化时应同步派生 `loading` 状态, 不依赖 effect 异步重置.
+- 个人设置账户信息按昵称、用户名、邮箱、用户组、配额排列, 配额显示在账户信息卡中; 昵称标签、输入框和保存按钮保持同行; 昵称与密码输入限宽.
+- 桌面侧栏占位宽度必须与固定侧栏共用 `DRAWER_WIDTH`; 侧栏标题行在定高容器内绘制下边框, 与顶栏下边框共线.
 - 前端验证顺序: `npm run typecheck` -> `npm run lint` -> `npm run format:check` -> `npm run build`; 代码逻辑变更后必须同步更新 `docs/webui.md` 与 `docs/tech-stack.md` 的对应描述.
 
 ## 构建与运行
