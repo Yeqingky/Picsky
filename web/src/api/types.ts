@@ -61,8 +61,7 @@ export interface CurrentUser {
 
 export type LoginRequest =
   | {
-      identifier?: string;
-      username?: string;
+      identifier: string;
       password: string;
       captcha_token?: string;
       login_challenge?: never;
@@ -266,8 +265,8 @@ export interface ApiKeyCreateRequest {
 
 /* ------------------------------------------------------------------ 管理 */
 
-/** 账号状态: 0 正常, 1 禁用 */
-export type UserStatus = 0 | 1;
+/** 账号状态: 0 正常, 1 未验证, 2 封禁 */
+export type UserStatus = 0 | 1 | 2;
 
 export interface AdminUser {
   id: number;
@@ -278,6 +277,7 @@ export interface AdminUser {
   group_id: number;
   group_name: string;
   status: UserStatus;
+  restore_group_id: number | null;
   quota_mode: QuotaMode | null;
   quota_value: number | null;
   used_images: number;

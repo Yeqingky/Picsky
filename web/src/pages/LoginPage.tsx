@@ -21,7 +21,7 @@ import {
   DialogTitle,
 } from '../components/ui/dialog';
 
-/** 登录页: 用户名/邮箱 + 密码 + 按需两步验证 + 人机验证 (/login) */
+/** 登录页: 邮箱 + 密码 + 按需两步验证 + 人机验证 (/login) */
 export default function LoginPage() {
   const { t } = useTranslation();
   const siteName = useSiteName();
@@ -30,7 +30,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const [identifier, setIdentifier] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const [loginChallenge, setLoginChallenge] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export default function LoginPage() {
   const [resetSignal, setResetSignal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [totpError, setTotpError] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<{ identifier?: string; password?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [submitting, setSubmitting] = useState(false);
 
   const captchaQuery = useQuery({
@@ -61,11 +61,11 @@ export default function LoginPage() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const nextErrors: { identifier?: string; password?: string } = {};
-    if (identifier.trim() === '') nextErrors.identifier = t('auth.login.identifierRequired');
+    const nextErrors: { email?: string; password?: string } = {};
+    if (email.trim() === '') nextErrors.email = t('auth.login.emailRequired');
     if (password === '') nextErrors.password = t('auth.login.passwordRequired');
     setFieldErrors(nextErrors);
-    if (nextErrors.identifier || nextErrors.password) return;
+    if (nextErrors.email || nextErrors.password) return;
 
     if (captchaRequired && captchaToken === '') {
       setError(t('auth.login.captchaRequired'));
@@ -76,7 +76,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login({
-        identifier: identifier.trim(),
+        identifier: email.trim().toLowerCase(),
         password,
         captcha_token: captchaToken === '' ? undefined : captchaToken,
       });
@@ -138,17 +138,21 @@ export default function LoginPage() {
         )}
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor="login-identifier">{t('auth.login.identifier')}</Label>
+          <Label htmlFor="login-email">{t('auth.login.email')}</Label>
           <Input
-            id="login-identifier"
-            value={identifier}
-            onChange={(event) => setIdentifier(event.target.value)}
-            aria-invalid={Boolean(fieldErrors.identifier)}
-            autoComplete="username"
+            id="login-email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value.toLowerCase())}
+            aria-invalid={Boolean(fieldErrors.email)}
+            aria-describedby={fieldErrors.email ? 'login-email-error' : undefined}
+            autoComplete="email"
             autoFocus
           />
-          {fieldErrors.identifier && (
-            <p className="text-destructive text-sm">{fieldErrors.identifier}</p>
+          {fieldErrors.email && (
+            <p id="login-email-error" className="text-destructive text-sm">
+              {fieldErrors.email}
+            </p>
           )}
         </div>
 

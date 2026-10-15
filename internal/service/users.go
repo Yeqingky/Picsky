@@ -11,17 +11,22 @@ import (
 	"github.com/yeqingky/Picsky/internal/model"
 )
 
-// Users 管理用户: 创建, 禁用, 改组, 配额覆盖, 默认策略与删除.
+// Users 管理用户: 创建, 状态, 用户组, 配额覆盖, 默认策略与删除.
 type Users struct {
 	db       *gorm.DB
 	settings *Settings
 	audit    *Audit
 	images   *Images
+	auth     *Auth
 }
 
 // NewUsers 创建用户服务.
-func NewUsers(database *gorm.DB, settings *Settings, audit *Audit, images *Images) *Users {
-	return &Users{db: database, settings: settings, audit: audit, images: images}
+func NewUsers(database *gorm.DB, settings *Settings, audit *Audit, images *Images, auth *Auth) *Users {
+	return &Users{db: database, settings: settings, audit: audit, images: images, auth: auth}
+}
+
+func validUserStatus(status int16) bool {
+	return status == model.UserStatusNormal || status == model.UserStatusUnverified || status == model.UserStatusBanned
 }
 
 // UserInput 是用户创建/更新入参; 指针字段为 nil 表示不修改.
@@ -40,9 +45,10 @@ type UserInput struct {
 // UserView 是用户管理视图.
 type UserView struct {
 	model.User
-	GroupName     string `json:"group_name"`
-	EmailVerified bool   `json:"email_verified"`
-	TOTPEnabled   bool   `json:"totp_enabled"`
+	RestoreGroupID *int64 `json:"restore_group_id"`
+	GroupName      string `json:"group_name"`
+	EmailVerified  bool   `json:"email_verified"`
+	TOTPEnabled    bool   `json:"totp_enabled"`
 }
 
 // UserListFilter 是用户列表过滤条件.
@@ -79,7 +85,8 @@ func (u *Users) List(filter UserListFilter) (*UserListResult, error) {
 	query := u.db.Model(&model.User{})
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		query = query.Where("username LIKE ? OR email LIKE ? OR nickname LIKE ?", like, like, like)
+		emailLike := "%" + strings.ToLower(keyword) + "%"
+		query = query.Where("username LIKE ? OR email LIKE ? OR nickname LIKE ?", like, emailLike, like)
 	}
 	if filter.GroupID != nil {
 		query = query.Where("group_id = ?", *filter.GroupID)
@@ -115,7 +122,7 @@ func (u *Users) View(user *model.User) (*UserView, error) {
 // Create 创建用户.
 func (u *Users) Create(in UserInput, actor *Principal, ip, userAgent string) (*model.User, error) {
 	username := strings.TrimSpace(in.Username)
-	email := strings.TrimSpace(in.Email)
+	email := normalizeEmail(in.Email)
 	if err := validateUsername(username); err != nil {
 		return nil, err
 	}
@@ -161,6 +168,13 @@ func (u *Users) Create(in UserInput, actor *Principal, ip, userAgent string) (*m
 		return nil, apperr.ErrInvalidRequest.WithMessage("配额数值不能为负数")
 	}
 
+	status := model.UserStatusNormal
+	if in.Status != nil {
+		status = *in.Status
+	}
+	if !validUserStatus(status) {
+		return nil, apperr.ErrInvalidRequest.WithMessage("账号状态无效")
+	}
 	hashed, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcryptCost)
 	if err != nil {
 		return nil, apperr.ErrInternal.WithMessage("密码散列失败: " + err.Error())
@@ -175,18 +189,31 @@ func (u *Users) Create(in UserInput, actor *Principal, ip, userAgent string) (*m
 		GroupID:         groupID,
 		QuotaMode:       quotaMode,
 		QuotaValue:      in.QuotaValue,
-		Status:          model.UserStatusNormal,
+		Status:          status,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+	}
+	if status == model.UserStatusUnverified {
+		user.EmailVerifiedAt = nil
+	}
+	if status != model.UserStatusNormal {
+		readOnly, err := u.auth.readOnlyGroup()
+		if err != nil {
+			return nil, err
+		}
+		user.RestoreGroupID = &groupID
+		user.GroupID = readOnly.ID
 	}
 	if in.DefaultPolicyID != nil && *in.DefaultPolicyID > 0 {
 		user.DefaultPolicyID = in.DefaultPolicyID
 	}
-	if in.Status != nil {
-		user.Status = *in.Status
-	}
 	if err := u.db.Create(&user).Error; err != nil {
 		return nil, apperr.ErrInternal.WithMessage("创建用户失败: " + err.Error())
+	}
+	if status == model.UserStatusUnverified {
+		if err := u.auth.QueueVerification(&user); err != nil {
+			u.auth.log.Warn("排队邮箱验证邮件失败", "user_id", user.ID, "error", err)
+		}
 	}
 	u.audit.Recordf(Entry{
 		UserID:     actorID(actor),
@@ -214,21 +241,67 @@ func (u *Users) Update(id int64, in UserInput, actor *Principal, ip, userAgent s
 	if in.Nickname != "" {
 		updates["nickname"] = strings.TrimSpace(in.Nickname)
 	}
-	if in.GroupID != nil {
-		var group model.Group
-		if err := u.db.First(&group, *in.GroupID).Error; err != nil {
-			return nil, apperr.ErrInvalidRequest.WithMessage("用户组不存在")
+	if in.GroupID != nil || in.Status != nil {
+		status := user.Status
+		if in.Status != nil {
+			status = *in.Status
 		}
-		if permissionsExceedActor(actor, group.Permissions) {
-			return nil, apperr.ErrInvalidRequest.WithMessage("用户组权限不能超出当前用户权限")
+		if !validUserStatus(status) {
+			return nil, apperr.ErrInvalidRequest.WithMessage("账号状态无效")
 		}
-		updates["group_id"] = *in.GroupID
-	}
-	if in.Status != nil {
-		if *in.Status != model.UserStatusNormal && *in.Status != model.UserStatusDisabled {
-			return nil, apperr.ErrInvalidRequest.WithMessage("状态只能是 0 (正常) 或 1 (禁用)")
+
+		groupID := user.GroupID
+		if user.Status != model.UserStatusNormal && user.RestoreGroupID != nil {
+			groupID = *user.RestoreGroupID
 		}
-		updates["status"] = *in.Status
+		if user.Status != model.UserStatusNormal && user.RestoreGroupID == nil {
+			readOnly, err := u.auth.readOnlyGroup()
+			if err != nil {
+				return nil, err
+			}
+			if groupID == readOnly.ID {
+				defaultGroup, err := u.auth.defaultGroup()
+				if err != nil {
+					return nil, err
+				}
+				groupID = defaultGroup.ID
+			}
+		}
+		if in.GroupID != nil {
+			var group model.Group
+			if err := u.db.First(&group, *in.GroupID).Error; err != nil {
+				return nil, apperr.ErrInvalidRequest.WithMessage("用户组不存在")
+			}
+			if permissionsExceedActor(actor, group.Permissions) {
+				return nil, apperr.ErrInvalidRequest.WithMessage("用户组权限不能超出当前用户权限")
+			}
+			groupID = *in.GroupID
+		}
+
+		switch status {
+		case model.UserStatusNormal:
+			updates["group_id"] = groupID
+			updates["restore_group_id"] = nil
+			if in.Status != nil {
+				updates["email_verified_at"] = nowUTC()
+			}
+		case model.UserStatusUnverified, model.UserStatusBanned:
+			readOnly, err := u.auth.readOnlyGroup()
+			if err != nil {
+				return nil, err
+			}
+			updates["group_id"] = readOnly.ID
+			updates["restore_group_id"] = groupID
+			if status == model.UserStatusUnverified {
+				updates["email_verified_at"] = nil
+			}
+			if user.Status != model.UserStatusBanned && status == model.UserStatusBanned {
+				updates["session_version"] = user.SessionVersion + 1
+			}
+		}
+		if in.Status != nil {
+			updates["status"] = status
+		}
 	}
 	if in.QuotaMode != nil {
 		mode := normalizeQuotaMode(in.QuotaMode)
@@ -272,8 +345,12 @@ func (u *Users) Update(id int64, in UserInput, actor *Principal, ip, userAgent s
 		updates["password_hash"] = string(hashed)
 	}
 
-	if err := u.db.Model(&model.User{}).Where("id = ?", user.ID).Updates(updates).Error; err != nil {
-		return nil, apperr.ErrInternal.WithMessage("更新用户失败: " + err.Error())
+	result := u.db.Model(&model.User{}).Where("id = ? AND status = ?", user.ID, user.Status).Updates(updates)
+	if result.Error != nil {
+		return nil, apperr.ErrInternal.WithMessage("更新用户失败: " + result.Error.Error())
+	}
+	if result.RowsAffected == 0 {
+		return nil, apperr.ErrInvalidRequest.WithMessage("账号状态已变化, 请刷新后重试")
 	}
 	u.audit.Recordf(Entry{
 		UserID:     actorID(actor),
@@ -284,7 +361,16 @@ func (u *Users) Update(id int64, in UserInput, actor *Principal, ip, userAgent s
 		IP:         ip,
 		UserAgent:  userAgent,
 	})
-	return u.UserByID(user.ID)
+	updated, err := u.UserByID(user.ID)
+	if err != nil {
+		return nil, err
+	}
+	if in.Status != nil && *in.Status == model.UserStatusUnverified {
+		if err := u.auth.QueueVerification(updated); err != nil {
+			u.auth.log.Warn("排队邮箱验证邮件失败", "user_id", updated.ID, "error", err)
+		}
+	}
+	return updated, nil
 }
 
 // Delete 删除用户: 其记录级联删除并按删除流程处理外部对象, 审计日志保留.
@@ -364,10 +450,11 @@ func (u *Users) views(users []model.User) ([]UserView, error) {
 	}
 	for _, user := range users {
 		views = append(views, UserView{
-			User:          user,
-			GroupName:     groupNames[user.GroupID],
-			EmailVerified: user.EmailVerifiedAt != nil,
-			TOTPEnabled:   user.TOTPSecret != "",
+			User:           user,
+			RestoreGroupID: user.RestoreGroupID,
+			GroupName:      groupNames[user.GroupID],
+			EmailVerified:  user.EmailVerifiedAt != nil,
+			TOTPEnabled:    user.TOTPSecret != "",
 		})
 	}
 	return views, nil

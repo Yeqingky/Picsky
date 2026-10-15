@@ -40,7 +40,7 @@ export const account = {
     emailVerified: '邮箱已验证',
     emailUnverified: '邮箱未验证',
     resendVerification: '重新发送验证邮件',
-    resendSent: '验证邮件已发送, 请查收',
+    resendSent: '验证邮件已排队, 请稍后查收',
     nickname: '昵称',
     nicknamePlaceholder: '在界面中显示的名称',
     nicknameSaved: '昵称已更新',

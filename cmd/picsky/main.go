@@ -99,6 +99,7 @@ func run() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	services.Mailer.Start(ctx)
 	go services.Tasks.Start(ctx)
 
 	server := &http.Server{

@@ -1271,14 +1271,14 @@ func TestAuthRegisterLoginAndTotp(t *testing.T) {
 		t.Error("弱密码应被拒绝")
 	}
 
-	user, err := f.svc.Auth.Login(ctx, service.LoginInput{Identifier: "admin", Password: "password123"}, "127.0.0.1", "test")
+	user, err := f.svc.Auth.Login(ctx, service.LoginInput{Email: "admin@example.com", Password: "password123"}, "127.0.0.1", "test")
 	if err != nil {
 		t.Fatalf("登录失败: %v", err)
 	}
 	if user.Username != "admin" {
 		t.Errorf("登录返回用户不正确: %+v", user)
 	}
-	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{Identifier: "admin@example.com", Password: "wrong"}, "127.0.0.1", "test"); err == nil {
+	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{Email: "admin@example.com", Password: "wrong"}, "127.0.0.1", "test"); err == nil {
 		t.Error("错误密码应被拒绝")
 	}
 
@@ -1316,6 +1316,176 @@ func TestAuthRegisterLoginAndTotp(t *testing.T) {
 		t.Error("错误的 TOTP 验证码应被拒绝")
 	}
 }
+func TestEmailNormalizationAtRegistrationAndAdminCreation(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	registered, err := f.svc.Auth.Register(ctx, service.RegisterInput{
+		Username: "mixedcase",
+		Email:    "  MixedCase@Example.COM ",
+		Password: "password123",
+	}, "127.0.0.1", "test")
+	if err != nil {
+		t.Fatalf("注册邮箱失败: %v", err)
+	}
+	if registered.Email != "mixedcase@example.com" {
+		t.Fatalf("注册邮箱应保存为小写且去除首尾空格, 实际 %q", registered.Email)
+	}
+	loggedIn, err := f.svc.Auth.Login(ctx, service.LoginInput{
+		Email:    "MIXEDCASE@EXAMPLE.COM",
+		Password: "password123",
+	}, "127.0.0.1", "test")
+	if err != nil || loggedIn.ID != registered.ID {
+		t.Fatalf("大小写混合的邮箱应登录到同一账号, 用户=%v, 错误=%v", loggedIn, err)
+	}
+
+	groupID := f.normalGID
+	created, err := f.svc.Users.Create(service.UserInput{
+		Username: "admincreated",
+		Email:    "AdminCreated@Example.COM",
+		Password: "password123",
+		GroupID:  &groupID,
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("管理员创建用户失败: %v", err)
+	}
+	if created.Email != "admincreated@example.com" {
+		t.Fatalf("管理员创建的邮箱应保存为小写, 实际 %q", created.Email)
+	}
+	searchResult, err := f.svc.Users.List(service.UserListFilter{Keyword: "ADMINCREATED@EXAMPLE.COM"})
+	if err != nil {
+		t.Fatalf("按大小写混合邮箱搜索用户失败: %v", err)
+	}
+	if len(searchResult.Items) != 1 || searchResult.Items[0].ID != created.ID {
+		t.Fatalf("邮箱搜索应不区分大小写, 实际结果: %+v", searchResult.Items)
+	}
+
+	for _, input := range []service.RegisterInput{
+		{Username: "mixedcase", Email: "other@example.com", Password: "password123"},
+		{Username: "other", Email: "MIXEDCASE@example.com", Password: "password123"},
+	} {
+		if _, err := f.svc.Auth.Register(ctx, input, "127.0.0.1", "test"); !errors.Is(err, service.ErrDuplicateRegistration) {
+			t.Fatalf("重复用户名或邮箱应返回内部重复注册标记, 实际错误: %v", err)
+		}
+	}
+}
+
+func TestLoginFailureResponsesAreUniform(t *testing.T) {
+	f := newFixture(t)
+	groupID := f.normalGID
+	banned, err := f.svc.Users.Create(service.UserInput{
+		Username: "banned",
+		Email:    "banned@example.com",
+		Password: "password123",
+		GroupID:  &groupID,
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("创建待封禁用户失败: %v", err)
+	}
+	bannedStatus := model.UserStatusBanned
+	if _, err := f.svc.Users.Update(banned.ID, service.UserInput{Status: &bannedStatus}, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("封禁测试用户失败: %v", err)
+	}
+
+	for _, attempt := range []struct {
+		email    string
+		password string
+	}{
+		{email: "missing@example.com", password: "password123"},
+		{email: "banned@example.com", password: "password123"},
+		{email: "admin@example.com", password: "wrong-password"},
+	} {
+		_, err := f.svc.Auth.Login(context.Background(), service.LoginInput{
+			Email:    attempt.email,
+			Password: attempt.password,
+		}, "127.0.0.1", "test")
+		var apiErr *apperr.Error
+		if !errors.As(err, &apiErr) || apiErr.Status != 401 || apiErr.Code != "unauthorized" || apiErr.Message != "邮箱或密码错误" {
+			t.Errorf("邮箱 %q 的认证失败应统一返回 401 与通用提示, 实际 %v", attempt.email, err)
+		}
+	}
+}
+
+func TestAccountStatusesEnforceReadOnlyGroupTransitions(t *testing.T) {
+	f := newFixture(t)
+	group, err := f.svc.Groups.Create(service.GroupInput{
+		Name:        "状态恢复目标组",
+		Permissions: []string{"upload"},
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("创建恢复目标组失败: %v", err)
+	}
+	groupID := group.ID
+	user, err := f.svc.Users.Create(service.UserInput{
+		Username: "stateuser",
+		Email:    "stateuser@example.com",
+		Password: "password123",
+		GroupID:  &groupID,
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("创建状态测试用户失败: %v", err)
+	}
+	var readOnly model.Group
+	if err := f.database.Where("name = ? AND is_system = ?", "只读", true).First(&readOnly).Error; err != nil {
+		t.Fatalf("读取只读用户组失败: %v", err)
+	}
+
+	unverifiedStatus := model.UserStatusUnverified
+	unverified, err := f.svc.Users.Update(user.ID, service.UserInput{Status: &unverifiedStatus}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("将用户设为未验证失败: %v", err)
+	}
+	if unverified.Status != model.UserStatusUnverified || unverified.GroupID != readOnly.ID || unverified.RestoreGroupID == nil || *unverified.RestoreGroupID != groupID || unverified.EmailVerifiedAt != nil {
+		t.Fatalf("未验证账号应使用只读组并保留原组: %+v", unverified)
+	}
+	principal, err := f.svc.Auth.PrincipalFor(user.ID, nil, nil)
+	if err != nil {
+		t.Fatalf("未验证账号应可登录以完成邮箱验证: %v", err)
+	}
+	if principal.Group.Name != "只读" || principal.Has(model.PermUpload) {
+		t.Fatalf("未验证账号必须使用只读权限, 实际组=%q 权限=%v", principal.Group.Name, principal.Permissions)
+	}
+	if err := f.svc.Groups.Delete(groupID, f.admin, "127.0.0.1", "test-agent"); err == nil {
+		t.Fatal("未验证账号引用的恢复目标组不得删除")
+	}
+
+	normalStatus := model.UserStatusNormal
+	verified, err := f.svc.Users.Update(user.ID, service.UserInput{Status: &normalStatus}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("恢复正常账号失败: %v", err)
+	}
+	if verified.Status != model.UserStatusNormal || verified.GroupID != groupID || verified.RestoreGroupID != nil || verified.EmailVerifiedAt == nil {
+		t.Fatalf("正常账号应恢复原组并标记邮箱已验证: %+v", verified)
+	}
+	session, err := f.svc.Auth.IssueSession(user.ID)
+	if err != nil {
+		t.Fatalf("签发测试会话失败: %v", err)
+	}
+
+	bannedStatus := model.UserStatusBanned
+	banned, err := f.svc.Users.Update(user.ID, service.UserInput{Status: &bannedStatus}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("封禁用户失败: %v", err)
+	}
+	if banned.Status != model.UserStatusBanned || banned.GroupID != readOnly.ID || banned.RestoreGroupID == nil || *banned.RestoreGroupID != groupID {
+		t.Fatalf("封禁账号应使用只读组并保留原组: %+v", banned)
+	}
+	if _, err := f.svc.Auth.SessionPrincipal(session); err == nil {
+		t.Fatal("封禁账号的既有会话必须失效")
+	}
+	if _, err := f.svc.Auth.PrincipalFor(user.ID, nil, nil); err == nil {
+		t.Fatal("封禁账号不得获得 API 主体")
+	}
+
+	restored, err := f.svc.Users.Update(user.ID, service.UserInput{Status: &normalStatus}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("解除封禁失败: %v", err)
+	}
+	if restored.Status != model.UserStatusNormal || restored.GroupID != groupID || restored.RestoreGroupID != nil {
+		t.Fatalf("解除封禁后应恢复封禁前用户组: %+v", restored)
+	}
+}
+
 func TestAuthLoginTwoStepTotpChallenge(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -1335,8 +1505,8 @@ func TestAuthLoginTwoStepTotpChallenge(t *testing.T) {
 	}
 
 	_, err = f.svc.Auth.Login(ctx, service.LoginInput{
-		Identifier: "admin",
-		Password:   "password123",
+		Email:    "admin@example.com",
+		Password: "password123",
 	}, ip, userAgent)
 	var apiErr *apperr.Error
 	if !errors.As(err, &apiErr) || apiErr.Details["totp_required"] != true {
@@ -1607,12 +1777,12 @@ func TestLoginFailureThrottle(t *testing.T) {
 
 	var lastErr error
 	for attempt := range service.LoginFailureLimit {
-		_, lastErr = f.svc.Auth.Login(ctx, service.LoginInput{Identifier: "admin", Password: "wrong-password"}, "203.0.113.10", "test")
+		_, lastErr = f.svc.Auth.Login(ctx, service.LoginInput{Email: "admin@example.com", Password: "wrong-password"}, "203.0.113.10", "test")
 		if lastErr == nil {
 			t.Fatalf("第 %d 次错误密码应失败", attempt+1)
 		}
 	}
-	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{Identifier: "admin", Password: "wrong-password"}, "203.0.113.10", "test"); err == nil {
+	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{Email: "admin@example.com", Password: "wrong-password"}, "203.0.113.10", "test"); err == nil {
 		t.Fatal("超过失败上限后应拒绝继续尝试")
 	} else {
 		var apiErr *apperr.Error
@@ -1622,10 +1792,10 @@ func TestLoginFailureThrottle(t *testing.T) {
 	}
 
 	// 正确密码同样被临时拒绝, 但其他来源不受影响.
-	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{Identifier: "admin", Password: "password123"}, "203.0.113.10", "test"); err == nil {
+	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{Email: "admin@example.com", Password: "password123"}, "203.0.113.10", "test"); err == nil {
 		t.Error("限流窗口内即使凭据正确也应拒绝")
 	}
-	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{Identifier: "admin", Password: "password123"}, "198.51.100.7", "test"); err != nil {
+	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{Email: "admin@example.com", Password: "password123"}, "198.51.100.7", "test"); err != nil {
 		t.Errorf("其他来源不应被牵连: %v", err)
 	}
 }
@@ -1733,7 +1903,7 @@ func TestRegisterRequiresASCIIAlphanumericUsername(t *testing.T) {
 	}
 }
 
-func TestLoginPrefersEmailWhenLegacyUsernameCollides(t *testing.T) {
+func TestLoginDoesNotAcceptLegacyUsernameAsEmail(t *testing.T) {
 	f := newFixture(t)
 	now := time.Now().UTC()
 	legacy := model.User{
@@ -1756,12 +1926,18 @@ func TestLoginPrefersEmailWhenLegacyUsernameCollides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("注册邮箱所有者失败: %v", err)
 	}
+	if _, err := f.svc.Auth.Login(context.Background(), service.LoginInput{
+		Email:    "victim",
+		Password: "target-password123",
+	}, "127.0.0.1", "test"); err == nil {
+		t.Fatal("用户名不能用于登录")
+	}
 	loggedIn, err := f.svc.Auth.Login(context.Background(), service.LoginInput{
-		Identifier: "victim@example.com",
-		Password:   "target-password123",
+		Email:    "victim@example.com",
+		Password: "target-password123",
 	}, "127.0.0.1", "test")
 	if err != nil {
-		t.Fatalf("邮箱登录被历史用户名拦截: %v", err)
+		t.Fatalf("邮箱登录失败: %v", err)
 	}
 	if loggedIn.ID != target.ID {
 		t.Fatalf("邮箱登录应解析到邮箱所有者 ID %d, 实际 %d", target.ID, loggedIn.ID)

@@ -6,6 +6,7 @@ package migrations
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -14,7 +15,7 @@ import (
 )
 
 // schemaVersion 是当前迁移版本, 每次结构变更递增并追加一个迁移函数.
-const schemaVersion = 6
+const schemaVersion = 8
 
 // SchemaMigration 记录已应用的迁移版本.
 type SchemaMigration struct {
@@ -136,8 +137,112 @@ var steps = map[int]func(*gorm.DB) error{
 			Update("value", model.ConflictSkip).Error
 	},
 	6: func(db *gorm.DB) error {
-		return db.AutoMigrate(&model.User{})
+		if db.Migrator().HasColumn(&model.User{}, "SessionVersion") {
+			return nil
+		}
+		return db.Migrator().AddColumn(&model.User{}, "SessionVersion")
 	},
+	7: normalizeUserEmails,
+	8: migrateAccountStates,
+}
+
+func normalizeUserEmails(db *gorm.DB) error {
+	type userEmail struct {
+		ID    int64
+		Email string
+	}
+	var users []userEmail
+	if err := db.Model(&model.User{}).Select("id", "email").Order("id ASC").Find(&users).Error; err != nil {
+		return fmt.Errorf("读取用户邮箱失败: %w", err)
+	}
+
+	owners := make(map[string]userEmail, len(users))
+	for _, user := range users {
+		normalized := strings.ToLower(strings.TrimSpace(user.Email))
+		if previous, exists := owners[normalized]; exists {
+			return fmt.Errorf("邮箱小写规范化冲突: users.id=%d 与 users.id=%d", previous.ID, user.ID)
+		}
+		owners[normalized] = user
+	}
+
+	for _, user := range users {
+		normalized := strings.ToLower(strings.TrimSpace(user.Email))
+		if normalized == user.Email {
+			continue
+		}
+		if err := db.Model(&model.User{}).Where("id = ?", user.ID).UpdateColumn("email", normalized).Error; err != nil {
+			return fmt.Errorf("规范化用户邮箱失败 (users.id=%d): %w", user.ID, err)
+		}
+	}
+	return nil
+}
+
+func migrateAccountStates(db *gorm.DB) error {
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		return fmt.Errorf("更新用户状态字段失败: %w", err)
+	}
+
+	verificationEnabled := false
+	if db.Migrator().HasTable(&model.Setting{}) {
+		var setting model.Setting
+		err := db.Select("value").Where("key = ?", "email_verification_enabled").First(&setting).Error
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return fmt.Errorf("读取邮箱验证设置失败: %w", err)
+		}
+		verificationEnabled = err == nil && strings.EqualFold(strings.TrimSpace(setting.Value), "true")
+	}
+
+	query := db.Model(&model.User{}).Where("status = ?", int16(1))
+	if verificationEnabled {
+		query = query.Or("status = ? AND email_verified_at IS NULL", model.UserStatusNormal)
+	}
+	var users []model.User
+	if err := query.Order("id ASC").Find(&users).Error; err != nil {
+		return fmt.Errorf("读取待迁移用户状态失败: %w", err)
+	}
+	if len(users) == 0 {
+		return nil
+	}
+
+	var readOnly model.Group
+	if err := db.Where("is_system = ? AND name = ?", true, "只读").First(&readOnly).Error; err != nil {
+		return fmt.Errorf("读取只读用户组失败: %w", err)
+	}
+	var defaultGroup model.Group
+	defaultGroupLoaded := false
+	for _, user := range users {
+		status := model.UserStatusBanned
+		if user.Status == model.UserStatusNormal {
+			status = model.UserStatusUnverified
+		}
+
+		restoreGroupID := user.GroupID
+		if user.RestoreGroupID != nil {
+			restoreGroupID = *user.RestoreGroupID
+		}
+		if restoreGroupID == readOnly.ID {
+			if !defaultGroupLoaded {
+				if err := db.Where("is_default = ? AND is_system = ?", true, false).First(&defaultGroup).Error; err != nil {
+					return fmt.Errorf("读取默认用户组失败: %w", err)
+				}
+				defaultGroupLoaded = true
+			}
+			restoreGroupID = defaultGroup.ID
+		}
+
+		updates := map[string]any{
+			"status":           status,
+			"group_id":         readOnly.ID,
+			"restore_group_id": restoreGroupID,
+		}
+		if status == model.UserStatusBanned {
+			updates["session_version"] = gorm.Expr("session_version + 1")
+		}
+		if err := db.Model(&model.User{}).Where("id = ?", user.ID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("迁移用户状态失败 (users.id=%d): %w", user.ID, err)
+		}
+	}
+	return nil
 }
 
 // defaultUploadRateLimit 是初始化阶段写入默认用户组的上传速率 (次/分钟):

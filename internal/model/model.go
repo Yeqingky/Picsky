@@ -5,8 +5,9 @@ import "time"
 
 // 用户状态.
 const (
-	UserStatusNormal   int16 = 0
-	UserStatusDisabled int16 = 1
+	UserStatusNormal     int16 = 0
+	UserStatusUnverified int16 = 1
+	UserStatusBanned     int16 = 2
 )
 
 // 配额方式.
@@ -108,6 +109,7 @@ type User struct {
 	EmailVerifiedAt *time.Time `json:"email_verified_at"`
 	Nickname        string     `gorm:"size:64" json:"nickname"`
 	GroupID         int64      `gorm:"not null;index" json:"group_id"`
+	RestoreGroupID  *int64     `gorm:"index" json:"-"`
 	DefaultPolicyID *int64     `json:"default_policy_id"`
 	QuotaMode       *string    `gorm:"size:8" json:"quota_mode"`
 	QuotaValue      *int64     `json:"quota_value"`

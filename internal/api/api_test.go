@@ -3,6 +3,7 @@ package api_test
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -205,6 +206,10 @@ func (s *server) sessionCookie(result *response) *http.Cookie {
 
 // smtpCaptureServer 接收一次纯文本 SMTP 邮件, 用于认证流程测试.
 func smtpCaptureServer(t *testing.T) (string, <-chan string) {
+	return smtpCaptureServerWithGate(t, nil, nil)
+}
+
+func smtpCaptureServerWithGate(t *testing.T, accepted chan<- struct{}, release <-chan struct{}) (string, <-chan string) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -217,6 +222,12 @@ func smtpCaptureServer(t *testing.T) (string, <-chan string) {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
+		}
+		if accepted != nil {
+			close(accepted)
+		}
+		if release != nil {
+			<-release
 		}
 		defer conn.Close()
 		_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
@@ -368,15 +379,7 @@ func base64Std(t *testing.T, payload []byte) string {
 // bootstrap 注册管理员并创建策略, 返回会话 cookie 与策略 ID.
 func (s *server) bootstrap() (*http.Cookie, int64) {
 	s.t.Helper()
-	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"username": "admin",
-		"email":    "admin@example.com",
-		"password": "password123",
-	}, nil)
-	if registered.Status != http.StatusCreated {
-		s.t.Fatalf("注册失败: %d %s", registered.Status, string(registered.Body))
-	}
-	cookie := s.sessionCookie(registered)
+	_, cookie := s.registerAndLogin("admin", "admin@example.com", "password123")
 
 	created := s.json(http.MethodPost, "/api/v1/admin/policies", map[string]any{
 		"name":            "主存储",
@@ -397,6 +400,201 @@ func (s *server) bootstrap() (*http.Cookie, int64) {
 	return cookie, int64(policy["id"].(float64))
 }
 
+func (s *server) registerAndLogin(username, email, password string) (*response, *http.Cookie) {
+	s.t.Helper()
+	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
+		"username": username,
+		"email":    email,
+		"password": password,
+	}, nil)
+	if registered.Status != http.StatusAccepted {
+		s.t.Fatalf("注册请求失败: %d %s", registered.Status, string(registered.Body))
+	}
+	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": email,
+		"password":   password,
+	}, nil)
+	if login.Status != http.StatusOK {
+		s.t.Fatalf("注册后登录失败: %d %s", login.Status, string(login.Body))
+	}
+	return login, s.sessionCookie(login)
+}
+
+func TestRegistrationResponsesDoNotRevealDuplicateAccounts(t *testing.T) {
+	s := newServer(t)
+	payloads := []map[string]any{
+		{"username": "enumuser", "email": "enum@example.com", "password": "password123"},
+		{"username": "enumuser", "email": "another@example.com", "password": "password123"},
+		{"username": "anotheruser", "email": "ENUM@EXAMPLE.COM", "password": "password123"},
+	}
+	var first *response
+	for index, payload := range payloads {
+		result := s.json(http.MethodPost, "/api/v1/auth/register", payload, nil)
+		if result.Status != http.StatusAccepted {
+			t.Fatalf("注册请求 %d 应返回通用 202, 实际 %d %s", index, result.Status, string(result.Body))
+		}
+		if result.Header.Get("Set-Cookie") != "" {
+			t.Fatalf("注册请求 %d 不应下发会话 Cookie", index)
+		}
+		if index == 0 {
+			first = result
+			continue
+		}
+		if string(result.Body) != string(first.Body) {
+			t.Fatalf("新注册与重复注册响应不一致: 首次=%s, 重复=%s", string(first.Body), string(result.Body))
+		}
+	}
+
+	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "ENUM@EXAMPLE.COM",
+		"password":   "password123",
+	}, nil)
+	if login.Status != http.StatusOK {
+		t.Fatalf("无注册会话时仍应可用邮箱登录: %d %s", login.Status, string(login.Body))
+	}
+}
+
+func TestUnverifiedRegistrationUsesReadOnlyGroupUntilEmailVerification(t *testing.T) {
+	s := newServer(t)
+	_, policyID := s.bootstrap()
+	smtpAccepted := make(chan struct{})
+	release := make(chan struct{})
+	released := false
+	releaseSMTP := func() {
+		if !released {
+			close(release)
+			released = true
+		}
+	}
+	smtpPort, messages := smtpCaptureServerWithGate(t, smtpAccepted, release)
+	t.Cleanup(releaseSMTP)
+	if err := s.svc.Settings.Update(map[string]string{
+		"email_verification_enabled": "true",
+		"smtp_host":                  "127.0.0.1",
+		"smtp_port":                  smtpPort,
+		"smtp_from":                  "noreply@example.com",
+		"smtp_encryption":            "none",
+		"site_url":                   "https://picsky.example",
+	}); err != nil {
+		t.Fatalf("配置邮箱验证与 SMTP 失败: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.svc.Mailer.Start(ctx)
+
+	payload, err := json.Marshal(map[string]string{
+		"username": "pendinguser",
+		"email":    "pending@example.com",
+		"password": "password123",
+	})
+	if err != nil {
+		t.Fatalf("编码注册请求失败: %v", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, s.http.URL+"/api/v1/auth/register", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("构造注册请求失败: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	type registrationResult struct {
+		status  int
+		headers http.Header
+		body    []byte
+		err     error
+	}
+	results := make(chan registrationResult, 1)
+	go func() {
+		response, err := s.http.Client().Do(request)
+		if err != nil {
+			results <- registrationResult{err: err}
+			return
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		results <- registrationResult{status: response.StatusCode, headers: response.Header, body: body, err: err}
+	}()
+	select {
+	case <-smtpAccepted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("验证邮件没有进入 SMTP worker")
+	}
+	var registered registrationResult
+	select {
+	case registered = <-results:
+	case <-time.After(2 * time.Second):
+		releaseSMTP()
+		select {
+		case <-results:
+		case <-time.After(5 * time.Second):
+		}
+		t.Fatal("注册请求等待 SMTP 网络发送完成")
+	}
+	if registered.err != nil {
+		t.Fatalf("注册请求失败: %v", registered.err)
+	}
+	if registered.status != http.StatusAccepted || registered.headers.Get("Set-Cookie") != "" {
+		t.Fatalf("注册应返回通用 202 且不下发会话: %d %s", registered.status, string(registered.body))
+	}
+	releaseSMTP()
+
+	var message string
+	select {
+	case message = <-messages:
+	case <-time.After(5 * time.Second):
+		t.Fatal("异步验证邮件未发送")
+	}
+	const verificationLink = "https://picsky.example/verify-email?token="
+	tokenStart := strings.Index(message, verificationLink)
+	if tokenStart < 0 {
+		t.Fatalf("验证邮件缺少链接: %s", message)
+	}
+	token := strings.Fields(message[tokenStart+len(verificationLink):])[0]
+
+	var registeredUser model.User
+	if err := s.db.Where("email = ?", "pending@example.com").First(&registeredUser).Error; err != nil {
+		t.Fatalf("读取未验证用户失败: %v", err)
+	}
+	if registeredUser.Status != model.UserStatusUnverified || registeredUser.EmailVerifiedAt != nil || registeredUser.RestoreGroupID == nil {
+		t.Fatalf("注册用户应保持未验证并记录恢复用户组: %+v", registeredUser)
+	}
+	var readOnly model.Group
+	if err := s.db.Where("name = ?", "只读").First(&readOnly).Error; err != nil {
+		t.Fatalf("读取只读用户组失败: %v", err)
+	}
+	if registeredUser.GroupID != readOnly.ID {
+		t.Fatalf("未验证用户应进入只读组, 实际组 ID %d", registeredUser.GroupID)
+	}
+
+	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "pending@example.com",
+		"password":   "password123",
+	}, nil)
+	if login.Status != http.StatusOK {
+		t.Fatalf("未验证用户应可登录以完成验证: %d %s", login.Status, string(login.Body))
+	}
+	cookie := s.sessionCookie(login)
+	me := s.raw(http.MethodGet, "/api/v1/auth/me", nil, nil, []*http.Cookie{cookie})
+	if me.Status != http.StatusOK || s.decode(me)["group"].(map[string]any)["name"] != "只读" {
+		t.Fatalf("未验证用户应使用只读组: %d %s", me.Status, string(me.Body))
+	}
+	upload := s.upload("/api/v1/upload", "pending.png", pngContent(t, 101), map[string]string{
+		"policy_id": fmt.Sprint(policyID),
+	}, map[string]string{}, []*http.Cookie{cookie})
+	if upload.Status != http.StatusForbidden {
+		t.Fatalf("未验证用户上传应被拒绝: %d %s", upload.Status, string(upload.Body))
+	}
+
+	verified := s.json(http.MethodPost, "/api/v1/auth/verify-email", map[string]string{"token": token}, nil)
+	if verified.Status != http.StatusNoContent {
+		t.Fatalf("邮箱验证失败: %d %s", verified.Status, string(verified.Body))
+	}
+	var activeUser model.User
+	if err := s.db.First(&activeUser, registeredUser.ID).Error; err != nil {
+		t.Fatalf("读取已验证用户失败: %v", err)
+	}
+	if activeUser.Status != model.UserStatusNormal || activeUser.EmailVerifiedAt == nil || activeUser.GroupID != *registeredUser.RestoreGroupID || activeUser.RestoreGroupID != nil {
+		t.Fatalf("邮箱验证后应恢复正常状态与原用户组: %+v", activeUser)
+	}
+}
 func TestClientIPSourceDiscoveryAndLoginRateLimit(t *testing.T) {
 	s := newServer(t)
 
@@ -405,15 +603,7 @@ func TestClientIPSourceDiscoveryAndLoginRateLimit(t *testing.T) {
 		t.Fatalf("IP 来源探测接口必须认证, 实际状态码 %d", unauthorized.Status)
 	}
 
-	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"username": "admin",
-		"email":    "admin@example.com",
-		"password": "password123",
-	}, nil)
-	if registered.Status != http.StatusCreated {
-		t.Fatalf("注册管理员失败: %d %s", registered.Status, string(registered.Body))
-	}
-	cookie := s.sessionCookie(registered)
+	_, cookie := s.registerAndLogin("admin", "admin@example.com", "password123")
 
 	sourcesResponse := s.raw(http.MethodGet, "/api/v1/admin/settings/client-ip-sources", nil, map[string]string{
 		"X-Forwarded-For": "203.0.113.10, 10.0.0.1",
@@ -446,7 +636,7 @@ func TestClientIPSourceDiscoveryAndLoginRateLimit(t *testing.T) {
 		t.Fatalf("非法 IP 来源应被拒绝, 实际状态码 %d", invalidSetting.Status)
 	}
 
-	loginBody, err := json.Marshal(map[string]string{"identifier": "missing-user", "password": "invalid"})
+	loginBody, err := json.Marshal(map[string]string{"identifier": "missing-user@example.com", "password": "invalid"})
 	if err != nil {
 		t.Fatalf("编码登录请求失败: %v", err)
 	}
@@ -565,7 +755,7 @@ func TestHealthAndAuthFlow(t *testing.T) {
 	}
 
 	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "admin@example.com",
+		"identifier": "ADMIN@EXAMPLE.COM",
 		"password":   "password123",
 	}, nil)
 	if login.Status != http.StatusOK {
@@ -574,11 +764,25 @@ func TestHealthAndAuthFlow(t *testing.T) {
 	loginCookie := s.sessionCookie(login)
 
 	badLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "admin",
+		"identifier": "admin@example.com",
 		"password":   "wrong-password",
 	}, nil)
 	if badLogin.Status != http.StatusUnauthorized {
 		t.Errorf("错误密码应返回 401, 实际 %d", badLogin.Status)
+	}
+	usernameLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "admin",
+		"password":   "password123",
+	}, nil)
+	if usernameLogin.Status != http.StatusUnauthorized || s.decode(usernameLogin)["message"] != s.decode(badLogin)["message"] {
+		t.Errorf("用户名登录应被拒绝, 并与错误密码使用相同响应: %d %s", usernameLogin.Status, string(usernameLogin.Body))
+	}
+	legacyUsernameFieldLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"username": "admin",
+		"password": "password123",
+	}, nil)
+	if legacyUsernameFieldLogin.Status == http.StatusOK {
+		t.Error("旧 username 请求字段不得用于登录")
 	}
 
 	changed := s.json(http.MethodPatch, "/api/v1/auth/password", map[string]any{
@@ -589,7 +793,7 @@ func TestHealthAndAuthFlow(t *testing.T) {
 		t.Errorf("修改密码失败: %d %s", changed.Status, string(changed.Body))
 	}
 	relogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "admin",
+		"identifier": "admin@example.com",
 		"password":   "password456",
 	}, nil)
 	if relogin.Status != http.StatusOK {
@@ -639,16 +843,8 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 		t.Fatalf("配置 SMTP 失败: %v", err)
 	}
 
-	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"username": "resetuser",
-		"email":    "reset@example.com",
-		"password": "old-password123",
-	}, nil)
-	if registered.Status != http.StatusCreated {
-		t.Fatalf("注册失败: %d %s", registered.Status, string(registered.Body))
-	}
+	registered, registeredCookie := s.registerAndLogin("resetuser", "reset@example.com", "old-password123")
 	userID := int64(s.decode(registered)["id"].(float64))
-	registeredCookie := s.sessionCookie(registered)
 	secret, _, err := s.svc.Auth.TOTPSetup(userID)
 	if err != nil {
 		t.Fatalf("生成 TOTP 秘钥失败: %v", err)
@@ -661,7 +857,7 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 		t.Fatalf("启用 TOTP 失败: %v", err)
 	}
 	beforeResetLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "resetuser",
+		"identifier": "reset@example.com",
 		"password":   "old-password123",
 	}, nil)
 	if beforeResetLogin.Status != http.StatusUnauthorized {
@@ -673,7 +869,7 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 	}
 
 	request := s.json(http.MethodPost, "/api/v1/auth/password/reset/request", map[string]any{
-		"email": "reset@example.com",
+		"email": "RESET@EXAMPLE.COM",
 	}, nil)
 	if request.Status != http.StatusNoContent {
 		t.Fatalf("请求找回邮件失败: %d %s", request.Status, string(request.Body))
@@ -718,13 +914,13 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 		t.Errorf("重置令牌重放应被拒绝, 实际 %d %s", replay.Status, string(replay.Body))
 	}
 	if oldPassword := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "resetuser",
+		"identifier": "reset@example.com",
 		"password":   "old-password123",
 	}, nil); oldPassword.Status != http.StatusUnauthorized {
 		t.Errorf("重置后旧密码应失效, 实际 %d %s", oldPassword.Status, string(oldPassword.Body))
 	}
 	newPassword := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "resetuser",
+		"identifier": "reset@example.com",
 		"password":   "new-password456",
 	}, nil)
 	if newPassword.Status != http.StatusOK {
@@ -733,15 +929,7 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 }
 func TestLoginTwoStepTotpAPI(t *testing.T) {
 	s := newServer(t)
-	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"username": "twostep",
-		"email":    "two-step@example.com",
-		"password": "password123",
-	}, nil)
-	if registered.Status != http.StatusCreated {
-		t.Fatalf("注册失败: %d %s", registered.Status, string(registered.Body))
-	}
-	cookie := s.sessionCookie(registered)
+	_, cookie := s.registerAndLogin("twostep", "two-step@example.com", "password123")
 
 	setup := s.json(http.MethodPost, "/api/v1/auth/totp/setup", nil, []*http.Cookie{cookie})
 	if setup.Status != http.StatusOK {
@@ -764,7 +952,7 @@ func TestLoginTwoStepTotpAPI(t *testing.T) {
 	}
 
 	first := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "twostep",
+		"identifier": "two-step@example.com",
 		"password":   "password123",
 	}, nil)
 	if first.Status != http.StatusUnauthorized {
@@ -900,15 +1088,7 @@ func TestUploadImagesAndKeys(t *testing.T) {
 	}
 
 	// 普通用户不能签发超出自身权限的密钥.
-	scopedRegister := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"username": "scoped",
-		"email":    "scoped@example.com",
-		"password": "password123",
-	}, nil)
-	if scopedRegister.Status != http.StatusCreated {
-		t.Fatalf("注册普通用户失败: %d %s", scopedRegister.Status, string(scopedRegister.Body))
-	}
-	scopedCookie := s.sessionCookie(scopedRegister)
+	_, scopedCookie := s.registerAndLogin("scoped", "scoped@example.com", "password123")
 	withinScope := s.json(http.MethodPost, "/api/v1/keys", map[string]any{
 		"name":   "ok",
 		"scopes": []string{"upload"},
@@ -1000,19 +1180,26 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 	}
 	userID := int64(s.decode(createdUser)["id"].(float64))
 
-	disabled := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/users/%d", userID), map[string]any{
-		"status": 1,
+	banned := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/users/%d", userID), map[string]any{
+		"status": 2,
 	}, []*http.Cookie{cookie})
-	if disabled.Status != http.StatusOK {
-		t.Fatalf("禁用用户失败: %d %s", disabled.Status, string(disabled.Body))
+	if banned.Status != http.StatusOK {
+		t.Fatalf("封禁用户失败: %d %s", banned.Status, string(banned.Body))
 	}
 
 	aliceLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "alice",
+		"identifier": "alice@example.com",
 		"password":   "password123",
 	}, nil)
-	if aliceLogin.Status != http.StatusForbidden {
-		t.Errorf("被禁用账号登录应返回 403, 实际 %d %s", aliceLogin.Status, string(aliceLogin.Body))
+	if aliceLogin.Status != http.StatusUnauthorized {
+		t.Errorf("封禁账号登录应返回通用 401, 实际 %d %s", aliceLogin.Status, string(aliceLogin.Body))
+	}
+	missingLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "missing@example.com",
+		"password":   "password123",
+	}, nil)
+	if missingLogin.Status != http.StatusUnauthorized || s.decode(aliceLogin)["message"] != s.decode(missingLogin)["message"] {
+		t.Errorf("封禁账号与不存在账号应使用相同登录响应: %d %s", missingLogin.Status, string(missingLogin.Body))
 	}
 
 	if err := s.svc.Settings.Update(nil); err != nil {
@@ -1120,7 +1307,7 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 		t.Fatalf("启用用户失败: %d", aliceEnabled.Status)
 	}
 	aliceLogin = s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "alice",
+		"identifier": "alice@example.com",
 		"password":   "password123",
 	}, nil)
 	if aliceLogin.Status != http.StatusOK {
@@ -1265,7 +1452,7 @@ func TestNativeUploadChecksPermissionBeforeReadingMultipartBody(t *testing.T) {
 		t.Fatalf("创建无上传权限用户失败: %d %s", created.Status, string(created.Body))
 	}
 	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "noupload",
+		"identifier": "no-upload@example.com",
 		"password":   "password123",
 	}, nil)
 	if login.Status != http.StatusOK {
@@ -1306,7 +1493,7 @@ func TestNativeUploadChecksRateLimitBeforeReadingMultipartBody(t *testing.T) {
 		t.Fatalf("创建限速用户失败: %d %s", created.Status, string(created.Body))
 	}
 	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "ratelimited",
+		"identifier": "rate-limited@example.com",
 		"password":   "password123",
 	}, nil)
 	if login.Status != http.StatusOK {
@@ -1463,7 +1650,7 @@ func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
 		t.Fatalf("创建设置管理员失败: %d %s", createdUser.Status, string(createdUser.Body))
 	}
 	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "settingsmanager",
+		"identifier": "settings-manager@example.com",
 		"password":   "password123",
 	}, nil)
 	if login.Status != http.StatusOK {
@@ -1510,14 +1697,7 @@ func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
 		t.Fatalf("回退到权限超出主体的默认组应返回 400, 实际 %d %s", clearToMorePrivilegedFallback.Status, string(clearToMorePrivilegedFallback.Body))
 	}
 
-	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"username": "newmember",
-		"email":    "new-member@example.com",
-		"password": "password123",
-	}, nil)
-	if registered.Status != http.StatusCreated {
-		t.Fatalf("注册新用户失败: %d %s", registered.Status, string(registered.Body))
-	}
+	registered, _ := s.registerAndLogin("newmember", "new-member@example.com", "password123")
 	newMember := s.decode(registered)
 	group := newMember["group"].(map[string]any)
 	if int64(group["id"].(float64)) != settingsGroupID {
@@ -1712,7 +1892,7 @@ func TestLskyUploadRequiresPermission(t *testing.T) {
 		t.Fatalf("创建用户失败: %d %s", created.Status, string(created.Body))
 	}
 	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "viewer",
+		"identifier": "viewer@example.com",
 		"password":   "password123",
 	}, nil)
 	viewerCookie := s.sessionCookie(login)
@@ -1776,7 +1956,7 @@ func TestJSONBodySizeLimit(t *testing.T) {
 
 	s.bootstrap()
 	cookie := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "admin",
+		"identifier": "admin@example.com",
 		"password":   "password123",
 	}, nil)
 	session := s.sessionCookie(cookie)
@@ -1810,7 +1990,6 @@ func TestRegisterEmailAllowlistAPI(t *testing.T) {
 		"email":    "allowed@EXAMPLE.COM",
 		"password": "password123",
 	}, nil)
-	if allowed.Status != http.StatusCreated {
-		t.Fatalf("白名单域名应允许注册, 实际 %d %s", allowed.Status, string(allowed.Body))
+	if allowed.Status != http.StatusAccepted {
 	}
 }

@@ -21,6 +21,7 @@ import type {
   AdminUserCreateRequest,
   AdminUserUpdateRequest,
   QuotaMode,
+  UserStatus,
 } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { DataTable } from '../../components/DataTable';
@@ -164,23 +165,25 @@ export default function AdminUsersPage() {
 
   const refreshIndicator = useDelayedLoading(usersQuery.isFetching && !usersQuery.isPending);
 
-  const handleToggleStatus = async (user: AdminUser) => {
-    const disabling = user.status === 0;
+  const handleStatusAction = async (user: AdminUser) => {
+    const action = user.status === 0 ? 'ban' : user.status === 1 ? 'verify' : 'unban';
+    const targetStatus: UserStatus = user.status === 0 ? 2 : 0;
     const ok = await confirm({
-      title: disabling ? t('admin.users.action.disable') : t('admin.users.action.enable'),
-      description: t(disabling ? 'admin.users.confirm.disable' : 'admin.users.confirm.enable', {
-        username: user.username,
-      }),
-      danger: disabling,
-      confirmText: disabling ? t('admin.users.action.disable') : t('admin.users.action.enable'),
+      title: t(`admin.users.action.${action}`),
+      description: t(`admin.users.confirm.${action}`, { username: user.username }),
+      danger: user.status === 0,
+      confirmText: t(`admin.users.action.${action}`),
     });
     if (!ok) return;
     updateMutation.mutate({
       id: user.id,
-      body: { status: disabling ? 1 : 0 },
-      message: t(disabling ? 'admin.users.feedback.disabled' : 'admin.users.feedback.enabled', {
-        username: user.username,
-      }),
+      body: { status: targetStatus },
+      message: t(
+        `admin.users.feedback.${action === 'ban' ? 'banned' : action === 'verify' ? 'verified' : 'unbanned'}`,
+        {
+          username: user.username,
+        },
+      ),
     });
   };
 
@@ -249,14 +252,23 @@ export default function AdminUsersPage() {
       id: 'status',
       header: t('admin.users.column.status'),
       className: 'w-[100px]',
-      cell: (row) =>
-        row.status === 0 ? (
-          <Badge className="border-transparent bg-success/10 text-success">
-            {t('common.status.normal')}
-          </Badge>
-        ) : (
-          <Badge variant="secondary">{t('common.status.disabled')}</Badge>
-        ),
+      cell: (row) => {
+        if (row.status === 0) {
+          return (
+            <Badge className="border-transparent bg-success/10 text-success">
+              {t('common.status.normal')}
+            </Badge>
+          );
+        }
+        if (row.status === 1) {
+          return (
+            <Badge className="border-transparent bg-warning/10 text-warning">
+              {t('common.status.unverified')}
+            </Badge>
+          );
+        }
+        return <Badge variant="secondary">{t('common.status.banned')}</Badge>;
+      },
     },
     {
       id: 'quota',
@@ -318,8 +330,8 @@ export default function AdminUsersPage() {
       header: t('common.table.actions'),
       className: 'w-[260px]',
       cell: (row) => {
-        const statusLabel =
-          row.status === 0 ? t('admin.users.action.disable') : t('admin.users.action.enable');
+        const action = row.status === 0 ? 'ban' : row.status === 1 ? 'verify' : 'unban';
+        const statusLabel = t(`admin.users.action.${action}`);
         return (
           <div className="flex items-center gap-0.5">
             <Tooltip>
@@ -329,7 +341,7 @@ export default function AdminUsersPage() {
                   size="icon-sm"
                   className={row.status === 0 ? 'text-destructive' : 'text-success'}
                   aria-label={statusLabel}
-                  onClick={() => void handleToggleStatus(row)}
+                  onClick={() => void handleStatusAction(row)}
                 >
                   {row.status === 0 ? (
                     <Ban className="size-4" />
@@ -620,7 +632,7 @@ function CreateUserDialog({
 
     onSubmit({
       username: username.trim(),
-      email: email.trim(),
+      email: email.trim().toLowerCase(),
       password,
       nickname: nickname.trim() === '' ? undefined : nickname.trim(),
       group_id: Number(groupId),
@@ -660,7 +672,7 @@ function CreateUserDialog({
               id="admin-user-email"
               type="email"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => setEmail(event.target.value.toLowerCase())}
               aria-invalid={Boolean(errors.email)}
               required
             />
@@ -753,7 +765,7 @@ function GroupDialog({
   onSubmit: (groupId: number) => void;
 }) {
   const { t } = useTranslation();
-  const [groupId, setGroupId] = useState(String(user.group_id));
+  const [groupId, setGroupId] = useState(String(user.restore_group_id ?? user.group_id));
   const [error, setError] = useState('');
 
   const submit = () => {

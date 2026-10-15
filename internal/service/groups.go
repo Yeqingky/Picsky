@@ -196,11 +196,11 @@ func (g *Groups) Delete(id int64, actor *Principal, ip, userAgent string) error 
 		return apperr.ErrInvalidRequest.WithMessage("内置用户组不能删除")
 	}
 	var userCount int64
-	if err := g.db.Model(&model.User{}).Where("group_id = ?", group.ID).Count(&userCount).Error; err != nil {
+	if err := g.db.Model(&model.User{}).Where("group_id = ? OR restore_group_id = ?", group.ID, group.ID).Count(&userCount).Error; err != nil {
 		return apperr.ErrInternal.WithMessage(err.Error())
 	}
 	if userCount > 0 {
-		return apperr.ErrInvalidRequest.WithMessage("用户组仍有用户, 不能删除")
+		return apperr.ErrInvalidRequest.WithMessage("用户组仍被用户或账号恢复目标引用, 不能删除")
 	}
 	if group.IsDefault {
 		return apperr.ErrInvalidRequest.WithMessage("默认用户组不能删除")

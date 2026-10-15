@@ -2,9 +2,9 @@
 export const auth = {
   login: {
     title: '登录',
-    description: '使用用户名或邮箱登录 {{siteName}}',
-    identifier: '用户名或邮箱',
-    identifierRequired: '请输入用户名或邮箱',
+    description: '使用邮箱登录 {{siteName}}',
+    email: '邮箱',
+    emailRequired: '请输入邮箱',
     password: '密码',
     passwordRequired: '请输入密码',
     totp: '动态口令',
@@ -31,7 +31,7 @@ export const auth = {
     captchaRequired: '请先完成人机验证',
     submit: '注册',
     submitting: '注册中…',
-    success: '注册成功, 请登录',
+    success: '注册请求已处理, 如邮箱可用, 请尝试使用邮箱登录; 启用邮箱验证时请查收邮件',
     disabled: '管理员已关闭注册功能, 暂时无法创建新账号。',
     hasAccount: '已有账号?',
     goLogin: '返回登录',

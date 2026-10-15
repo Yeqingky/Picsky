@@ -1,28 +1,81 @@
 package service
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/smtp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
-// Mailer 通过 SMTP 发送邮件, 用于邮箱验证与密码找回.
+// Mailer 通过 SMTP 发送邮件, 验证邮件使用有界异步队列.
 type Mailer struct {
-	settings *Settings
+	settings  *Settings
+	log       *slog.Logger
+	queue     chan mailMessage
+	startOnce sync.Once
 }
 
+type mailMessage struct {
+	to      string
+	subject string
+	body    string
+}
+
+const mailQueueCapacity = 128
+
 // NewMailer 创建邮件服务.
-func NewMailer(settings *Settings) *Mailer {
-	return &Mailer{settings: settings}
+func NewMailer(settings *Settings, log *slog.Logger) *Mailer {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Mailer{
+		settings: settings,
+		log:      log,
+		queue:    make(chan mailMessage, mailQueueCapacity),
+	}
 }
 
 // Configured 判断 SMTP 是否已配置齐全.
 func (m *Mailer) Configured() bool {
 	return strings.TrimSpace(m.settings.String("smtp_host")) != "" && strings.TrimSpace(m.settings.String("smtp_from")) != ""
+}
+
+// Start 启动异步邮件发送 worker.
+func (m *Mailer) Start(ctx context.Context) {
+	m.startOnce.Do(func() {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case message := <-m.queue:
+					if err := m.Send(message.to, message.subject, message.body); err != nil {
+						m.log.Warn("异步发送邮件失败", "error", err)
+					}
+				}
+			}
+		}()
+	})
+}
+
+// Enqueue 将邮件放入有界队列, 不等待 SMTP 网络请求.
+func (m *Mailer) Enqueue(to, subject, body string) error {
+	if !m.Configured() {
+		return errors.New("SMTP 未配置")
+	}
+	select {
+	case m.queue <- mailMessage{to: to, subject: subject, body: body}:
+		return nil
+	default:
+		return errors.New("邮件发送队列已满")
+	}
 }
 
 // Send 发送纯文本邮件.

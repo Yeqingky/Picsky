@@ -30,7 +30,7 @@ interface RegisterFieldErrors {
 /** 注册页: 用户名 / 邮箱 / 密码 + 人机验证 (/register) */
 export default function RegisterPage() {
   const { t } = useTranslation();
-  const { isLoading, refresh } = useAuth();
+  const { isLoading } = useAuth();
   const navigate = useNavigate();
 
   const [username, setUsername] = useState('');
@@ -60,6 +60,7 @@ export default function RegisterPage() {
     event.preventDefault();
 
     const trimmedUsername = username.trim();
+    const normalizedEmail = email.trim().toLowerCase();
     const nextErrors: RegisterFieldErrors = {};
     if (trimmedUsername === '') nextErrors.username = t('auth.register.usernameRequired');
     else if (
@@ -67,8 +68,8 @@ export default function RegisterPage() {
       !USERNAME_PATTERN.test(trimmedUsername)
     )
       nextErrors.username = t('auth.register.usernameInvalid');
-    if (email.trim() === '') nextErrors.email = t('auth.register.emailRequired');
-    else if (!EMAIL_PATTERN.test(email.trim())) nextErrors.email = t('common.form.invalidEmail');
+    if (normalizedEmail === '') nextErrors.email = t('auth.register.emailRequired');
+    else if (!EMAIL_PATTERN.test(normalizedEmail)) nextErrors.email = t('common.form.invalidEmail');
     if (password === '') nextErrors.password = t('common.form.required');
     else if (Array.from(password).length < MIN_PASSWORD_LENGTH)
       nextErrors.password = t('common.form.passwordTooShort');
@@ -89,14 +90,12 @@ export default function RegisterPage() {
     try {
       await authApi.register({
         username: trimmedUsername,
-        email: email.trim(),
+        email: normalizedEmail,
         password,
         captcha_token: captchaToken === '' ? undefined : captchaToken,
       });
       toast.success(t('auth.register.success'));
-      // 邮箱验证关闭时注册会直接下发会话; 验证开启时不发会话, 需要手动登录
-      const session = await refresh();
-      navigate(session ? '/' : '/login', { replace: true });
+      navigate('/login', { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'captcha_failed') {
         setCaptchaToken('');
@@ -164,16 +163,23 @@ export default function RegisterPage() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="register-email">{t('auth.register.email')}</Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="register-email">{t('auth.register.email')}</Label>
+          {fieldErrors.email && (
+            <p id="register-email-error" className="text-destructive text-right text-sm">
+              {fieldErrors.email}
+            </p>
+          )}
+        </div>
         <Input
           id="register-email"
           type="email"
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => setEmail(event.target.value.toLowerCase())}
           aria-invalid={Boolean(fieldErrors.email)}
+          aria-describedby={fieldErrors.email ? 'register-email-error' : undefined}
           autoComplete="email"
         />
-        {fieldErrors.email && <p className="text-destructive text-sm">{fieldErrors.email}</p>}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -197,18 +203,25 @@ export default function RegisterPage() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="register-confirm-password">{t('auth.register.confirmPassword')}</Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="register-confirm-password">{t('auth.register.confirmPassword')}</Label>
+          {fieldErrors.confirmPassword && (
+            <p id="register-confirm-password-error" className="text-destructive text-right text-sm">
+              {fieldErrors.confirmPassword}
+            </p>
+          )}
+        </div>
         <Input
           id="register-confirm-password"
           type="password"
           value={confirmPassword}
           onChange={(event) => setConfirmPassword(event.target.value)}
           aria-invalid={Boolean(fieldErrors.confirmPassword)}
+          aria-describedby={
+            fieldErrors.confirmPassword ? 'register-confirm-password-error' : undefined
+          }
           autoComplete="new-password"
         />
-        {fieldErrors.confirmPassword && (
-          <p className="text-destructive text-sm">{fieldErrors.confirmPassword}</p>
-        )}
       </div>
 
       <CaptchaWidget config={captchaConfig} onToken={setCaptchaToken} resetSignal={resetSignal} />

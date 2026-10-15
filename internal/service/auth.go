@@ -19,6 +19,7 @@ import (
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/yeqingky/Picsky/internal/apperr"
 	"github.com/yeqingky/Picsky/internal/crypto"
@@ -84,6 +85,7 @@ type Auth struct {
 	log                  *slog.Logger
 	loginLimiter         *RateLimiter
 	passwordResetLimiter *RateLimiter
+	dummyPasswordHash    []byte
 	loginChallengesMu    sync.Mutex
 	loginChallenges      map[string]loginChallenge
 }
@@ -100,9 +102,26 @@ func NewAuth(database *gorm.DB, settings *Settings, cipher *crypto.Cipher, audit
 		secretKey:            secretKey,
 		log:                  log,
 		loginLimiter:         NewRateLimiter(LoginFailureWindow),
+		dummyPasswordHash:    loginDummyPasswordHash(),
 		passwordResetLimiter: NewRateLimiter(passwordResetRequestWindow),
 		loginChallenges:      make(map[string]loginChallenge),
 	}
+}
+
+var cachedLoginDummyHash struct {
+	sync.Once
+	hash []byte
+	err  error
+}
+
+func loginDummyPasswordHash() []byte {
+	cachedLoginDummyHash.Do(func() {
+		cachedLoginDummyHash.hash, cachedLoginDummyHash.err = bcrypt.GenerateFromPassword([]byte("picsky-login-timing-dummy"), bcryptCost)
+	})
+	if cachedLoginDummyHash.err != nil {
+		panic(fmt.Sprintf("generate dummy bcrypt hash: %v", cachedLoginDummyHash.err))
+	}
+	return cachedLoginDummyHash.hash
 }
 
 // RegisterInput 是注册入参.
@@ -112,6 +131,9 @@ type RegisterInput struct {
 	Password     string
 	CaptchaToken string
 }
+
+// ErrDuplicateRegistration 表示用户名或邮箱已被占用, 由公开 API 转为通用响应.
+var ErrDuplicateRegistration = errors.New("duplicate registration")
 
 // Register 注册用户; 首个注册账号进入管理员组.
 func (a *Auth) Register(ctx context.Context, in RegisterInput, ip, userAgent string) (*model.User, error) {
@@ -123,7 +145,7 @@ func (a *Auth) Register(ctx context.Context, in RegisterInput, ip, userAgent str
 	}
 
 	username := strings.TrimSpace(in.Username)
-	email := strings.TrimSpace(in.Email)
+	email := normalizeEmail(in.Email)
 	if err := validateUsername(username); err != nil {
 		return nil, err
 	}
@@ -137,18 +159,23 @@ func (a *Auth) Register(ctx context.Context, in RegisterInput, ip, userAgent str
 		return nil, err
 	}
 
+	hashed, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcryptCost)
+	if err != nil {
+		return nil, apperr.ErrInternal.WithMessage("密码散列失败: " + err.Error())
+	}
+
 	var existing int64
 	if err := a.db.Model(&model.User{}).Where("username = ?", username).Count(&existing).Error; err != nil {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
 	if existing > 0 {
-		return nil, apperr.ErrInvalidRequest.WithMessage("用户名已被占用")
+		return nil, ErrDuplicateRegistration
 	}
 	if err := a.db.Model(&model.User{}).Where("email = ?", email).Count(&existing).Error; err != nil {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
 	if existing > 0 {
-		return nil, apperr.ErrInvalidRequest.WithMessage("邮箱已被占用")
+		return nil, ErrDuplicateRegistration
 	}
 
 	var userCount int64
@@ -171,12 +198,8 @@ func (a *Auth) Register(ctx context.Context, in RegisterInput, ip, userAgent str
 		groupID = group.ID
 	}
 
-	hashed, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcryptCost)
-	if err != nil {
-		return nil, apperr.ErrInternal.WithMessage("密码散列失败: " + err.Error())
-	}
-
 	now := nowUTC()
+	verificationRequired := a.settings.Bool("email_verification_enabled", false)
 	user := model.User{
 		Username:     username,
 		Email:        email,
@@ -186,17 +209,28 @@ func (a *Auth) Register(ctx context.Context, in RegisterInput, ip, userAgent str
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	verificationRequired := a.settings.Bool("email_verification_enabled", false)
-	if !verificationRequired {
+	if verificationRequired {
+		readOnly, err := a.readOnlyGroup()
+		if err != nil {
+			return nil, err
+		}
+		user.RestoreGroupID = &groupID
+		user.GroupID = readOnly.ID
+		user.Status = model.UserStatusUnverified
+	} else {
 		user.EmailVerifiedAt = &now
 	}
-	if err := a.db.Create(&user).Error; err != nil {
-		return nil, apperr.ErrInvalidRequest.WithMessage("创建用户失败: " + err.Error())
+	result := a.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&user)
+	if result.Error != nil {
+		return nil, apperr.ErrInternal.WithMessage("创建用户失败: " + result.Error.Error())
+	}
+	if result.RowsAffected == 0 {
+		return nil, ErrDuplicateRegistration
 	}
 
 	if verificationRequired {
-		if err := a.SendVerification(&user); err != nil {
-			a.log.Warn("发送邮箱验证邮件失败", "user_id", user.ID, "error", err)
+		if err := a.QueueVerification(&user); err != nil {
+			a.log.Warn("排队邮箱验证邮件失败", "user_id", user.ID, "error", err)
 		}
 	}
 
@@ -214,7 +248,7 @@ func (a *Auth) Register(ctx context.Context, in RegisterInput, ip, userAgent str
 
 // LoginInput 是登录入参.
 type LoginInput struct {
-	Identifier     string
+	Email          string
 	Password       string
 	TOTPCode       string
 	CaptchaToken   string
@@ -242,13 +276,13 @@ func (a *Auth) Login(ctx context.Context, in LoginInput, ip, userAgent string) (
 	if strings.TrimSpace(in.TOTPCode) != "" {
 		return nil, apperr.ErrInvalidRequest.WithMessage("两步验证码必须通过登录挑战提交")
 	}
-	identifier := strings.TrimSpace(in.Identifier)
-	if identifier == "" || in.Password == "" {
-		return nil, apperr.ErrInvalidRequest.WithMessage("请输入用户名与密码")
+	email := normalizeEmail(in.Email)
+	if email == "" || in.Password == "" {
+		return nil, apperr.ErrInvalidRequest.WithMessage("请输入邮箱与密码")
 	}
 
 	ipKey := "login:ip:" + ip
-	identifierKey := "login:user:" + ip + "|" + strings.ToLower(identifier)
+	identifierKey := "login:email:" + ip + "|" + email
 	for _, key := range []string{ipKey, identifierKey} {
 		if a.loginLimiter.Count(key) >= LoginFailureLimit {
 			return nil, apperr.ErrRateLimited.WithMessage("登录失败次数过多, 请稍后再试").
@@ -257,33 +291,36 @@ func (a *Auth) Login(ctx context.Context, in LoginInput, ip, userAgent string) (
 	}
 
 	var user model.User
-	var err error
-	if strings.Contains(identifier, "@") {
-		// 邮箱优先, 避免历史用户名与其他用户邮箱冲突时拦截邮箱登录.
-		err = a.db.Where("email = ?", identifier).First(&user).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			err = a.db.Where("username = ?", identifier).First(&user).Error
-		}
-	} else {
-		err = a.db.Where("username = ?", identifier).First(&user).Error
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		a.recordLoginFailure(ipKey, identifierKey)
-		a.audit.Recordf(Entry{Action: "login_failed", Detail: map[string]any{"identifier": identifier, "reason": "not_found"}, IP: ip, UserAgent: userAgent})
-		return nil, apperr.ErrUnauthorized.WithMessage("用户名或密码错误")
-	}
-	if err != nil {
+	err := a.db.Where("email = ?", email).First(&user).Error
+	found := err == nil
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
-	if user.Status == model.UserStatusDisabled {
-		a.recordLoginFailure(ipKey, identifierKey)
-		a.audit.Recordf(Entry{UserID: &user.ID, Action: "login_failed", Detail: map[string]any{"reason": "disabled"}, IP: ip, UserAgent: userAgent})
-		return nil, apperr.ErrForbidden.WithMessage("账号已被禁用")
+
+	passwordHash := a.dummyPasswordHash
+	reason := "not_found"
+	if found {
+		reason = "bad_password"
+		if user.Status == model.UserStatusBanned {
+			reason = "banned"
+		} else {
+			passwordHash = []byte(user.PasswordHash)
+		}
 	}
-	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(in.Password)) != nil {
+	passwordErr := bcrypt.CompareHashAndPassword(passwordHash, []byte(in.Password))
+	if !found || user.Status == model.UserStatusBanned || passwordErr != nil {
 		a.recordLoginFailure(ipKey, identifierKey)
-		a.audit.Recordf(Entry{UserID: &user.ID, Action: "login_failed", Detail: map[string]any{"reason": "bad_password"}, IP: ip, UserAgent: userAgent})
-		return nil, apperr.ErrUnauthorized.WithMessage("用户名或密码错误")
+		entry := Entry{
+			Action:    "login_failed",
+			Detail:    map[string]any{"email": email, "reason": reason},
+			IP:        ip,
+			UserAgent: userAgent,
+		}
+		if found {
+			entry.UserID = &user.ID
+		}
+		a.audit.Recordf(entry)
+		return nil, apperr.ErrUnauthorized.WithMessage("邮箱或密码错误")
 	}
 
 	if user.TOTPSecret != "" {
@@ -394,8 +431,8 @@ func (a *Auth) loginWithChallenge(token, code, ip, userAgent string) (*model.Use
 		}
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
-	if user.Status == model.UserStatusDisabled {
-		return nil, apperr.ErrForbidden.WithMessage("账号已被禁用")
+	if user.Status == model.UserStatusBanned {
+		return nil, apperr.ErrForbidden.WithMessage("账号已封禁")
 	}
 	if user.TOTPSecret == "" {
 		return nil, apperr.ErrUnauthorized.WithMessage("两步验证已关闭, 请重新登录")
@@ -417,9 +454,6 @@ func (a *Auth) loginWithChallenge(token, code, ip, userAgent string) (*model.Use
 }
 
 func (a *Auth) finishLogin(user *model.User, ip, userAgent, ipKey, identifierKey string) error {
-	if a.settings.Bool("email_verification_enabled", false) && user.EmailVerifiedAt == nil {
-		return apperr.ErrForbidden.WithMessage("邮箱尚未验证, 请先完成邮箱验证")
-	}
 
 	now := nowUTC()
 	if err := a.db.Model(&model.User{}).Where("id = ?", user.ID).Updates(map[string]any{
@@ -530,8 +564,8 @@ func (a *Auth) SessionPrincipal(token string) (*Principal, error) {
 }
 
 func (a *Auth) principalForUser(user *model.User, apiKeyID *int64, apiScopes *int64) (*Principal, error) {
-	if user.Status == model.UserStatusDisabled {
-		return nil, apperr.ErrForbidden.WithMessage("账号已被禁用")
+	if user.Status == model.UserStatusBanned {
+		return nil, apperr.ErrForbidden.WithMessage("账号已封禁")
 	}
 	var group model.Group
 	if err := a.db.First(&group, user.GroupID).Error; err != nil {
@@ -578,10 +612,10 @@ func (a *Auth) ParseSession(token string) (int64, error) {
 	return userID, nil
 }
 
-// SendVerification 发送邮箱验证邮件.
-func (a *Auth) SendVerification(user *model.User) error {
-	if !a.mailer.Configured() {
-		return errors.New("SMTP 未配置")
+// QueueVerification 将邮箱验证邮件放入异步发送队列.
+func (a *Auth) QueueVerification(user *model.User) error {
+	if user.EmailVerifiedAt != nil {
+		return nil
 	}
 	token, err := a.signToken(purposeEmailVerify, user.ID, time.Now().Add(EmailVerifyTTL))
 	if err != nil {
@@ -594,7 +628,7 @@ func (a *Auth) SendVerification(user *model.User) error {
 	}
 	siteName := a.settings.String("site_name")
 	body := fmt.Sprintf("你好 %s:\n\n请访问以下链接完成 %s 邮箱验证 (24 小时内有效):\n%s\n\n如果这不是你的操作, 请忽略本邮件.\n", user.Username, siteName, link)
-	return a.mailer.Send(user.Email, siteName+" 邮箱验证", body)
+	return a.mailer.Enqueue(user.Email, siteName+" 邮箱验证", body)
 }
 
 // VerifyEmail 校验邮箱验证令牌.
@@ -604,23 +638,47 @@ func (a *Auth) VerifyEmail(token string) error {
 		return apperr.ErrInvalidRequest.WithMessage("验证链接无效或已过期")
 	}
 	now := nowUTC()
-	result := a.db.Model(&model.User{}).Where("id = ? AND email_verified_at IS NULL", userID).Updates(map[string]any{
-		"email_verified_at": now,
-		"updated_at":        now,
-	})
-	if result.Error != nil {
-		return apperr.ErrInternal.WithMessage(result.Error.Error())
+	if err := a.db.Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.First(&user, userID).Error; err != nil {
+			return err
+		}
+		if user.EmailVerifiedAt != nil {
+			return nil
+		}
+		updates := map[string]any{
+			"email_verified_at": now,
+			"updated_at":        now,
+		}
+		if user.Status == model.UserStatusUnverified {
+			groupID := user.GroupID
+			if user.RestoreGroupID != nil {
+				groupID = *user.RestoreGroupID
+			} else {
+				var group model.Group
+				if err := tx.Where("is_default = ? AND is_system = ?", true, false).Order("sort ASC, id ASC").First(&group).Error; err != nil {
+					return err
+				}
+				groupID = group.ID
+			}
+			updates["status"] = model.UserStatusNormal
+			updates["group_id"] = groupID
+			updates["restore_group_id"] = nil
+		}
+		return tx.Model(&model.User{}).Where("id = ? AND email_verified_at IS NULL AND status = ?", userID, user.Status).Updates(updates).Error
+	}); err != nil {
+		return apperr.ErrInternal.WithMessage(err.Error())
 	}
 	a.audit.Recordf(Entry{UserID: &userID, Action: "email_verified", TargetType: "user", TargetID: &userID})
 	return nil
 }
 
-// RequestPasswordReset 对已注册邮箱发送找回链接; 对不存在或已禁用的账号保持相同响应.
+// RequestPasswordReset 对已注册邮箱发送找回链接; 对不存在或已封禁的账号保持相同响应.
 func (a *Auth) RequestPasswordReset(ctx context.Context, email, captchaToken, ip string) error {
 	if err := a.captcha.Verify(ctx, captchaToken, ip); err != nil {
 		return err
 	}
-	email = strings.TrimSpace(email)
+	email = normalizeEmail(email)
 	if err := validateEmail(email); err != nil {
 		return err
 	}
@@ -628,7 +686,7 @@ func (a *Auth) RequestPasswordReset(ctx context.Context, email, captchaToken, ip
 	limited := false
 	for _, key := range []string{
 		"password-reset:ip:" + ip,
-		"password-reset:email:" + strings.ToLower(email),
+		"password-reset:email:" + email,
 	} {
 		allowed, _ := a.passwordResetLimiter.Allow(key, passwordResetRequestLimit)
 		if !allowed {
@@ -647,13 +705,13 @@ func (a *Auth) RequestPasswordReset(ctx context.Context, email, captchaToken, ip
 	}
 
 	var user model.User
-	if err := a.db.Where("LOWER(email) = ?", strings.ToLower(email)).First(&user).Error; err != nil {
+	if err := a.db.Where("email = ?", email).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
 		return apperr.ErrInternal.WithMessage(err.Error())
 	}
-	if user.Status == model.UserStatusDisabled {
+	if user.Status == model.UserStatusBanned {
 		return nil
 	}
 
@@ -786,6 +844,14 @@ func (a *Auth) adminGroup() (*model.Group, error) {
 	}
 	if err != nil {
 		return nil, apperr.ErrInternal.WithMessage("管理员组不存在: " + err.Error())
+	}
+	return &group, nil
+}
+
+func (a *Auth) readOnlyGroup() (*model.Group, error) {
+	var group model.Group
+	if err := a.db.Where("is_system = ? AND name = ?", true, "只读").First(&group).Error; err != nil {
+		return nil, apperr.ErrInternal.WithMessage("只读用户组不存在: " + err.Error())
 	}
 	return &group, nil
 }
@@ -968,6 +1034,10 @@ func validateUsername(username string) error {
 		}
 	}
 	return nil
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 // validateEmail 校验邮箱格式.

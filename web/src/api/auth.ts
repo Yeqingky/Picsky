@@ -16,7 +16,7 @@ export const authApi = {
     api.post<CurrentUser>('/auth/login', body, { silent: true }).then((r) => r.data),
 
   register: (body: RegisterRequest) =>
-    api.post<CurrentUser>('/auth/register', body, { silent: true }).then((r) => r.data),
+    api.post<void>('/auth/register', body, { silent: true }).then(() => undefined),
 
   logout: () => api.post<void>('/auth/logout', undefined, { silent: true }).then(() => undefined),
 

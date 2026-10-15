@@ -122,7 +122,7 @@ export default function ForgotPasswordPage() {
               id="password-recovery-email"
               type="email"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => setEmail(event.target.value.toLowerCase())}
               autoComplete="email"
               autoFocus
             />

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -73,7 +74,6 @@ func (s *Server) meResponse(principal *service.Principal) meDTO {
 func (s *Server) login(c *gin.Context) {
 	var payload struct {
 		Identifier     string `json:"identifier"`
-		Username       string `json:"username"`
 		Password       string `json:"password"`
 		TOTP           string `json:"totp"`
 		CaptchaToken   string `json:"captcha_token"`
@@ -83,13 +83,8 @@ func (s *Server) login(c *gin.Context) {
 		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
 		return
 	}
-	identifier := strings.TrimSpace(payload.Identifier)
-	if identifier == "" {
-		identifier = strings.TrimSpace(payload.Username)
-	}
-
 	user, err := s.svc.Auth.Login(c.Request.Context(), service.LoginInput{
-		Identifier:     identifier,
+		Email:          payload.Identifier,
 		Password:       payload.Password,
 		TOTPCode:       payload.TOTP,
 		CaptchaToken:   payload.CaptchaToken,
@@ -115,7 +110,7 @@ func (s *Server) login(c *gin.Context) {
 	c.JSON(http.StatusOK, s.meResponse(principal))
 }
 
-// register 注册; 首个账号自动成为管理员.
+// register 返回统一结果, 不暴露用户名或邮箱是否已注册.
 func (s *Server) register(c *gin.Context) {
 	var payload struct {
 		Username     string `json:"username"`
@@ -127,31 +122,20 @@ func (s *Server) register(c *gin.Context) {
 		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
 		return
 	}
-	user, err := s.svc.Auth.Register(c.Request.Context(), service.RegisterInput{
+	_, err := s.svc.Auth.Register(c.Request.Context(), service.RegisterInput{
 		Username:     payload.Username,
 		Email:        payload.Email,
 		Password:     payload.Password,
 		CaptchaToken: payload.CaptchaToken,
 	}, clientIP(c), userAgent(c))
-	if err != nil {
+	if err != nil && !errors.Is(err, service.ErrDuplicateRegistration) {
 		s.fail(c, err)
 		return
 	}
 
-	principal, err := s.svc.Auth.PrincipalFor(user.ID, nil, nil)
-	if err != nil {
-		s.fail(c, err)
-		return
-	}
-	if user.EmailVerifiedAt != nil {
-		token, err := s.svc.Auth.IssueSession(user.ID)
-		if err != nil {
-			s.fail(c, err)
-			return
-		}
-		s.setSessionCookie(c, token, int(service.SessionTTL.Seconds()))
-	}
-	c.JSON(http.StatusCreated, s.meResponse(principal))
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "注册请求已处理, 如邮箱可用, 请尝试使用邮箱登录; 启用邮箱验证时请查收邮件",
+	})
 }
 
 // logout 注销当前会话.
@@ -328,18 +312,14 @@ func (s *Server) resetPassword(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// resendVerification 重新发送邮箱验证邮件.
+// resendVerification 将邮箱验证邮件放入异步发送队列.
 func (s *Server) resendVerification(c *gin.Context) {
 	principal := middleware.Principal(c)
-	if !s.svc.Mailer.Configured() {
-		s.fail(c, apperr.ErrInvalidRequest.WithMessage("SMTP 未配置, 无法发送验证邮件"))
+	if err := s.svc.Auth.QueueVerification(principal.User); err != nil {
+		s.fail(c, apperr.ErrBackend.WithMessage("排队验证邮件失败: "+err.Error()))
 		return
 	}
-	if err := s.svc.Auth.SendVerification(principal.User); err != nil {
-		s.fail(c, apperr.ErrBackend.WithMessage("发送验证邮件失败: "+err.Error()))
-		return
-	}
-	c.Status(http.StatusNoContent)
+	c.Status(http.StatusAccepted)
 }
 
 // setSessionCookie 写入或清除会话 cookie.
