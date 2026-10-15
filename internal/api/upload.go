@@ -18,8 +18,12 @@ import (
 // upload 处理 multipart 上传.
 func (s *Server) upload(c *gin.Context) {
 	principal := middleware.Principal(c)
+	permit, err := s.svc.Upload.Preflight(principal)
+	if err != nil {
+		s.fail(c, err)
+		return
+	}
 	limit := service.UploadLimit(s.svc.Settings, principal.Group)
-
 	result, err := httpupload.Read(c, s.cfg.TempDir, s.cfg.UploadMemoryLimit, limit)
 	if err != nil {
 		s.fail(c, err)
@@ -43,6 +47,7 @@ func (s *Server) upload(c *gin.Context) {
 		Source:    s.sourceOf(principal),
 		ClientIP:  clientIP(c),
 		UserAgent: userAgent(c),
+		Permit:    permit,
 	})
 	if err != nil {
 		s.fail(c, err)

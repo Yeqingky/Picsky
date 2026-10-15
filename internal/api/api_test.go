@@ -324,6 +324,25 @@ func (s *server) upload(path string, filename string, content []byte, fields map
 	return s.raw(http.MethodPost, path, body, headers, cookies)
 }
 
+func (s *server) countedUpload(path, filename string, content []byte, fields map[string]string, cookies []*http.Cookie) (*response, int64, int) {
+	s.t.Helper()
+	body, contentType := multipartBody(s.t, filename, content, fields)
+	countedBody := &countingReadCloser{reader: bytes.NewReader(body.Bytes())}
+	request := httptest.NewRequest(http.MethodPost, path, countedBody)
+	request.ContentLength = int64(body.Len())
+	request.Header.Set("Content-Type", contentType)
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	s.engine.ServeHTTP(recorder, request)
+	return &response{
+		Status: recorder.Code,
+		Body:   recorder.Body.Bytes(),
+		Header: recorder.Header(),
+	}, countedBody.bytesRead, body.Len()
+}
+
 // pngContent 生成 PNG 内容.
 func pngContent(t *testing.T, seed int) []byte {
 	t.Helper()
@@ -1150,6 +1169,171 @@ func TestNativeUploadRejectsInvalidPayloads(t *testing.T) {
 	}
 	if contentType := notFound.Header.Get("Content-Type"); !strings.Contains(contentType, "application/json") {
 		t.Errorf("未知 API 路径应返回 JSON, 实际 %q", contentType)
+	}
+}
+
+func TestNativeUploadRejectsOversizedMultipartField(t *testing.T) {
+	s := newServer(t)
+	cookie, policyID := s.bootstrap()
+	result := s.upload("/api/v1/upload", "field-too-large.png", pngContent(t, 19), map[string]string{
+		"policy_id": fmt.Sprint(policyID),
+		"padding":   strings.Repeat("x", 4097),
+	}, map[string]string{}, []*http.Cookie{cookie})
+	if result.Status != http.StatusBadRequest {
+		t.Fatalf("超过单字段上限应返回 400, 实际 %d %s", result.Status, string(result.Body))
+	}
+}
+
+func TestNativeUploadLimitsTotalMultipartFieldBytes(t *testing.T) {
+	s := newServer(t)
+	cookie, policyID := s.bootstrap()
+	fields := map[string]string{"policy_id": fmt.Sprint(policyID)}
+	for i := range 16 {
+		fields[fmt.Sprintf("field-%02d", i)] = strings.Repeat("x", 4096)
+	}
+	result := s.upload("/api/v1/upload", "field-budget.png", pngContent(t, 20), fields, map[string]string{}, []*http.Cookie{cookie})
+	if result.Status != http.StatusBadRequest {
+		t.Fatalf("超过 multipart 字段总量预算应返回 400, 实际 %d %s", result.Status, string(result.Body))
+	}
+}
+
+func TestNativeUploadLimitsMultipartFieldCount(t *testing.T) {
+	s := newServer(t)
+	cookie, policyID := s.bootstrap()
+	fields := map[string]string{"policy_id": fmt.Sprint(policyID)}
+	for i := range 63 {
+		fields[fmt.Sprintf("field-%02d", i)] = ""
+	}
+	withinLimit := s.upload("/api/v1/upload", "field-count.png", pngContent(t, 21), fields, map[string]string{}, []*http.Cookie{cookie})
+	if withinLimit.Status != http.StatusCreated {
+		t.Fatalf("64 个非文件字段应通过: %d %s", withinLimit.Status, string(withinLimit.Body))
+	}
+	fields["field-over-limit"] = ""
+	overLimit := s.upload("/api/v1/upload", "field-count-over.png", pngContent(t, 22), fields, map[string]string{}, []*http.Cookie{cookie})
+	if overLimit.Status != http.StatusBadRequest {
+		t.Fatalf("超过 multipart 字段数量上限应返回 400, 实际 %d %s", overLimit.Status, string(overLimit.Body))
+	}
+}
+
+func TestNativeUploadChecksPermissionBeforeReadingMultipartBody(t *testing.T) {
+	s := newServer(t)
+	adminCookie, policyID := s.bootstrap()
+	group := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+		"name":        "无上传权限组",
+		"permissions": []string{"manage_keys"},
+	}, []*http.Cookie{adminCookie})
+	if group.Status != http.StatusCreated {
+		t.Fatalf("创建无上传权限组失败: %d %s", group.Status, string(group.Body))
+	}
+	groupID := int64(s.decode(group)["id"].(float64))
+	created := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
+		"username": "no-upload",
+		"email":    "no-upload@example.com",
+		"password": "password123",
+		"group_id": groupID,
+	}, []*http.Cookie{adminCookie})
+	if created.Status != http.StatusCreated {
+		t.Fatalf("创建无上传权限用户失败: %d %s", created.Status, string(created.Body))
+	}
+	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "no-upload",
+		"password":   "password123",
+	}, nil)
+	if login.Status != http.StatusOK {
+		t.Fatalf("无上传权限用户登录失败: %d %s", login.Status, string(login.Body))
+	}
+	fields := map[string]string{
+		"policy_id": fmt.Sprint(policyID),
+		"padding":   strings.Repeat("x", 2<<20),
+	}
+	result, bytesRead, bodySize := s.countedUpload("/api/v1/upload", "denied.png", pngContent(t, 23), fields, []*http.Cookie{s.sessionCookie(login)})
+	if result.Status != http.StatusForbidden {
+		t.Fatalf("无上传权限应返回 403, 实际 %d %s", result.Status, string(result.Body))
+	}
+	if bytesRead >= int64(bodySize)/2 {
+		t.Errorf("权限拒绝前解析了大部分 multipart 请求体: %d/%d 字节", bytesRead, bodySize)
+	}
+}
+
+func TestNativeUploadChecksRateLimitBeforeReadingMultipartBody(t *testing.T) {
+	s := newServer(t)
+	adminCookie, policyID := s.bootstrap()
+	group := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+		"name":              "限速上传组",
+		"permissions":       []string{"upload", "manage_policies"},
+		"upload_rate_limit": 1,
+	}, []*http.Cookie{adminCookie})
+	if group.Status != http.StatusCreated {
+		t.Fatalf("创建限速上传组失败: %d %s", group.Status, string(group.Body))
+	}
+	groupID := int64(s.decode(group)["id"].(float64))
+	created := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
+		"username": "rate-limited",
+		"email":    "rate-limited@example.com",
+		"password": "password123",
+		"group_id": groupID,
+	}, []*http.Cookie{adminCookie})
+	if created.Status != http.StatusCreated {
+		t.Fatalf("创建限速用户失败: %d %s", created.Status, string(created.Body))
+	}
+	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "rate-limited",
+		"password":   "password123",
+	}, nil)
+	if login.Status != http.StatusOK {
+		t.Fatalf("限速用户登录失败: %d %s", login.Status, string(login.Body))
+	}
+	cookie := s.sessionCookie(login)
+	first := s.upload("/api/v1/upload", "first.png", pngContent(t, 24), map[string]string{
+		"policy_id": fmt.Sprint(policyID),
+	}, map[string]string{}, []*http.Cookie{cookie})
+	if first.Status != http.StatusCreated {
+		t.Fatalf("限速窗口内首次上传应成功: %d %s", first.Status, string(first.Body))
+	}
+
+	fields := map[string]string{
+		"policy_id": fmt.Sprint(policyID),
+		"padding":   strings.Repeat("x", 2<<20),
+	}
+	result, bytesRead, bodySize := s.countedUpload("/api/v1/upload", "limited.png", pngContent(t, 25), fields, []*http.Cookie{cookie})
+	if result.Status != http.StatusTooManyRequests {
+		t.Fatalf("超出上传速率应返回 429, 实际 %d %s", result.Status, string(result.Body))
+	}
+	if bytesRead >= int64(bodySize)/2 {
+		t.Errorf("限流拒绝前解析了大部分 multipart 请求体: %d/%d 字节", bytesRead, bodySize)
+	}
+}
+
+func TestLskyMultipartBudgetIncludesFirstTokenField(t *testing.T) {
+	s := newServer(t)
+	adminCookie, policyID := s.bootstrap()
+	createdKey := s.json(http.MethodPost, "/api/v1/keys", map[string]any{"name": "lsky-field-budget"}, []*http.Cookie{adminCookie})
+	if createdKey.Status != http.StatusCreated {
+		t.Fatalf("创建 API 密钥失败: %d %s", createdKey.Status, string(createdKey.Body))
+	}
+	fields := map[string]string{
+		"token":       s.decode(createdKey)["secret"].(string),
+		"strategy_id": fmt.Sprint(policyID),
+	}
+	for i := range 15 {
+		fields[fmt.Sprintf("field-%02d", i)] = strings.Repeat("x", 4096)
+	}
+	total := 0
+	for name, value := range fields {
+		total += len(name) + len(value)
+	}
+	edgeLength := (64 << 10) - total - len("edge") + 1
+	if edgeLength <= 0 || edgeLength > 4096 {
+		t.Fatalf("测试字段无法构造预算边界: extra=%d", edgeLength)
+	}
+	fields["edge"] = strings.Repeat("x", edgeLength)
+
+	result := s.upload("/lsky/api/v1/upload", "field-budget.png", pngContent(t, 26), fields, map[string]string{}, nil)
+	if result.Status != http.StatusOK {
+		t.Fatalf("Lsky 业务错误应使用 HTTP 200, 实际 %d %s", result.Status, string(result.Body))
+	}
+	if s.decode(result)["status"] != false {
+		t.Errorf("超出总量预算的 Lsky multipart 字段应被拒绝: %s", string(result.Body))
 	}
 }
 

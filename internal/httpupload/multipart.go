@@ -14,8 +14,12 @@ import (
 	"github.com/yeqingky/Picsky/internal/service"
 )
 
-// maxFormFieldLength 限制单字段长度, 防止异常客户端占用内存.
-const maxFormFieldLength = 4096
+// Multipart 字段按单值长度、字段名和值总量及字段数量共同限界.
+const (
+	maxFormFieldLength     = 4096
+	maxFormFieldTotalBytes = 64 << 10
+	maxFormFieldCount      = 64
+)
 
 // Result 是一次 multipart 解析结果.
 type Result struct {
@@ -26,10 +30,29 @@ type Result struct {
 
 // RequestReader 保留 multipart 流, 支持在读取文件前检查首个表单字段.
 type RequestReader struct {
-	reader    *multipart.Reader
-	fields    map[string]string
-	firstRead bool
-	consumed  bool
+	reader      *multipart.Reader
+	fields      map[string]string
+	fieldBudget multipartFieldBudget
+	firstRead   bool
+	consumed    bool
+}
+
+type multipartFieldBudget struct {
+	totalBytes int
+	count      int
+}
+
+func (b *multipartFieldBudget) add(name string, value []byte) error {
+	if b.count >= maxFormFieldCount {
+		return apperr.ErrInvalidRequest.WithMessage("multipart 表单字段过多")
+	}
+	remaining := maxFormFieldTotalBytes - b.totalBytes
+	if len(name) > remaining || len(value) > remaining-len(name) {
+		return apperr.ErrInvalidRequest.WithMessage("multipart 表单字段总量超出限制")
+	}
+	b.totalBytes += len(name) + len(value)
+	b.count++
+	return nil
 }
 
 // NewRequestReader 创建 multipart 流读取器.
@@ -64,6 +87,9 @@ func (r *RequestReader) ReadFirstField(name string) (string, error) {
 	if len(value) > maxFormFieldLength {
 		return "", apperr.ErrInvalidRequest.WithMessage("表单字段过长")
 	}
+	if err := r.fieldBudget.add(name, value); err != nil {
+		return "", err
+	}
 	if err := part.Close(); err != nil {
 		return "", apperr.ErrInvalidRequest.WithMessage("读取表单字段失败: " + err.Error())
 	}
@@ -88,7 +114,7 @@ func (r *RequestReader) Read(tempDir string, memLimit, limit int64) (*Result, er
 			closeResult(result)
 			return nil, apperr.ErrInvalidRequest.WithMessage("解析上传请求失败: " + err.Error())
 		}
-		if err := handlePart(part, tempDir, memLimit, limit, result); err != nil {
+		if err := handlePart(part, tempDir, memLimit, limit, result, &r.fieldBudget); err != nil {
 			closeResult(result)
 			return nil, err
 		}
@@ -110,7 +136,7 @@ func Read(c *gin.Context, tempDir string, memLimit int64, limit int64) (*Result,
 }
 
 // handlePart 处理单个 part.
-func handlePart(part *multipart.Part, tempDir string, memLimit, limit int64, result *Result) error {
+func handlePart(part *multipart.Part, tempDir string, memLimit, limit int64, result *Result, budget *multipartFieldBudget) error {
 	defer part.Close()
 	name := part.FormName()
 	filename := part.FileName()
@@ -126,9 +152,15 @@ func handlePart(part *multipart.Part, tempDir string, memLimit, limit int64, res
 		result.Filename = filename
 		return nil
 	}
-	value, err := io.ReadAll(io.LimitReader(part, maxFormFieldLength))
+	value, err := io.ReadAll(io.LimitReader(part, maxFormFieldLength+1))
 	if err != nil {
 		return apperr.ErrInvalidRequest.WithMessage("读取表单字段失败: " + err.Error())
+	}
+	if len(value) > maxFormFieldLength {
+		return apperr.ErrInvalidRequest.WithMessage("表单字段过长")
+	}
+	if err := budget.add(name, value); err != nil {
+		return err
 	}
 	if name != "" {
 		result.Fields[name] = strings.TrimSpace(string(value))

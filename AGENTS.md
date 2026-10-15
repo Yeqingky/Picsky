@@ -69,6 +69,7 @@ Picsky/
 - 冲突策略只使用 `rename` / `skip`; `overwrite` 是后端能力声明, 不作为冲突策略.
 - Lsky Pro 兼容层是适配层: 不得绕过认证, 权限, 配额与能力降级; 兼容字段有变更时先更新 `docs/lsky-compat.md`.
 - Lsky 上传在 multipart 文件缓冲前完成认证、上传权限与限流预检; 仅使用表单 `token` 的请求要求它是首个 multipart 字段, 通过认证后按用户组文件大小上限读取.
+- 原生 multipart 上传必须在解析请求体前完成认证、上传权限与限流预检; 所有 multipart 非文件字段值每项最多 4 KiB, 最多 64 项, 字段名和值合计最多 64 KiB (Lsky `token` 计入预算).
 - 不实现本地人机验证: 只接入 Cap 与 Cloudflare Turnstile; 注册, 邮箱验证, 人机验证都必须是可开关项.
 - 启用 TOTP 的登录使用两步流程: 首次请求校验用户名/密码与人机验证并返回短时挑战; 前端在模态框自动提交动态口令, 挑战必须一次性消费并绑定来源 IP / User-Agent.
 - 登录限流、TOTP 挑战、审计与上传记录统一使用 `client_ip_source` 解析的地址; 默认使用 `REMOTE_ADDR`, 只有可信反向代理会覆盖所选请求头且应用端口不对公网开放时才配置代理头.
