@@ -588,16 +588,41 @@ func TestHealthAndAuthFlow(t *testing.T) {
 	if changed.Status != http.StatusNoContent {
 		t.Errorf("修改密码失败: %d %s", changed.Status, string(changed.Body))
 	}
-	if relogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+	relogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
 		"identifier": "admin",
 		"password":   "password456",
-	}, nil); relogin.Status != http.StatusOK {
+	}, nil)
+	if relogin.Status != http.StatusOK {
 		t.Errorf("新密码登录失败: %d %s", relogin.Status, string(relogin.Body))
 	}
 
-	logout := s.raw(http.MethodPost, "/api/v1/auth/logout", nil, nil, []*http.Cookie{loginCookie})
+	changedCookie := s.sessionCookie(changed)
+	if stale := s.raw(http.MethodGet, "/api/v1/auth/me", nil, nil, []*http.Cookie{loginCookie}); stale.Status != http.StatusUnauthorized {
+		t.Errorf("改密后旧会话应失效, 实际 %d %s", stale.Status, string(stale.Body))
+	}
+	if current := s.raw(http.MethodGet, "/api/v1/auth/me", nil, nil, []*http.Cookie{changedCookie}); current.Status != http.StatusOK {
+		t.Fatalf("改密响应应续发当前会话, 实际 %d %s", current.Status, string(current.Body))
+	}
+
+	logoutCookie := s.sessionCookie(relogin)
+	logout := s.raw(http.MethodPost, "/api/v1/auth/logout", nil, nil, []*http.Cookie{logoutCookie})
 	if logout.Status != http.StatusNoContent {
 		t.Errorf("登出失败: %d", logout.Status)
+	}
+	clearedCookie := false
+	for _, value := range logout.Header.Values("Set-Cookie") {
+		if strings.HasPrefix(value, "picsky_session=") && strings.Contains(strings.ToLower(value), "max-age=0") {
+			clearedCookie = true
+			break
+		}
+	}
+	if !clearedCookie {
+		t.Errorf("登出响应应清除浏览器 cookie: %v", logout.Header.Values("Set-Cookie"))
+	}
+	for _, cookie := range []*http.Cookie{changedCookie, logoutCookie} {
+		if revoked := s.raw(http.MethodGet, "/api/v1/auth/me", nil, nil, []*http.Cookie{cookie}); revoked.Status != http.StatusUnauthorized {
+			t.Errorf("登出后旧会话应失效, 实际 %d %s", revoked.Status, string(revoked.Body))
+		}
 	}
 }
 
@@ -623,6 +648,7 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 		t.Fatalf("注册失败: %d %s", registered.Status, string(registered.Body))
 	}
 	userID := int64(s.decode(registered)["id"].(float64))
+	registeredCookie := s.sessionCookie(registered)
 	secret, _, err := s.svc.Auth.TOTPSetup(userID)
 	if err != nil {
 		t.Fatalf("生成 TOTP 秘钥失败: %v", err)
@@ -681,6 +707,9 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 	}, nil)
 	if reset.Status != http.StatusNoContent {
 		t.Fatalf("重置密码失败: %d %s", reset.Status, string(reset.Body))
+	}
+	if stale := s.raw(http.MethodGet, "/api/v1/auth/me", nil, nil, []*http.Cookie{registeredCookie}); stale.Status != http.StatusUnauthorized {
+		t.Errorf("密码重置后旧会话应失效, 实际 %d %s", stale.Status, string(stale.Body))
 	}
 	if replay := s.json(http.MethodPost, "/api/v1/auth/password/reset", map[string]any{
 		"token":    token,

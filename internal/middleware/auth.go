@@ -40,11 +40,11 @@ func (a *Auth) Resolve(c *gin.Context) (*service.Principal, error) {
 	}
 
 	if cookie, err := c.Cookie(SessionCookieName); err == nil && strings.TrimSpace(cookie) != "" {
-		userID, err := a.svc.Auth.ParseSession(cookie)
+		principal, err := a.svc.Auth.SessionPrincipal(cookie)
 		if err != nil {
-			return nil, apperr.ErrUnauthorized
+			return nil, err
 		}
-		return a.svc.Auth.PrincipalFor(userID, nil, nil)
+		return principal, nil
 	}
 	return nil, nil
 }

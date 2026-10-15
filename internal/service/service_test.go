@@ -1292,6 +1292,18 @@ func TestAuthRegisterLoginAndTotp(t *testing.T) {
 	if _, err := f.svc.Auth.ParseSession(token + "tampered"); err == nil {
 		t.Error("被篡改的会话令牌应校验失败")
 	}
+	if _, err := f.svc.Auth.SessionPrincipal(token); err != nil {
+		t.Fatalf("签发的会话无法解析主体: %v", err)
+	}
+	if err := f.svc.Auth.Logout(user.ID, "127.0.0.1", "test"); err != nil {
+		t.Fatalf("注销会话失败: %v", err)
+	}
+	if _, err := f.svc.Auth.ParseSession(token); err == nil {
+		t.Error("注销后会话令牌应被吊销")
+	}
+	if _, err := f.svc.Auth.SessionPrincipal(token); err == nil {
+		t.Error("注销后会话主体应无法解析")
+	}
 
 	secret, otpauthURL, err := f.svc.Auth.TOTPSetup(user.ID)
 	if err != nil {

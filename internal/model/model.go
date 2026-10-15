@@ -114,6 +114,7 @@ type User struct {
 	UsedImages      int64      `gorm:"not null;default:0" json:"used_images"`
 	UsedBytes       int64      `gorm:"not null;default:0" json:"used_bytes"`
 	Status          int16      `gorm:"not null;default:0" json:"status"`
+	SessionVersion  int64      `gorm:"not null;default:1" json:"-"`
 	TOTPSecret      string     `gorm:"size:255" json:"-"`
 	LastLoginAt     *time.Time `json:"last_login_at"`
 	LastLoginIP     string     `gorm:"size:45" json:"last_login_ip"`

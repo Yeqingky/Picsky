@@ -157,8 +157,12 @@ func (s *Server) register(c *gin.Context) {
 // logout 注销当前会话.
 func (s *Server) logout(c *gin.Context) {
 	principal := middleware.Principal(c)
-	if principal != nil {
-		s.svc.Auth.Logout(principal.User.ID, clientIP(c), userAgent(c))
+	if principal != nil && principal.APIKeyID == nil {
+		if err := s.svc.Auth.Logout(principal.User.ID, clientIP(c), userAgent(c)); err != nil {
+			s.setSessionCookie(c, "", -1)
+			s.fail(c, err)
+			return
+		}
 	}
 	s.setSessionCookie(c, "", -1)
 	c.Status(http.StatusNoContent)
@@ -188,6 +192,14 @@ func (s *Server) changePassword(c *gin.Context) {
 	if err := s.svc.Auth.ChangePassword(principal.User.ID, payload.OldPassword, payload.NewPassword, clientIP(c), userAgent(c)); err != nil {
 		s.fail(c, err)
 		return
+	}
+	if principal.APIKeyID == nil {
+		token, err := s.svc.Auth.IssueSession(principal.User.ID)
+		if err != nil {
+			s.fail(c, err)
+			return
+		}
+		s.setSessionCookie(c, token, int(service.SessionTTL.Seconds()))
 	}
 	c.Status(http.StatusNoContent)
 }

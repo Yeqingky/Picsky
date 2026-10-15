@@ -14,7 +14,7 @@ import (
 )
 
 // schemaVersion 是当前迁移版本, 每次结构变更递增并追加一个迁移函数.
-const schemaVersion = 5
+const schemaVersion = 6
 
 // SchemaMigration 记录已应用的迁移版本.
 type SchemaMigration struct {
@@ -134,6 +134,9 @@ var steps = map[int]func(*gorm.DB) error{
 		return db.Model(&model.Setting{}).
 			Where("key = ? AND value IN ?", "default_conflict_policy", []string{"overwrite", "fail"}).
 			Update("value", model.ConflictSkip).Error
+	},
+	6: func(db *gorm.DB) error {
+		return db.AutoMigrate(&model.User{})
 	},
 }
 

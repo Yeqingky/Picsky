@@ -83,7 +83,61 @@ func TestConflictPolicyMigrationMapsLegacyValuesToSkip(t *testing.T) {
 	if err := database.Order("version DESC").First(&latest).Error; err != nil {
 		t.Fatalf("读取迁移版本失败: %v", err)
 	}
-	if latest.Version != 5 {
-		t.Errorf("迁移版本应为 5, 实际 %d", latest.Version)
+	if latest.Version != 6 {
+		t.Errorf("迁移版本应为 6, 实际 %d", latest.Version)
 	}
 }
+
+func TestSessionVersionMigrationInitializesExistingUsers(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open("file:session-version-migration?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		t.Fatalf("读取测试数据库连接失败: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	if err := database.AutoMigrate(&SchemaMigration{}, &userBeforeSessionVersion{}); err != nil {
+		t.Fatalf("准备旧版用户表失败: %v", err)
+	}
+	now := time.Now().UTC()
+	legacy := userBeforeSessionVersion{
+		Username:     "legacy",
+		Email:        "legacy@example.com",
+		PasswordHash: "hash",
+		GroupID:      1,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := database.Create(&legacy).Error; err != nil {
+		t.Fatalf("写入旧版用户失败: %v", err)
+	}
+	if err := database.Create(&SchemaMigration{Version: 5, AppliedAt: now}).Error; err != nil {
+		t.Fatalf("写入旧迁移版本失败: %v", err)
+	}
+
+	if err := Run(database); err != nil {
+		t.Fatalf("升级迁移失败: %v", err)
+	}
+	var upgraded model.User
+	if err := database.First(&upgraded, legacy.ID).Error; err != nil {
+		t.Fatalf("读取升级后的用户失败: %v", err)
+	}
+	if upgraded.SessionVersion != 1 {
+		t.Errorf("旧用户的会话版本应初始化为 1, 实际 %d", upgraded.SessionVersion)
+	}
+}
+
+type userBeforeSessionVersion struct {
+	ID           int64     `gorm:"primaryKey;autoIncrement"`
+	Username     string    `gorm:"size:64;not null;uniqueIndex"`
+	Email        string    `gorm:"size:255;not null;uniqueIndex"`
+	PasswordHash string    `gorm:"size:255;not null"`
+	GroupID      int64     `gorm:"not null;index"`
+	CreatedAt    time.Time `gorm:"not null"`
+	UpdatedAt    time.Time `gorm:"not null"`
+}
+
+func (userBeforeSessionVersion) TableName() string { return "users" }

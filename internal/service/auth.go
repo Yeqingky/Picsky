@@ -436,12 +436,23 @@ func (a *Auth) recordLoginFailure(ipKey, identifierKey string) {
 	a.loginLimiter.Add(identifierKey)
 }
 
-// Logout 记录登出审计.
-func (a *Auth) Logout(userID int64, ip, userAgent string) {
+// Logout 吊销用户的全部会话并记录登出审计.
+func (a *Auth) Logout(userID int64, ip, userAgent string) error {
+	result := a.db.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"session_version": gorm.Expr("session_version + 1"),
+		"updated_at":      nowUTC(),
+	})
+	if result.Error != nil {
+		return apperr.ErrInternal.WithMessage(result.Error.Error())
+	}
+	if result.RowsAffected != 1 {
+		return apperr.ErrUnauthorized
+	}
 	a.audit.Recordf(Entry{UserID: &userID, Action: "logout", IP: ip, UserAgent: userAgent})
+	return nil
 }
 
-// ChangePassword 修改密码.
+// ChangePassword 修改密码并吊销修改前签发的全部会话.
 func (a *Auth) ChangePassword(userID int64, oldPassword, newPassword, ip, userAgent string) error {
 	var user model.User
 	if err := a.db.First(&user, userID).Error; err != nil {
@@ -458,8 +469,9 @@ func (a *Auth) ChangePassword(userID int64, oldPassword, newPassword, ip, userAg
 		return apperr.ErrInternal.WithMessage("密码散列失败: " + err.Error())
 	}
 	if err := a.db.Model(&model.User{}).Where("id = ?", user.ID).Updates(map[string]any{
-		"password_hash": string(hashed),
-		"updated_at":    nowUTC(),
+		"password_hash":   string(hashed),
+		"session_version": gorm.Expr("session_version + 1"),
+		"updated_at":      nowUTC(),
 	}).Error; err != nil {
 		return apperr.ErrInternal.WithMessage(err.Error())
 	}
@@ -493,6 +505,23 @@ func (a *Auth) PrincipalFor(userID int64, apiKeyID *int64, apiScopes *int64) (*P
 	if err := a.db.First(&user, userID).Error; err != nil {
 		return nil, apperr.ErrUnauthorized
 	}
+	return a.principalForUser(&user, apiKeyID, apiScopes)
+}
+
+// SessionPrincipal 校验服务端会话版本并加载会话主体.
+func (a *Auth) SessionPrincipal(token string) (*Principal, error) {
+	userID, sessionVersion, err := a.parseSessionToken(token)
+	if err != nil {
+		return nil, apperr.ErrUnauthorized
+	}
+	var user model.User
+	if err := a.db.First(&user, userID).Error; err != nil || user.SessionVersion != sessionVersion {
+		return nil, apperr.ErrUnauthorized
+	}
+	return a.principalForUser(&user, nil, nil)
+}
+
+func (a *Auth) principalForUser(user *model.User, apiKeyID *int64, apiScopes *int64) (*Principal, error) {
 	if user.Status == model.UserStatusDisabled {
 		return nil, apperr.ErrForbidden.WithMessage("账号已被禁用")
 	}
@@ -504,7 +533,7 @@ func (a *Auth) PrincipalFor(userID int64, apiKeyID *int64, apiScopes *int64) (*P
 	if apiScopes != nil {
 		permissions = permissions & model.Permission(*apiScopes)
 	}
-	return &Principal{User: &user, Group: &group, Permissions: permissions, APIKeyID: apiKeyID}, nil
+	return &Principal{User: user, Group: &group, Permissions: permissions, APIKeyID: apiKeyID}, nil
 }
 
 // UserByID 读取用户.
@@ -516,14 +545,29 @@ func (a *Auth) UserByID(userID int64) (*model.User, error) {
 	return &user, nil
 }
 
-// IssueSession 生成会话令牌.
+// IssueSession 生成绑定当前服务端版本的会话令牌.
 func (a *Auth) IssueSession(userID int64) (string, error) {
-	return a.signToken(purposeSession, userID, time.Now().Add(SessionTTL))
+	var user model.User
+	if err := a.db.Select("session_version").First(&user, userID).Error; err != nil {
+		return "", apperr.ErrInternal.WithMessage(err.Error())
+	}
+	return a.signSessionToken(userID, user.SessionVersion, time.Now().Add(SessionTTL)), nil
 }
 
-// ParseSession 校验会话令牌并返回用户 ID.
+// ParseSession 校验会话签名、有效期与当前服务端版本并返回用户 ID.
 func (a *Auth) ParseSession(token string) (int64, error) {
-	return a.parseToken(token, purposeSession)
+	userID, sessionVersion, err := a.parseSessionToken(token)
+	if err != nil {
+		return 0, err
+	}
+	var user model.User
+	if err := a.db.Select("session_version").First(&user, userID).Error; err != nil {
+		return 0, err
+	}
+	if user.SessionVersion != sessionVersion {
+		return 0, errors.New("会话已吊销")
+	}
+	return userID, nil
 }
 
 // SendVerification 发送邮箱验证邮件.
@@ -645,13 +689,12 @@ func (a *Auth) ResetPassword(token, newPassword, ip, userAgent string) error {
 		if !hmac.Equal([]byte(credentialTag), []byte(expectedTag)) {
 			return apperr.ErrInvalidRequest.WithMessage("密码找回链接无效或已过期")
 		}
-		result := tx.Model(&model.User{}).
-			Where("id = ? AND password_hash = ?", user.ID, user.PasswordHash).
-			Updates(map[string]any{
-				"password_hash": string(hashed),
-				"totp_secret":   "",
-				"updated_at":    now,
-			})
+		result := tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+			"password_hash":   string(hashed),
+			"totp_secret":     "",
+			"session_version": gorm.Expr("session_version + 1"),
+			"updated_at":      now,
+		})
 		if result.Error != nil {
 			return apperr.ErrInternal.WithMessage(result.Error.Error())
 		}
@@ -760,31 +803,52 @@ func (a *Auth) defaultGroup() (*model.Group, error) {
 	return &group, nil
 }
 
-// signToken 生成 HMAC 签名的令牌.
+// signToken 生成 HMAC 签名的用途令牌.
 func (a *Auth) signToken(purpose string, userID int64, expiresAt time.Time) (string, error) {
 	payload := strings.Join([]string{purpose, strconv.FormatInt(userID, 10), strconv.FormatInt(expiresAt.Unix(), 10)}, "|")
+	return a.encodeToken(payload), nil
+}
+
+func (a *Auth) signSessionToken(userID, sessionVersion int64, expiresAt time.Time) string {
+	payload := strings.Join([]string{
+		purposeSession,
+		strconv.FormatInt(userID, 10),
+		strconv.FormatInt(sessionVersion, 10),
+		strconv.FormatInt(expiresAt.Unix(), 10),
+	}, "|")
+	return a.encodeToken(payload)
+}
+
+func (a *Auth) encodeToken(payload string) string {
 	signature := a.sign(payload)
-	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+func (a *Auth) verifiedTokenFields(token string) ([]string, error) {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) != 2 {
+		return nil, errors.New("令牌格式非法")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, err
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, err
+	}
+	if !hmac.Equal(signature, a.sign(string(payload))) {
+		return nil, errors.New("令牌签名校验失败")
+	}
+	return strings.Split(string(payload), "|"), nil
 }
 
 // parseToken 校验签名与有效期并返回用户 ID.
 func (a *Auth) parseToken(token, purpose string) (int64, error) {
-	parts := strings.Split(strings.TrimSpace(token), ".")
-	if len(parts) != 2 {
-		return 0, errors.New("令牌格式非法")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	fields, err := a.verifiedTokenFields(token)
 	if err != nil {
 		return 0, err
 	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return 0, err
-	}
-	if !hmac.Equal(signature, a.sign(string(payload))) {
-		return 0, errors.New("令牌签名校验失败")
-	}
-	fields := strings.Split(string(payload), "|")
 	if len(fields) != 3 || fields[0] != purpose {
 		return 0, errors.New("令牌用途不匹配")
 	}
@@ -800,6 +864,32 @@ func (a *Auth) parseToken(token, purpose string) (int64, error) {
 		return 0, errors.New("令牌已过期")
 	}
 	return userID, nil
+}
+
+func (a *Auth) parseSessionToken(token string) (int64, int64, error) {
+	fields, err := a.verifiedTokenFields(token)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(fields) != 4 || fields[0] != purposeSession {
+		return 0, 0, errors.New("会话令牌格式非法")
+	}
+	userID, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	sessionVersion, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	expiresAt, err := strconv.ParseInt(fields[3], 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	if time.Now().Unix() > expiresAt {
+		return 0, 0, errors.New("令牌已过期")
+	}
+	return userID, sessionVersion, nil
 }
 func (a *Auth) signPasswordResetToken(userID int64, passwordHash string, expiresAt time.Time) string {
 	payload := strings.Join([]string{
