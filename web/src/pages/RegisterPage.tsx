@@ -12,11 +12,13 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { useSiteName } from '../hooks/useSite';
 import { useAuth } from '../hooks/useAuth';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_PATTERN = /^[A-Za-z0-9]+$/;
+const MAX_USERNAME_LENGTH = 64;
 const MIN_PASSWORD_LENGTH = 8;
+const MAX_PASSWORD_BYTES = 72;
 
 interface RegisterFieldErrors {
   username?: string;
@@ -28,7 +30,6 @@ interface RegisterFieldErrors {
 /** 注册页: 用户名 / 邮箱 / 密码 + 人机验证 (/register) */
 export default function RegisterPage() {
   const { t } = useTranslation();
-  const siteName = useSiteName();
   const { isLoading, refresh } = useAuth();
   const navigate = useNavigate();
 
@@ -61,11 +62,18 @@ export default function RegisterPage() {
     const trimmedUsername = username.trim();
     const nextErrors: RegisterFieldErrors = {};
     if (trimmedUsername === '') nextErrors.username = t('auth.register.usernameRequired');
+    else if (
+      trimmedUsername.length > MAX_USERNAME_LENGTH ||
+      !USERNAME_PATTERN.test(trimmedUsername)
+    )
+      nextErrors.username = t('auth.register.usernameInvalid');
     if (email.trim() === '') nextErrors.email = t('auth.register.emailRequired');
     else if (!EMAIL_PATTERN.test(email.trim())) nextErrors.email = t('common.form.invalidEmail');
     if (password === '') nextErrors.password = t('common.form.required');
-    else if (password.length < MIN_PASSWORD_LENGTH)
+    else if (Array.from(password).length < MIN_PASSWORD_LENGTH)
       nextErrors.password = t('common.form.passwordTooShort');
+    else if (new TextEncoder().encode(password).length > MAX_PASSWORD_BYTES)
+      nextErrors.password = t('common.form.passwordTooLong');
     if (confirmPassword !== password)
       nextErrors.confirmPassword = t('common.form.passwordMismatch');
     setFieldErrors(nextErrors);
@@ -107,12 +115,7 @@ export default function RegisterPage() {
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-      <div className="flex flex-col gap-1">
-        <h2 className="font-heading text-xl font-semibold">{t('auth.register.title')}</h2>
-        <p className="text-muted-foreground text-sm">
-          {t('auth.register.description', { siteName })}
-        </p>
-      </div>
+      <h2 className="font-heading text-xl font-semibold">{t('auth.register.title')}</h2>
 
       {registerDisabled && (
         <Alert className="border-warning/30 bg-warning/10">
@@ -129,20 +132,35 @@ export default function RegisterPage() {
       )}
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="register-username">{t('auth.register.username')}</Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="register-username">{t('auth.register.username')}</Label>
+          {fieldErrors.username && (
+            <p id="register-username-error" className="text-destructive text-right text-sm">
+              {fieldErrors.username}
+            </p>
+          )}
+        </div>
         <Input
           id="register-username"
           value={username}
           onChange={(event) => setUsername(event.target.value)}
+          onBlur={(event) => setUsername(event.currentTarget.value.trim())}
+          onPaste={(event) => {
+            const input = event.currentTarget;
+            const start = input.selectionStart ?? input.value.length;
+            const end = input.selectionEnd ?? input.value.length;
+            const pasted = event.clipboardData.getData('text').replace(/[^A-Za-z0-9]/g, '');
+            const nextValue = input.value.slice(0, start) + pasted + input.value.slice(end);
+            event.preventDefault();
+            setUsername(nextValue);
+            const cursor = start + pasted.length;
+            requestAnimationFrame(() => input.setSelectionRange(cursor, cursor));
+          }}
           aria-invalid={Boolean(fieldErrors.username)}
+          aria-describedby={fieldErrors.username ? 'register-username-error' : undefined}
           autoComplete="username"
           autoFocus
         />
-        {fieldErrors.username ? (
-          <p className="text-destructive text-sm">{fieldErrors.username}</p>
-        ) : (
-          <p className="text-muted-foreground text-sm">{t('auth.register.usernameHint')}</p>
-        )}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -159,16 +177,23 @@ export default function RegisterPage() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="register-password">{t('auth.register.password')}</Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="register-password">{t('auth.register.password')}</Label>
+          {fieldErrors.password && (
+            <p id="register-password-error" className="text-destructive text-right text-sm">
+              {fieldErrors.password}
+            </p>
+          )}
+        </div>
         <Input
           id="register-password"
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           aria-invalid={Boolean(fieldErrors.password)}
+          aria-describedby={fieldErrors.password ? 'register-password-error' : undefined}
           autoComplete="new-password"
         />
-        {fieldErrors.password && <p className="text-destructive text-sm">{fieldErrors.password}</p>}
       </div>
 
       <div className="flex flex-col gap-2">

@@ -121,6 +121,7 @@ export const common = {
     required: '此项为必填',
     invalidEmail: '邮箱格式不正确',
     passwordTooShort: '密码至少 8 位',
+    passwordTooLong: '密码不能超过 72 字节',
     passwordMismatch: '两次输入的密码不一致',
     invalidNumber: '请输入有效数字',
     sizeUnit: '体积单位',

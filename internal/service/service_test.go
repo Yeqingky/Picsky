@@ -1236,7 +1236,7 @@ func TestRegisterEmailAllowlist(t *testing.T) {
 	}
 	for index, email := range []string{"nested@sub.example.com", "outside@example.net"} {
 		if _, err := f.svc.Auth.Register(context.Background(), service.RegisterInput{
-			Username: fmt.Sprintf("blocked-%d", index),
+			Username: fmt.Sprintf("blocked%d", index),
 			Email:    email,
 			Password: "password123",
 		}, "127.0.0.1", "test"); !errors.Is(err, apperr.ErrEmailNotAllowed) {
@@ -1250,7 +1250,7 @@ func TestAuthRegisterLoginAndTotp(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := f.svc.Auth.Register(ctx, service.RegisterInput{
-		Username: "admin",
+		Username: " admin ",
 		Email:    "other@example.com",
 		Password: "password123",
 	}, "127.0.0.1", "test"); err == nil {
@@ -1696,5 +1696,74 @@ func TestDanglingDefaultPolicyFallsBack(t *testing.T) {
 	result := f.mustUpload(refreshed, nil, "fallback.png", pngBytes(t, 502, 4, 4))
 	if result.Record.PolicyID != mainPolicy.ID {
 		t.Fatalf("默认策略失效后应退化为组内第一个可用策略: %d", result.Record.PolicyID)
+	}
+}
+
+func TestRegisterRequiresASCIIAlphanumericUsername(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	for index, username := range []string{"has-hyphen", "has_underscore", "has.dot", "has space", "夜轻", "name@example.com"} {
+		_, err := f.svc.Auth.Register(ctx, service.RegisterInput{
+			Username: username,
+			Email:    fmt.Sprintf("invalid%d@example.com", index),
+			Password: "password123",
+		}, "127.0.0.1", "test")
+		if err == nil {
+			t.Errorf("用户名 %q 应被拒绝", username)
+		}
+		groupID := f.normalGID
+		_, err = f.svc.Users.Create(service.UserInput{
+			Username: username,
+			Email:    fmt.Sprintf("admininvalid%d@example.com", index),
+			Password: "password123",
+			GroupID:  &groupID,
+		}, f.admin, "127.0.0.1", "test")
+		if err == nil {
+			t.Errorf("后台创建用户应拒绝用户名 %q", username)
+		}
+	}
+
+	if _, err := f.svc.Auth.Register(ctx, service.RegisterInput{
+		Username: "Az09",
+		Email:    "valid@example.com",
+		Password: "password123",
+	}, "127.0.0.1", "test"); err != nil {
+		t.Fatalf("大小写英文字母和数字组成的用户名应有效: %v", err)
+	}
+}
+
+func TestLoginPrefersEmailWhenLegacyUsernameCollides(t *testing.T) {
+	f := newFixture(t)
+	now := time.Now().UTC()
+	legacy := model.User{
+		Username:     "victim@example.com",
+		Email:        "legacy@example.net",
+		PasswordHash: f.admin.User.PasswordHash,
+		GroupID:      f.admin.User.GroupID,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := f.database.Create(&legacy).Error; err != nil {
+		t.Fatalf("写入历史冲突用户名失败: %v", err)
+	}
+
+	target, err := f.svc.Auth.Register(context.Background(), service.RegisterInput{
+		Username: "victim",
+		Email:    "victim@example.com",
+		Password: "target-password123",
+	}, "127.0.0.1", "test")
+	if err != nil {
+		t.Fatalf("注册邮箱所有者失败: %v", err)
+	}
+	loggedIn, err := f.svc.Auth.Login(context.Background(), service.LoginInput{
+		Identifier: "victim@example.com",
+		Password:   "target-password123",
+	}, "127.0.0.1", "test")
+	if err != nil {
+		t.Fatalf("邮箱登录被历史用户名拦截: %v", err)
+	}
+	if loggedIn.ID != target.ID {
+		t.Fatalf("邮箱登录应解析到邮箱所有者 ID %d, 实际 %d", target.ID, loggedIn.ID)
 	}
 }

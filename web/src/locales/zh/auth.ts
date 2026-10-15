@@ -21,10 +21,9 @@ export const auth = {
 
   register: {
     title: '注册',
-    description: '创建 {{siteName}} 账号',
     username: '用户名',
     usernameRequired: '请输入用户名',
-    usernameHint: '任意字符, 首尾空格会被去除',
+    usernameInvalid: '仅支持大小写英文字母和数字, 最多 64 位',
     email: '邮箱',
     emailRequired: '请输入邮箱',
     password: '密码',

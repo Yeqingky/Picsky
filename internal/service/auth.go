@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/pquerna/otp/totp"
@@ -258,7 +257,16 @@ func (a *Auth) Login(ctx context.Context, in LoginInput, ip, userAgent string) (
 	}
 
 	var user model.User
-	err := a.db.Where("username = ? OR email = ?", identifier, identifier).First(&user).Error
+	var err error
+	if strings.Contains(identifier, "@") {
+		// 邮箱优先, 避免历史用户名与其他用户邮箱冲突时拦截邮箱登录.
+		err = a.db.Where("email = ?", identifier).First(&user).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			err = a.db.Where("username = ?", identifier).First(&user).Error
+		}
+	} else {
+		err = a.db.Where("username = ?", identifier).First(&user).Error
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		a.recordLoginFailure(ipKey, identifierKey)
 		a.audit.Recordf(Entry{Action: "login_failed", Detail: map[string]any{"identifier": identifier, "reason": "not_found"}, IP: ip, UserAgent: userAgent})
@@ -946,7 +954,7 @@ func (a *Auth) sign(payload string) []byte {
 	return mac.Sum(nil)
 }
 
-// validateUsername 校验用户名: 任意字符, 去首尾空格, 不含控制字符.
+// validateUsername 校验用户名: 去首尾空格后仅允许 ASCII 英文字母与数字.
 func validateUsername(username string) error {
 	if username == "" {
 		return apperr.ErrInvalidRequest.WithMessage("用户名不能为空")
@@ -955,8 +963,8 @@ func validateUsername(username string) error {
 		return apperr.ErrInvalidRequest.WithMessage("用户名过长")
 	}
 	for _, r := range username {
-		if unicode.IsControl(r) {
-			return apperr.ErrInvalidRequest.WithMessage("用户名不能包含控制字符")
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return apperr.ErrInvalidRequest.WithMessage("用户名只能包含大小写英文字母和数字")
 		}
 	}
 	return nil

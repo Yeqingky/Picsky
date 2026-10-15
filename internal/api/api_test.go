@@ -640,7 +640,7 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 	}
 
 	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"username": "reset-user",
+		"username": "resetuser",
 		"email":    "reset@example.com",
 		"password": "old-password123",
 	}, nil)
@@ -661,7 +661,7 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 		t.Fatalf("启用 TOTP 失败: %v", err)
 	}
 	beforeResetLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "reset-user",
+		"identifier": "resetuser",
 		"password":   "old-password123",
 	}, nil)
 	if beforeResetLogin.Status != http.StatusUnauthorized {
@@ -718,13 +718,13 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 		t.Errorf("重置令牌重放应被拒绝, 实际 %d %s", replay.Status, string(replay.Body))
 	}
 	if oldPassword := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "reset-user",
+		"identifier": "resetuser",
 		"password":   "old-password123",
 	}, nil); oldPassword.Status != http.StatusUnauthorized {
 		t.Errorf("重置后旧密码应失效, 实际 %d %s", oldPassword.Status, string(oldPassword.Body))
 	}
 	newPassword := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "reset-user",
+		"identifier": "resetuser",
 		"password":   "new-password456",
 	}, nil)
 	if newPassword.Status != http.StatusOK {
@@ -734,7 +734,7 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 func TestLoginTwoStepTotpAPI(t *testing.T) {
 	s := newServer(t)
 	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"username": "two-step",
+		"username": "twostep",
 		"email":    "two-step@example.com",
 		"password": "password123",
 	}, nil)
@@ -764,7 +764,7 @@ func TestLoginTwoStepTotpAPI(t *testing.T) {
 	}
 
 	first := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "two-step",
+		"identifier": "twostep",
 		"password":   "password123",
 	}, nil)
 	if first.Status != http.StatusUnauthorized {
@@ -1256,7 +1256,7 @@ func TestNativeUploadChecksPermissionBeforeReadingMultipartBody(t *testing.T) {
 	}
 	groupID := int64(s.decode(group)["id"].(float64))
 	created := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
-		"username": "no-upload",
+		"username": "noupload",
 		"email":    "no-upload@example.com",
 		"password": "password123",
 		"group_id": groupID,
@@ -1265,7 +1265,7 @@ func TestNativeUploadChecksPermissionBeforeReadingMultipartBody(t *testing.T) {
 		t.Fatalf("创建无上传权限用户失败: %d %s", created.Status, string(created.Body))
 	}
 	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "no-upload",
+		"identifier": "noupload",
 		"password":   "password123",
 	}, nil)
 	if login.Status != http.StatusOK {
@@ -1297,7 +1297,7 @@ func TestNativeUploadChecksRateLimitBeforeReadingMultipartBody(t *testing.T) {
 	}
 	groupID := int64(s.decode(group)["id"].(float64))
 	created := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
-		"username": "rate-limited",
+		"username": "ratelimited",
 		"email":    "rate-limited@example.com",
 		"password": "password123",
 		"group_id": groupID,
@@ -1306,7 +1306,7 @@ func TestNativeUploadChecksRateLimitBeforeReadingMultipartBody(t *testing.T) {
 		t.Fatalf("创建限速用户失败: %d %s", created.Status, string(created.Body))
 	}
 	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "rate-limited",
+		"identifier": "ratelimited",
 		"password":   "password123",
 	}, nil)
 	if login.Status != http.StatusOK {
@@ -1454,7 +1454,7 @@ func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
 	}
 	settingsGroupID := int64(s.decode(settingsGroup)["id"].(float64))
 	createdUser := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
-		"username": "settings-manager",
+		"username": "settingsmanager",
 		"email":    "settings-manager@example.com",
 		"password": "password123",
 		"group_id": settingsGroupID,
@@ -1463,7 +1463,7 @@ func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
 		t.Fatalf("创建设置管理员失败: %d %s", createdUser.Status, string(createdUser.Body))
 	}
 	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
-		"identifier": "settings-manager",
+		"identifier": "settingsmanager",
 		"password":   "password123",
 	}, nil)
 	if login.Status != http.StatusOK {
@@ -1511,7 +1511,7 @@ func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
 	}
 
 	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
-		"username": "new-member",
+		"username": "newmember",
 		"email":    "new-member@example.com",
 		"password": "password123",
 	}, nil)
