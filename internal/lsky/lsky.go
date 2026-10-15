@@ -77,19 +77,19 @@ func fail(c *gin.Context, message string) {
 // writeError 按 Lsky 语义映射错误.
 func (h *Handler) writeError(c *gin.Context, err error) {
 	apiErr := apperr.From(err)
-	switch apiErr.Status {
-	case http.StatusUnauthorized:
+	switch {
+	case apiErr.Status == http.StatusUnauthorized:
 		c.JSON(http.StatusUnauthorized, envelope{Status: false, Message: "Authentication failed.", Data: gin.H{}})
-	case http.StatusTooManyRequests:
+	case apiErr.Status == http.StatusTooManyRequests:
 		if apiErr.Details != nil {
 			if retry, okCast := apiErr.Details["retry_after_seconds"].(int); okCast {
 				c.Header("Retry-After", strconv.Itoa(retry))
 			}
 		}
 		c.JSON(http.StatusTooManyRequests, envelope{Status: false, Message: "Too Many Requests", Data: gin.H{}})
-	case http.StatusInternalServerError:
+	case apiErr.Status >= http.StatusInternalServerError:
 		h.log.Error("兼容层请求失败", "path", c.Request.URL.Path, "error", err)
-		fail(c, "服务内部错误")
+		c.JSON(apiErr.Status, envelope{Status: false, Message: apiErr.Message, Data: gin.H{}})
 	default:
 		fail(c, apiErr.Message)
 	}

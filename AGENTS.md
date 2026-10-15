@@ -68,6 +68,7 @@ Picsky/
 - 魔法路径模板必须包含内容哈希变量或单个 `{seq}`; `rename` 从已入库匹配路径的最大序号之后分配, 扫描补录路径也占用序号; 未使用 `{seq}` 时冲突重命名追加 `-N`, 其他生成变量在重试中固定.
 - 冲突策略只使用 `rename` / `skip`; `overwrite` 是后端能力声明, 不作为冲突策略.
 - Lsky Pro 兼容层是适配层: 不得绕过认证, 权限, 配额与能力降级; 兼容字段有变更时先更新 `docs/lsky-compat.md`.
+- 对外错误响应必须通过 `apperr.From` 归一; 所有 5xx 与 `backend_error` 使用通用消息并移除 `Details`, 原始错误仅写服务端日志; Lsky 5xx 返回实际状态码, 后端错误使用 502, 不按业务失败返回 HTTP 200.
 - Lsky 上传在 multipart 文件缓冲前完成认证、上传权限与限流预检; 仅使用表单 `token` 的请求要求它是首个 multipart 字段, 通过认证后按用户组文件大小上限读取.
 - 原生 multipart 上传必须在解析请求体前完成认证、上传权限与限流预检; 所有 multipart 非文件字段值每项最多 4 KiB, 最多 64 项, 字段名和值合计最多 64 KiB (Lsky `token` 计入预算).
 - Base64 JSON 上传必须流式读取 `data` 并直接解码到共用上传缓冲, 禁止在内存完整保留编码字符串或解码副本; 不限组仍受 2 GiB 单次硬上限约束, `data` 字段前后区段各最多 32 KiB, data URL 头最多 4 KiB, 解码缓冲遵循 `PICSKY_UPLOAD_MEMORY_LIMIT`.

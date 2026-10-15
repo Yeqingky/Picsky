@@ -51,6 +51,13 @@ func (e *Error) WithMessage(message string) *Error {
 	return &clone
 }
 
+const (
+	backendErrorCode     = "backend_error"
+	backendErrorMessage  = "外部服务错误"
+	internalErrorCode    = "internal_error"
+	internalErrorMessage = "服务内部错误"
+)
+
 // 预定义错误, 与 docs/api.md 第 2 节的错误码表一致.
 var (
 	ErrInvalidRequest    = New(http.StatusBadRequest, "invalid_request", "参数缺失或非法")
@@ -66,18 +73,30 @@ var (
 	ErrFileTooLarge      = New(http.StatusRequestEntityTooLarge, "file_too_large", "超过体积上限")
 	ErrUnsupportedFormat = New(http.StatusUnsupportedMediaType, "unsupported_format", "格式不在白名单")
 	ErrRateLimited       = New(http.StatusTooManyRequests, "rate_limited", "超过上传速率限制")
-	ErrBackend           = New(http.StatusBadGateway, "backend_error", "外部存储错误")
-	ErrInternal          = New(http.StatusInternalServerError, "internal_error", "服务内部错误")
+	ErrBackend           = New(http.StatusBadGateway, backendErrorCode, backendErrorMessage)
+	ErrInternal          = New(http.StatusInternalServerError, internalErrorCode, internalErrorMessage)
 )
 
-// From 把任意 error 归一为 API 错误.
+// From 把任意 error 归一为 API 错误, 并清除 5xx 与后端错误的对外细节.
 func From(err error) *Error {
 	if err == nil {
 		return nil
 	}
 	var apiErr *Error
-	if errors.As(err, &apiErr) {
-		return apiErr
+	if errors.As(err, &apiErr) && apiErr != nil {
+		if apiErr.Status < http.StatusInternalServerError && apiErr.Code != backendErrorCode {
+			return apiErr
+		}
+		safe := *apiErr
+		safe.Details = nil
+		if safe.Status == http.StatusBadGateway || safe.Code == backendErrorCode {
+			safe.Code = backendErrorCode
+			safe.Message = backendErrorMessage
+		} else {
+			safe.Code = internalErrorCode
+			safe.Message = internalErrorMessage
+		}
+		return &safe
 	}
-	return ErrInternal.WithMessage(err.Error())
+	return New(http.StatusInternalServerError, internalErrorCode, internalErrorMessage)
 }

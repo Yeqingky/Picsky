@@ -105,6 +105,7 @@ func (s *Server) adminTestPolicy(c *gin.Context) {
 		"error":      nil,
 	}
 	if testErr != nil {
+		s.log.Error("存储策略连接测试失败", "policy_id", id, "error", testErr)
 		response["error"] = apperr.From(testErr).Message
 	}
 	c.JSON(http.StatusOK, response)
