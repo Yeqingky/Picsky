@@ -72,21 +72,6 @@ flowchart LR
 - 注册与安全: 首个注册账号为管理员; 可选邮箱验证; 可选接入 Cap / Cloudflare Turnstile 人机验证 (默认关闭).
 - 维护: 策略首次接入自动扫描已有文件 (非图片文件也记录路径), 维护任务队列支持手动执行与失败重试.
 
-## 文档索引
-
-| 文档 | 内容 |
-| --- | --- |
-| [docs/architecture.md](docs/architecture.md) | 系统架构, 上传流程, 安全设计, 部署拓扑 |
-| [docs/tech-stack.md](docs/tech-stack.md) | 技术选型建议, 仓库结构, 构建约定 |
-| [docs/database.md](docs/database.md) | 数据模型, 表结构, 索引, 系统设置项 |
-| [docs/storage-policy.md](docs/storage-policy.md) | 存储策略, 魔法路径, 分发域名, 冲突与秒传 |
-| [docs/api.md](docs/api.md) | REST API, 认证方式, 错误码, 客户端兼容 |
-| [docs/lsky-compat.md](docs/lsky-compat.md) | Lsky Pro API 兼容层: 路由覆盖, 字段映射, 虚拟默认相册, 语义差异 |
-| [docs/permissions.md](docs/permissions.md) | 用户, 用户组, 权限位, 配额, 多租户 |
-| [docs/webui.md](docs/webui.md) | 页面结构, 交互行为, 权限可见性 |
-| [docs/roadmap.md](docs/roadmap.md) | 里程碑与交付顺序 |
-| [docs/open-questions.md](docs/open-questions.md) | 待讨论与待确认事项 |
-
 ## 许可
 
 见 [LICENSE](LICENSE).
