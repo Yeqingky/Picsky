@@ -394,36 +394,6 @@ func (i *Images) find(id int64) (*model.Image, error) {
 	return &record, nil
 }
 
-// reconcileUsersTx 在事务内按记录聚合重算指定用户的用量计数.
-func reconcileUsersTx(tx *gorm.DB, userIDs []int64) error {
-	seen := make(map[int64]bool, len(userIDs))
-	now := nowUTC()
-	for _, userID := range userIDs {
-		if userID <= 0 || seen[userID] {
-			continue
-		}
-		seen[userID] = true
-		var aggregate struct {
-			Count int64
-			Bytes int64
-		}
-		if err := tx.Model(&model.Image{}).
-			Select("COUNT(*) as count, COALESCE(SUM(size), 0) as bytes").
-			Where("user_id = ? AND quota_charged = ?", userID, true).
-			Scan(&aggregate).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
-			"used_images": aggregate.Count,
-			"used_bytes":  aggregate.Bytes,
-			"updated_at":  now,
-		}).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // refundQuota 原子回补用户配额计数, 结果不为负.
 func refundQuota(tx *gorm.DB, userID int64, images int64, bytes int64, now time.Time) error {
 	return tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{

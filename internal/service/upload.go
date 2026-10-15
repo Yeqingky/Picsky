@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -22,33 +24,33 @@ import (
 	"github.com/yeqingky/Picsky/internal/storage"
 )
 
-// maxRenameAttempts 是冲突重命名的最大尝试次数.
-const maxRenameAttempts = 6
-
 // MaxUploadSize 是单次上传的硬上限: 后端无分片能力, 超过该体积直接拒绝.
 const MaxUploadSize int64 = 2 << 30
 
 // Upload 实现上传流程: 校验, 哈希层与路径层冲突检查, 外部写入, 记录入库与配额计费.
 type Upload struct {
-	db       *gorm.DB
-	cfg      *config.Config
-	settings *Settings
-	audit    *Audit
-	limiter  *RateLimiter
-	policies *Policies
-	log      *slog.Logger
+	db         *gorm.DB
+	cfg        *config.Config
+	settings   *Settings
+	audit      *Audit
+	limiter    *RateLimiter
+	policies   *Policies
+	log        *slog.Logger
+	pathLockMu sync.Mutex
+	pathLocks  map[int64]*sync.Mutex
 }
 
 // NewUpload 创建上传服务.
 func NewUpload(database *gorm.DB, cfg *config.Config, settings *Settings, audit *Audit, policies *Policies, log *slog.Logger) *Upload {
 	return &Upload{
-		db:       database,
-		cfg:      cfg,
-		settings: settings,
-		audit:    audit,
-		limiter:  NewRateLimiter(time.Minute),
-		policies: policies,
-		log:      log,
+		db:        database,
+		cfg:       cfg,
+		settings:  settings,
+		audit:     audit,
+		limiter:   NewRateLimiter(time.Minute),
+		policies:  policies,
+		pathLocks: make(map[int64]*sync.Mutex),
+		log:       log,
 	}
 }
 
@@ -185,7 +187,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	}
 
 	// 冲突检查第二层: 路径与外部对象.
-	relPath, err := storage.RenderPath(policy.PathTemplate, storage.PathVars{
+	renderer, err := storage.NewPathRenderer(policy.PathTemplate, storage.PathVars{
 		MD5:    sums.MD5,
 		SHA256: sums.SHA256,
 		SHA512: sums.SHA512,
@@ -194,33 +196,65 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if err != nil {
 		return nil, apperr.ErrInternal.WithMessage("魔法路径渲染失败: " + err.Error())
 	}
+	if policy.ConflictPolicy == model.ConflictRename {
+		unlock := u.lockPolicyPath(policy.ID)
+		defer unlock()
 
-	var (
-		objectKey         string
-		overwriteExisting bool
-	)
-resolved:
-	for attempt := 0; ; attempt++ {
+		// 等待同策略的重命名上传完成后再次检查哈希, 避免并发同内容上传生成孤立对象.
+		var concurrentExisting model.Image
+		err := u.db.Where("policy_id = ? AND sha256 = ? AND kind = ?", policy.ID, sums.SHA256, model.KindImage).
+			Order("id ASC").First(&concurrentExisting).Error
+		switch {
+		case err == nil:
+			return u.reuseRecord(req, policy, urls, defaultURL, &concurrentExisting)
+		case errors.Is(err, gorm.ErrRecordNotFound):
+		default:
+			return nil, apperr.ErrInternal.WithMessage(err.Error())
+		}
+	}
+
+	sequence := uint64(0)
+	if renderer.HasSequence() {
+		sequence = 1
+		if policy.ConflictPolicy == model.ConflictRename {
+			prefix, suffix := renderer.SequencePattern()
+			maxSequence, err := u.maxPathSequence(policy.ID, prefix, suffix)
+			if err != nil {
+				return nil, err
+			}
+			sequence, err = nextPathSequence(maxSequence)
+			if err != nil {
+				return nil, apperr.ErrPathConflict.WithMessage(err.Error())
+			}
+		}
+	}
+	relPath, err := renderer.Render(sequence)
+	if err != nil {
+		return nil, apperr.ErrInternal.WithMessage("魔法路径渲染失败: " + err.Error())
+	}
+
+	var objectKey string
+	for {
 		objectKey = storage.NormalizeObjectKey("", relPath)
 		conflictRecord, err := u.recordForKey(policy.ID, objectKey)
 		if err != nil {
 			return nil, err
 		}
-		objectExists := false
-		if caps.Has(storage.CapStat) {
+		objectExists := conflictRecord != nil
+		if conflictRecord == nil && caps.Has(storage.CapStat) {
 			if _, statErr := adapter.Stat(ctx, objectKey); statErr == nil {
 				objectExists = true
 			} else if !errors.Is(statErr, storage.ErrNotFound) {
 				u.log.Warn("冲突检查时查询外部对象失败", "object_key", objectKey, "error", statErr)
 			}
 		}
-		if conflictRecord == nil && !objectExists {
+		if !objectExists {
 			break
 		}
 		if conflictRecord != nil && conflictRecord.SHA256 == sums.SHA256 {
 			return u.reuseRecord(req, policy, urls, defaultURL, conflictRecord)
 		}
-		if conflictRecord == nil && objectExists {
+		if conflictRecord == nil {
 			// 对象已存在但记录尚不可见: 可能是并发上传相同内容, 先按内容再确认一次.
 			contentRecord, err := u.contentRecord(policy.ID, sums.SHA256, user.ID)
 			if err != nil {
@@ -232,26 +266,32 @@ resolved:
 		}
 
 		switch policy.ConflictPolicy {
-		case model.ConflictSkip, model.ConflictFail:
+		case model.ConflictSkip:
 			return nil, apperr.ErrPathConflict.WithDetails(map[string]any{
 				"object_key": objectKey,
 				"policy":     policy.ConflictPolicy,
 			})
-		case model.ConflictOverwrite:
-			if !caps.Has(storage.CapOverwrite) {
-				return nil, apperr.ErrPathConflict.WithMessage("后端未声明 overwrite 能力, 无法覆盖")
-			}
-			overwriteExisting = true
-			break resolved
 		case model.ConflictRename:
-			if attempt >= maxRenameAttempts {
-				return nil, apperr.ErrPathConflict.WithMessage("重命名后仍存在冲突, 请调整魔法路径模板")
+			if !renderer.HasSequence() && sequence == 0 {
+				prefix, suffix := renderer.SequencePattern()
+				maxSequence, err := u.maxPathSequence(policy.ID, prefix, suffix)
+				if err != nil {
+					return nil, err
+				}
+				sequence, err = nextPathSequence(maxSequence)
+				if err != nil {
+					return nil, apperr.ErrPathConflict.WithMessage(err.Error())
+				}
+			} else {
+				sequence, err = nextPathSequence(sequence)
+				if err != nil {
+					return nil, apperr.ErrPathConflict.WithMessage(err.Error())
+				}
 			}
-			renamed, err := renameRelPath(relPath)
+			relPath, err = renderer.Render(sequence)
 			if err != nil {
-				return nil, apperr.ErrInternal.WithMessage("生成冲突重命名失败: " + err.Error())
+				return nil, apperr.ErrPathConflict.WithMessage("递增序号后路径无效: " + err.Error())
 			}
-			relPath = renamed
 		default:
 			return nil, apperr.ErrPathConflict
 		}
@@ -307,50 +347,15 @@ resolved:
 		record.Height = &height
 	}
 
-	// 事务内重新判定计费并原子入账: 并发上传同一对象键时只有一条记录, 且只计费一次.
+	// 事务内重新判定计费并原子入账: 并发上传相同内容时只保留一条计费记录.
 	var (
-		charged  bool
-		reused   *model.Image
-		replaced *model.Image
+		charged bool
+		reused  *model.Image
 	)
 	if err := u.db.Transaction(func(tx *gorm.DB) error {
 		existing, err := recordForKeyTx(tx, policy.ID, objectKey)
 		if err != nil {
 			return err
-		}
-
-		// 覆盖模式下覆盖本人已有记录: 更新元数据, 不新建记录.
-		if overwriteExisting && existing != nil && existing.UserID == user.ID {
-			if err := tx.Model(&model.Image{}).Where("id = ?", existing.ID).Updates(map[string]any{
-				"md5":    sums.MD5,
-				"sha1":   sums.SHA1,
-				"sha256": sums.SHA256,
-				"sha512": sums.SHA512,
-				"size":   sums.Size,
-				"format": detected.Format,
-				"ext":    detected.Ext,
-				"mime":   detected.MIME,
-				"width":  record.Width,
-				"height": record.Height,
-			}).Error; err != nil {
-				return err
-			}
-			// 记录仍计费时同步占用空间的差值, 避免 used_bytes 与记录不一致.
-			if existing.QuotaCharged && existing.Size != sums.Size {
-				delta := sums.Size - existing.Size
-				if err := tx.Model(&model.User{}).Where("id = ?", existing.UserID).Updates(map[string]any{
-					"used_bytes": gorm.Expr("CASE WHEN used_bytes + ? < 0 THEN 0 ELSE used_bytes + ? END", delta, delta),
-					"updated_at": now,
-				}).Error; err != nil {
-					return err
-				}
-			}
-			updated, err := recordForKeyTx(tx, policy.ID, objectKey)
-			if err != nil {
-				return err
-			}
-			replaced = updated
-			return nil
 		}
 
 		// 并发上传相同内容: 幂等复用已有记录, 不新建.
@@ -360,15 +365,13 @@ resolved:
 		}
 
 		// 事务内再按内容确认一次 (串行化点): 并发相同内容上传只保留一条计费记录.
-		if !overwriteExisting {
-			contentRecord, err := contentRecordTx(tx, policy.ID, sums.SHA256, user.ID)
-			if err != nil {
-				return err
-			}
-			if contentRecord != nil && contentRecord.SHA256 == sums.SHA256 {
-				reused = contentRecord
-				return nil
-			}
+		contentRecord, err := contentRecordTx(tx, policy.ID, sums.SHA256, user.ID)
+		if err != nil {
+			return err
+		}
+		if contentRecord != nil && contentRecord.SHA256 == sums.SHA256 {
+			reused = contentRecord
+			return nil
 		}
 
 		charge := existing == nil
@@ -382,43 +385,6 @@ resolved:
 			}
 		}
 		record.QuotaCharged = charge
-
-		if overwriteExisting {
-			var affected []model.Image
-			if err := tx.Select("id", "user_id", "size", "quota_charged").
-				Where("policy_id = ? AND object_key = ?", policy.ID, objectKey).
-				Find(&affected).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&model.Image{}).
-				Where("policy_id = ? AND object_key = ?", policy.ID, objectKey).
-				Updates(map[string]any{
-					"md5":    sums.MD5,
-					"sha1":   sums.SHA1,
-					"sha256": sums.SHA256,
-					"sha512": sums.SHA512,
-					"size":   sums.Size,
-					"format": detected.Format,
-					"ext":    detected.Ext,
-					"mime":   detected.MIME,
-					"width":  record.Width,
-					"height": record.Height,
-				}).Error; err != nil {
-				return err
-			}
-			// 其他用户的计费记录体积被改写, 按记录聚合重算其用量, 避免计数残留偏差.
-			owners := make([]int64, 0, len(affected))
-			for idx := range affected {
-				if affected[idx].QuotaCharged && affected[idx].UserID != user.ID {
-					owners = append(owners, affected[idx].UserID)
-				}
-			}
-			if len(owners) > 0 {
-				if err := reconcileUsersTx(tx, owners); err != nil {
-					return err
-				}
-			}
-		}
 		if err := tx.Create(&record).Error; err != nil {
 			return err
 		}
@@ -461,25 +427,6 @@ resolved:
 			UserAgent: req.UserAgent,
 		})
 		return &UploadResult{Record: reused, URLs: urls, Dedup: true, QuotaCharged: reused.QuotaCharged, Status: http.StatusOK}, nil
-	}
-	if replaced != nil {
-		u.audit.Recordf(Entry{
-			UserID:     &user.ID,
-			Action:     "upload",
-			TargetType: "image",
-			TargetID:   &replaced.ID,
-			Detail: map[string]any{
-				"policy_id":     policy.ID,
-				"object_key":    replaced.ObjectKey,
-				"size":          replaced.Size,
-				"sha256":        replaced.SHA256,
-				"overwritten":   true,
-				"quota_charged": replaced.QuotaCharged,
-			},
-			IP:        req.ClientIP,
-			UserAgent: req.UserAgent,
-		})
-		return &UploadResult{Record: replaced, URLs: urls, Dedup: false, QuotaCharged: replaced.QuotaCharged, Status: http.StatusCreated}, nil
 	}
 
 	u.audit.Recordf(Entry{
@@ -685,20 +632,88 @@ func (u *Upload) lockUserTx(tx *gorm.DB, userID int64) (*model.User, error) {
 	return &user, nil
 }
 
-// renameRelPath 在最后一段文件名主体后追加随机后缀.
-func renameRelPath(relPath string) (string, error) {
-	suffix, err := storage.RandomString(8)
+func (u *Upload) lockPolicyPath(policyID int64) func() {
+	u.pathLockMu.Lock()
+	if u.pathLocks == nil {
+		u.pathLocks = make(map[int64]*sync.Mutex)
+	}
+	lock := u.pathLocks[policyID]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		u.pathLocks[policyID] = lock
+	}
+	u.pathLockMu.Unlock()
+
+	lock.Lock()
+	return lock.Unlock
+}
+
+func (u *Upload) maxPathSequence(policyID int64, prefix, suffix string) (uint64, error) {
+	pattern := escapeLikeLiteral(prefix) + "%" + escapeLikeLiteral(suffix)
+	rows, err := u.db.Model(&model.Image{}).
+		Select("object_key").
+		Where("policy_id = ? AND object_key LIKE ? ESCAPE '!'", policyID, pattern).
+		Rows()
 	if err != nil {
-		return "", err
+		return 0, apperr.ErrInternal.WithMessage("查询递增序号失败: " + err.Error())
 	}
-	segments := strings.Split(relPath, "/")
-	last := segments[len(segments)-1]
-	if idx := strings.LastIndexByte(last, '.'); idx > 0 {
-		segments[len(segments)-1] = last[:idx] + "-" + suffix + last[idx:]
-	} else {
-		segments[len(segments)-1] = last + "-" + suffix
+	defer rows.Close()
+
+	var highest uint64
+	for rows.Next() {
+		var objectKey string
+		if err := rows.Scan(&objectKey); err != nil {
+			return 0, apperr.ErrInternal.WithMessage("读取递增序号失败: " + err.Error())
+		}
+		if len(objectKey) < len(prefix)+len(suffix) ||
+			!strings.HasPrefix(objectKey, prefix) ||
+			!strings.HasSuffix(objectKey, suffix) {
+			continue
+		}
+		digits := objectKey[len(prefix) : len(objectKey)-len(suffix)]
+		if digits == "" {
+			continue
+		}
+		isDecimal := true
+		for i := range digits {
+			if digits[i] < '0' || digits[i] > '9' {
+				isDecimal = false
+				break
+			}
+		}
+		if !isDecimal {
+			continue
+		}
+		sequence, err := strconv.ParseUint(digits, 10, 64)
+		if err == nil && sequence > highest {
+			highest = sequence
+		}
 	}
-	return strings.Join(segments, "/"), nil
+	if err := rows.Err(); err != nil {
+		return 0, apperr.ErrInternal.WithMessage("读取递增序号失败: " + err.Error())
+	}
+	return highest, nil
+}
+
+func escapeLikeLiteral(value string) string {
+	if !strings.ContainsAny(value, "!%_") {
+		return value
+	}
+	var escaped strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] == '!' || value[i] == '%' || value[i] == '_' {
+			escaped.WriteByte('!')
+		}
+		escaped.WriteByte(value[i])
+	}
+	return escaped.String()
+}
+
+func nextPathSequence(current uint64) (uint64, error) {
+	if current == ^uint64(0) {
+		return 0, errors.New("递增序号已达到上限")
+	}
+	return current + 1, nil
 }
 
 func sourceOrDefault(source string) string {

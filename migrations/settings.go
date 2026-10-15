@@ -79,7 +79,7 @@ var SettingDefinitions = []SettingDefinition{
 	{Key: "max_file_size_bytes", Label: "单文件上限 (字节)", Type: "int", Group: "上传限制"},
 	{Key: "gallery_page_size", Label: "图库每页数量", Type: "int", Group: "上传限制"},
 
-	{Key: "default_conflict_policy", Label: "新策略默认冲突策略", Type: "select", Group: "存储默认", Options: []string{"rename", "skip", "overwrite", "fail"}},
+	{Key: "default_conflict_policy", Label: "新策略默认冲突策略", Type: "select", Group: "存储默认", Options: []string{"rename", "skip"}},
 	{Key: "default_path_template", Label: "新策略默认魔法路径", Type: "string", Group: "存储默认"},
 	{Key: "delete_object_on_last_reference", Label: "引用归零时删除外部对象", Type: "bool", Group: "存储默认", Help: "仅在策略后端声明 delete 能力时生效"},
 

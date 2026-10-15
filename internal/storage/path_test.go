@@ -22,6 +22,7 @@ func TestRenderPathExamples(t *testing.T) {
 		{"{md5:4}/{md5:8}.{ext}", "0f1e/0f1e2d3c.png"},
 		{"{ext}/{md5}.{ext}", "png/0f1e2d3c4b5a69788796a5b4c3d2e1f0.png"},
 		{"{md5}.{ext}", "0f1e2d3c4b5a69788796a5b4c3d2e1f0.png"},
+		{"{seq}.jpg", "1.jpg"},
 	}
 	for _, testCase := range cases {
 		got, err := RenderPath(testCase.template, vars)
@@ -61,6 +62,40 @@ func TestRenderPathRandomVariables(t *testing.T) {
 	}
 }
 
+func TestPathRendererKeepsGeneratedVariablesAcrossSequences(t *testing.T) {
+	renderer, err := NewPathRenderer("{rand:8}_{seq}_{rand:8}.jpg", PathVars{})
+	if err != nil {
+		t.Fatalf("NewPathRenderer 返回错误: %v", err)
+	}
+	first, err := renderer.Render(1)
+	if err != nil {
+		t.Fatalf("Render(1) 返回错误: %v", err)
+	}
+	second, err := renderer.Render(2)
+	if err != nil {
+		t.Fatalf("Render(2) 返回错误: %v", err)
+	}
+	firstParts := strings.Split(first, "_")
+	secondParts := strings.Split(second, "_")
+	if len(firstParts) != 3 || len(secondParts) != 3 {
+		t.Fatalf("路径变量分段不符合预期: %q, %q", first, second)
+	}
+	if firstParts[1] != "1" || secondParts[1] != "2" {
+		t.Errorf("递增序号不符合预期: %q, %q", firstParts[1], secondParts[1])
+	}
+	if firstParts[0] != secondParts[0] || firstParts[2] != secondParts[2] {
+		t.Errorf("非序号变量在重试时应保持不变: %q, %q", first, second)
+	}
+
+	highNumber, err := renderer.Render(150)
+	if err != nil {
+		t.Fatalf("Render(150) 返回错误: %v", err)
+	}
+	if !strings.Contains(highNumber, "_150_") {
+		t.Errorf("递增序号应支持超过旧重试次数的值: %q", highNumber)
+	}
+}
+
 func TestValidateTemplateRejects(t *testing.T) {
 	cases := []string{
 		"",
@@ -74,6 +109,7 @@ func TestValidateTemplateRejects(t *testing.T) {
 		"{md5:0}.{ext}",
 		"{md5}.{ext",
 		strings.Repeat("a", 129) + "/{md5}",
+		"{seq}_{seq}.jpg",
 	}
 	for _, template := range cases {
 		if err := ValidateTemplate(template); err == nil {

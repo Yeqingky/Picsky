@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -442,8 +443,8 @@ func TestConflictRename(t *testing.T) {
 	if secondResult.Record.RelPath == firstResult.Record.RelPath {
 		t.Fatal("冲突时应重命名")
 	}
-	if !strings.Contains(filepath.Base(secondResult.Record.RelPath), "-") {
-		t.Errorf("重命名结果应追加随机后缀: %q", secondResult.Record.RelPath)
+	if !strings.Contains(filepath.Base(secondResult.Record.RelPath), "-1.") {
+		t.Errorf("重命名结果应追加递增数字后缀: %q", secondResult.Record.RelPath)
 	}
 	if f.recordsFor(policy.ID) != 2 {
 		t.Errorf("冲突重命名后应有两条记录, 当前 %d", f.recordsFor(policy.ID))
@@ -453,9 +454,9 @@ func TestConflictRename(t *testing.T) {
 	}
 }
 
-func TestConflictFailAndSkip(t *testing.T) {
+func TestConflictSkip(t *testing.T) {
 	f := newFixture(t)
-	policy := f.createPolicy("冲突失败", "{ext}/{sha256:1}.{ext}", model.ConflictFail)
+	policy := f.createPolicy("冲突跳过", "{ext}/{sha256:1}.{ext}", model.ConflictSkip)
 
 	first := pngBytes(t, 21, 4, 4)
 	firstResult := f.mustUpload(f.admin, &policy.ID, "a.png", first)
@@ -476,75 +477,34 @@ func TestConflictFailAndSkip(t *testing.T) {
 
 	_, err := f.upload(f.admin, &policy.ID, "b.png", second)
 	if err == nil {
-		t.Fatal("fail 策略应返回冲突错误")
+		t.Fatal("skip 策略在哈希不一致时应返回冲突")
 	}
 	var apiErr *apperr.Error
 	if !errors.As(err, &apiErr) || apiErr.Code != "path_conflict" || apiErr.Status != 409 {
 		t.Errorf("冲突错误不正确: %v", err)
 	}
-
-	skipPolicy := f.createPolicy("冲突跳过", "{ext}/skip/{sha256:1}.{ext}", model.ConflictSkip)
-	skipFirst := f.mustUpload(f.admin, &skipPolicy.ID, "c.png", first)
-	_ = skipFirst
-	if _, err := f.upload(f.admin, &skipPolicy.ID, "d.png", second); err == nil {
-		t.Error("skip 策略在哈希不一致时应返回冲突")
-	}
 }
 
-func TestConflictOverwrite(t *testing.T) {
+func TestUnsupportedConflictPoliciesAreRejected(t *testing.T) {
 	f := newFixture(t)
-	policy := f.createPolicy("冲突覆盖", "{ext}/{sha256:1}.{ext}", model.ConflictOverwrite)
-
-	first := pngBytes(t, 31, 4, 4)
-	firstResult := f.mustUpload(f.admin, &policy.ID, "a.png", first)
-	prefix := firstResult.Record.SHA256[:1]
-
-	var second []byte
-	for seed := 32; seed < 400; seed++ {
-		candidate := pngBytes(t, seed, 6, 6)
-		sum := sha256.Sum256(candidate)
-		if hex.EncodeToString(sum[:])[:1] == prefix {
-			second = candidate
-			break
+	for _, conflict := range []string{"overwrite", "fail"} {
+		input := service.PolicyInput{
+			Name:           "unsupported-" + conflict,
+			Type:           "webdav",
+			PathTemplate:   "{seq}.jpg",
+			ConflictPolicy: conflict,
+			Config:         map[string]string{"endpoint": f.davEndpoint()},
+			URLs:           []service.URLInput{{Alias: "cdn", URL: "https://cdn.example.com/image/", IsDefault: true}},
 		}
-	}
-	if second == nil {
-		t.Fatal("未构造出哈希前缀相同的测试内容")
-	}
-
-	secondResult := f.mustUpload(f.admin, &policy.ID, "b.png", second)
-	if secondResult.Record.ObjectKey != firstResult.Record.ObjectKey {
-		t.Errorf("overwrite 策略应复用同一对象键: %q vs %q", secondResult.Record.ObjectKey, firstResult.Record.ObjectKey)
-	}
-	if secondResult.Record.ID != firstResult.Record.ID {
-		t.Errorf("同用户覆盖应复用同一条记录: %d vs %d", secondResult.Record.ID, firstResult.Record.ID)
-	}
-	if f.recordsFor(policy.ID) != 1 {
-		t.Errorf("同用户覆盖不应产生重复记录, 当前 %d 条", f.recordsFor(policy.ID))
-	}
-	sum := sha256.Sum256(second)
-	onDisk, err := os.ReadFile(filepath.Join(f.davRoot, filepath.FromSlash(secondResult.Record.ObjectKey)))
-	if err != nil {
-		t.Fatalf("读取外部对象失败: %v", err)
-	}
-	diskSum := sha256.Sum256(onDisk)
-	if hex.EncodeToString(diskSum[:]) != hex.EncodeToString(sum[:]) {
-		t.Error("外部对象应被覆盖为新内容")
-	}
-
-	var updated model.Image
-	if err := f.database.First(&updated, firstResult.Record.ID).Error; err != nil {
-		t.Fatalf("读取记录失败: %v", err)
-	}
-	if updated.SHA256 != hex.EncodeToString(sum[:]) {
-		t.Error("覆盖时既有记录的哈希应同步更新")
-	}
-	user := f.reloadUser(f.admin.User.ID)
-	if user.UsedImages != 1 {
-		t.Errorf("覆盖不应重复计费: used_images=%d", user.UsedImages)
-	}
-	if user.UsedBytes != int64(len(second)) {
-		t.Errorf("覆盖后占用空间应同步为新的体积: used_bytes=%d, 期望 %d", user.UsedBytes, len(second))
+		err := f.svc.Policies.Validate(&input, nil)
+		var apiErr *apperr.Error
+		if !errors.As(err, &apiErr) || apiErr.Code != "invalid_request" {
+			t.Errorf("策略不应接受 %q, 错误: %v", conflict, err)
+		}
+		if err := f.svc.Settings.Update(map[string]string{"default_conflict_policy": conflict}); !errors.As(err, &apiErr) ||
+			apiErr.Code != "invalid_request" {
+			t.Errorf("系统设置不应接受默认策略 %q, 错误: %v", conflict, err)
+		}
 	}
 }
 
@@ -883,6 +843,73 @@ func TestScanBackfill(t *testing.T) {
 	}
 }
 
+func TestScannedSequenceContinuesAfterHighestImportedPath(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("递增路径", "{seq}.{ext}", model.ConflictRename)
+
+	for index, number := range []int{1, 929} {
+		content := pngBytes(t, 90+index, 4, 4)
+		objectPath := filepath.Join(f.davRoot, fmt.Sprintf("%d.png", number))
+		if err := os.WriteFile(objectPath, content, 0o600); err != nil {
+			t.Fatalf("准备扫描对象失败: %v", err)
+		}
+	}
+	scan, err := f.svc.Policies.Scan(context.Background(), policy.ID, f.admin.User.ID, nil, false)
+	if err != nil {
+		t.Fatalf("扫描失败: %v", err)
+	}
+	if scan.Images != 2 {
+		t.Fatalf("扫描应补录两个图片对象, 实际 %+v", scan)
+	}
+
+	result := f.mustUpload(f.admin, &policy.ID, "new.png", pngBytes(t, 95, 4, 4))
+	if result.Record.RelPath != "930.png" {
+		t.Fatalf("扫描到 929.png 后应生成 930.png, 实际 %q", result.Record.RelPath)
+	}
+}
+
+func TestConcurrentSequenceUploadsUseDistinctPaths(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("并发递增路径", "{seq}.{ext}", model.ConflictRename)
+	contents := [][]byte{pngBytes(t, 96, 4, 4), pngBytes(t, 97, 4, 4)}
+	type outcome struct {
+		record *model.Image
+		err    error
+	}
+	results := make(chan outcome, len(contents))
+	var wait sync.WaitGroup
+	for _, content := range contents {
+		content := content
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			result, err := f.upload(f.admin, &policy.ID, "parallel.png", content)
+			if err != nil {
+				results <- outcome{err: err}
+				return
+			}
+			results <- outcome{record: result.Record}
+		}()
+	}
+	wait.Wait()
+	close(results)
+
+	paths := make(map[string]bool, len(contents))
+	for result := range results {
+		if result.err != nil {
+			t.Errorf("并发上传失败: %v", result.err)
+			continue
+		}
+		paths[result.record.RelPath] = true
+		if _, err := os.Stat(filepath.Join(f.davRoot, filepath.FromSlash(result.record.ObjectKey))); err != nil {
+			t.Errorf("递增对象未写入: %v", err)
+		}
+	}
+	if !paths["1.png"] || !paths["2.png"] {
+		t.Errorf("并发上传应占用不同递增路径, 实际 %v", paths)
+	}
+}
+
 func TestPathPreviewMatchesUpload(t *testing.T) {
 	f := newFixture(t)
 	preview, err := f.svc.Policies.Preview(service.PreviewInput{
@@ -896,6 +923,14 @@ func TestPathPreviewMatchesUpload(t *testing.T) {
 	}
 	if preview.ObjectKey != "0f/0f1e2d3c4b5a69788796a5b4c3d2e1f0.png" {
 		t.Errorf("预览 object_key 不正确: %q", preview.ObjectKey)
+	}
+
+	sequencePreview, err := f.svc.Policies.Preview(service.PreviewInput{PathTemplate: "{seq}.jpg"})
+	if err != nil {
+		t.Fatalf("递增路径预览失败: %v", err)
+	}
+	if sequencePreview.RelPath != "1.jpg" {
+		t.Errorf("递增变量预览应从 1 开始, 实际 %q", sequencePreview.RelPath)
 	}
 
 	if _, err := f.svc.Policies.Create(service.PolicyInput{

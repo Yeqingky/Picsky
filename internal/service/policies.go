@@ -298,11 +298,7 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 		return apperr.ErrInvalidRequest.WithMessage(err.Error())
 	}
 	switch in.ConflictPolicy {
-	case model.ConflictRename, model.ConflictSkip, model.ConflictFail:
-	case model.ConflictOverwrite:
-		if !spec.Has(storage.CapOverwrite) {
-			return apperr.ErrInvalidRequest.WithMessage("该后端不支持覆盖, 不能选择 overwrite 冲突策略")
-		}
+	case model.ConflictRename, model.ConflictSkip:
 	default:
 		return apperr.ErrInvalidRequest.WithMessage("未知冲突策略: " + in.ConflictPolicy)
 	}

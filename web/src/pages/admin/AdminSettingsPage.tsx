@@ -132,7 +132,7 @@ const TIMEZONES = [
 const CAPTCHA_PROVIDERS = ['none', 'cap', 'turnstile'] as const;
 const FILE_SIZE_UNITS = ['KB', 'MB'] as const;
 const SMTP_ENCRYPTIONS = ['starttls', 'ssl', 'none'] as const;
-const CONFLICT_POLICIES = ['rename', 'skip', 'overwrite', 'fail'] as const;
+const CONFLICT_POLICIES = ['rename', 'skip'] as const;
 
 /** Select 不接受空字符串值: 用哨兵表示"未设置", 提交前映射回空串 */
 const GROUP_UNSET = 'unset';

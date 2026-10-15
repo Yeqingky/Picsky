@@ -341,7 +341,7 @@ export interface AdminGroupWriteRequest {
   sort?: number;
 }
 
-export type ConflictPolicy = 'rename' | 'skip' | 'overwrite' | 'fail';
+export type ConflictPolicy = 'rename' | 'skip';
 
 export interface AdminPolicyUrl {
   alias: string;

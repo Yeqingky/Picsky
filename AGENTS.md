@@ -65,6 +65,8 @@ Picsky/
 - Git 提交身份: 用户名 `YeqingKy`, 邮箱 `me@yeqing.im`.
 - 不把 `README` 用作变更日志; 发布说明写入仓库根目录的 `.release-notes.md`, 并通过 `.git/info/exclude` 保持在本地忽略.
 - 存储适配器必须声明能力 (`delete`, `overwrite`, `stat`, `presign`, `multipart`); 新增驱动不得假设后端支持删除或覆盖, 上层按能力降级.
+- 魔法路径模板必须包含内容哈希变量或单个 `{seq}`; `rename` 从已入库匹配路径的最大序号之后分配, 扫描补录路径也占用序号; 未使用 `{seq}` 时冲突重命名追加 `-N`, 其他生成变量在重试中固定.
+- 冲突策略只使用 `rename` / `skip`; `overwrite` 是后端能力声明, 不作为冲突策略.
 - Lsky Pro 兼容层是适配层: 不得绕过认证, 权限, 配额与能力降级; 兼容字段有变更时先更新 `docs/lsky-compat.md`.
 - 不实现本地人机验证: 只接入 Cap 与 Cloudflare Turnstile; 注册, 邮箱验证, 人机验证都必须是可开关项.
 - 启用 TOTP 的登录使用两步流程: 首次请求校验用户名/密码与人机验证并返回短时挑战; 前端在模态框自动提交动态口令, 挑战必须一次性消费并绑定来源 IP / User-Agent.
@@ -76,6 +78,7 @@ Picsky/
 - 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示; 注册邮箱白名单按完整域名精确匹配, 留空时不限制; 列表输入复用 `TagsInput`.
 - 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 不引入 MUI, Emotion, 其它 UI 库或图标库, 图标统一 lucide-react, 全局提示统一 sonner.
 - 表格统一用 `src/components/DataTable.tsx`, 日期选择统一用 `src/components/DatePicker.tsx`, 空/错状态统一用 `src/components/States.tsx`; 需要新交互时先扩展这些共享组件.
+- 存储策略分发域名列表的“别名”与“域名 URL”列名与“添加域名”按钮在顶部同行, 只显示一次; 桌面端拖动手柄排序且首项为默认, 删除首项后新的首项接替, 小屏幕纵向排列.
 - 图库筛选使用原始文件名, 格式与存储策略; 不提供开始时间和结束时间筛选; 仅存在筛选条件时渲染清空筛选按钮.
 - `LazyImage` 的加载与失败状态必须绑定当前图片直链; 直链变化时应同步派生 `loading` 状态, 不依赖 effect 异步重置.
 - 个人设置账户信息按昵称、用户名、邮箱、用户组、配额排列, 配额显示在账户信息卡中; 昵称标签、输入框和保存按钮保持同行; 昵称与密码输入限宽.

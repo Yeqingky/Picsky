@@ -34,12 +34,9 @@ export const adminPolicies = {
   conflict: {
     rename: 'rename (重命名)',
     skip: 'skip (跳过)',
-    overwrite: 'overwrite (覆盖)',
-    fail: 'fail (失败)',
-    renameHint: '同键对象内容不同时, 在文件名主体后追加 -{rand:8} 再上传。',
-    skipHint: '同键对象已存在时直接复用, 不重复上传。',
-    overwriteHint: '覆盖同键对象, 需要后端声明 overwrite 能力。',
-    failHint: '同键对象内容不同时直接报错, 交由上传者处理。',
+    renameHint:
+      '模板含 {seq} 时从已占用最大序号 + 1 开始; 冲突后只递增序号, 其他变量保持不变. 未使用 {seq} 时在文件名主体后追加 -1、-2 等数字。',
+    skipHint: '同键对象内容相同则复用; 内容不同时返回冲突, 不覆盖对象。',
   },
 
   capability: {
@@ -73,13 +70,13 @@ export const adminPolicies = {
       connection: '后端连接',
       connectionHint: '外部存储的服务地址与访问凭据; 凭据加密保存, 仅管理员可见。',
       path: '魔法路径',
-      pathHint: '每个文件的相对路径生成规则, 必须包含至少一个内容哈希变量。',
+      pathHint: '每个文件的相对路径生成规则, 必须包含内容哈希变量或 {seq}。',
       urls: '分发域名别名',
-      urlsHint: '对外直链由别名 URL 与相对路径拼接; 至少一个域名, 且恰好一个为默认。',
       conflict: '冲突策略',
-      conflictHint: '目标对象已存在且内容不同时的处理方式, 按后端能力降级。',
+      conflictHint: '目标路径已存在时的处理方式; rename 使用递增序号, skip 不覆盖。',
       scan: '扫描补录',
-      scanHint: '递归列举存储路径下的文件入库 (幂等); 已入库路径会跳过。',
+      scanHint:
+        '递归列举存储路径下的文件入库 (幂等); 已入库路径会跳过, 补录路径也会参与 {seq} 序号计算。',
       reference: '对象键与域名 URL 对照表',
       referenceHint: '用于核对对象键与各分发域名路径是否指向同一对象。',
     },
@@ -114,14 +111,13 @@ export const adminPolicies = {
       nameRequired: '请填写策略名称',
       endpointRequired: '请填写服务地址',
       templateRequired: '请填写路径模板',
-      templateHash:
-        '路径模板必须包含至少一个内容哈希变量 ({md5} / {sha256} / {sha512} 或其截断形式)',
+      templateVariable:
+        '路径模板必须包含内容哈希变量 ({md5} / {sha256} / {sha512} 或其截断形式) 或 {seq}',
       templateInvalid: '模板不能以 / 开头, 不能包含连续 // 或 ..',
       urlAliasRequired: '请填写别名',
       urlRequired: '请填写域名 URL',
       urlInvalid: '地址必须以 http:// 或 https:// 开头',
       urlsRequired: '至少需要配置一个分发域名',
-      urlsDefaultRequired: '恰好需要一个默认域名',
       sortInvalid: '排序必须是整数',
       saveFailed: '保存失败',
     },
@@ -133,11 +129,10 @@ export const adminPolicies = {
       aliasPlaceholder: '融合CDN',
       urlLabel: '域名 URL',
       urlPlaceholder: 'https://cdn.example.com/image/',
-      default: '默认',
-      defaultHint: '上传响应 url 字段使用默认域名拼接。',
+      defaultHint:
+        '列表第一项为默认域名; 上传响应 url 字段使用该域名拼接; 拖动左侧把手可调整顺序。',
+      dragHandle: '拖动排序; 也可用上下方向键调整顺序',
       remove: '删除该项',
-      moveUp: '上移',
-      moveDown: '下移',
     },
 
     variable: {
@@ -149,17 +144,18 @@ export const adminPolicies = {
       sha256Short: 'SHA-256 前 {{length}} 位',
       sha512: '完整 SHA-512 (128 位十六进制)',
       ext: '扩展名, 由真实格式推导出的小写后缀',
-      uuid: '随机 UUIDv4; 会破坏跨用户复用',
-      rand: '随机 8 位小写字母数字; 会破坏跨用户复用',
+      seq: '从 1 开始的递增序号; rename 会从已占用最大序号之后继续, 扫描补录也会参与计算',
+      uuid: '随机 UUIDv4; 本次路径生成后固定, 序号递增时不变',
+      rand: '随机 8 位小写字母数字; 本次路径生成后固定, 序号递增时不变',
       randShort: '随机 {{length}} 位小写字母数字',
-      note: '路径只由内容哈希与扩展名决定; 不要使用时间、用户或原始文件名变量, 否则跨用户复用会失效。',
+      note: '模板需含内容哈希或 {seq}; 相同 SHA-256 会优先复用已有记录, 序号递增时其他变量保持不变。',
     },
 
     preview: {
       title: '实时预览',
-      invalid: '填写包含内容哈希变量的合法模板后显示预览。',
+      invalid: '填写包含内容哈希变量或 {seq} 的合法模板后显示预览。',
       failed: '预览失败',
-      sampleNote: '预览使用示例值渲染: md5 0f1e2d3c4b5a69788796a5b4c3d2e1f0, ext png。',
+      sampleNote: '预览使用示例值渲染: seq 1, md5 0f1e2d3c4b5a69788796a5b4c3d2e1f0, ext png。',
       urls: '拼接后的域名 URL',
     },
 
@@ -172,7 +168,6 @@ export const adminPolicies = {
     },
 
     conflictDisabled: {
-      overwrite: '该后端未声明 overwrite 能力, 无法选择覆盖; 保存时也会被拒绝。',
       stat: '该后端未声明 stat 能力, 冲突检查只按记录判断, 不查询对象是否存在。',
     },
 
@@ -183,7 +178,7 @@ export const adminPolicies = {
       result: '图片 {{images}} 个, 其他文件 {{files}} 个, 跳过 {{skipped}} 个',
       failedTitle: '失败明细 ({{count}})',
       dryRunPrefix: '试运行: ',
-      q21: '非图片文件只占用路径、不进图库, 也不计配额 (kind=file); 路径被占用后不会再被重复分配。',
+      q21: '扫描补录的路径会参与 {seq} 的最大序号计算; 非图片文件只占用路径、不进图库, 也不计配额 (kind=file)。',
     },
 
     reference: {

@@ -154,6 +154,9 @@ func (s *Settings) Update(values map[string]string) error {
 			prepared[key] = source
 			continue
 		}
+		if key == "default_conflict_policy" && value != model.ConflictRename && value != model.ConflictSkip {
+			return apperr.ErrInvalidRequest.WithMessage("默认冲突策略无效")
+		}
 		if key == "default_group_id" {
 			if err := s.checkDefaultGroup(value); err != nil {
 				return err

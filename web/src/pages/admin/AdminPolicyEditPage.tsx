@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   Eye,
   EyeOff,
   FolderTree,
+  GripVertical,
   Globe,
   Info,
   Play,
@@ -37,7 +36,6 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { RadioGroup, RadioGroupItem } from '../../components/ui/radio-group';
 import {
   Select,
   SelectContent,
@@ -60,7 +58,7 @@ import { formatDuration } from '../../utils/format';
  */
 const TYPE_OPTIONS = ['webdav'] as const;
 
-const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip', 'overwrite', 'fail'];
+const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
 
 /** 新建时的能力表: 编辑模式以服务端返回的 capabilities 为准 */
 const NEW_TYPE_CAPABILITIES: Record<string, string[]> = {
@@ -102,12 +100,13 @@ const TEMPLATE_VARIABLES = [
   '{sha256:16}',
   '{sha512}',
   '{ext}',
+  '{seq}',
   '{uuid}',
   '{rand}',
   '{rand:8}',
 ] as const;
 
-const HASH_VARIABLE_RE = /\{(?:md5|sha256|sha512)(?::\d+)?\}/;
+const PATH_VARIABLE_RE = /\{(?:md5|sha256|sha512)(?::\d+)?\}|\{seq\}/;
 const URL_RE = /^https?:\/\//i;
 const INTEGER_RE = /^-?\d+$/;
 
@@ -122,7 +121,6 @@ interface UrlRow {
   key: string;
   alias: string;
   url: string;
-  is_default: boolean;
 }
 
 interface FormState {
@@ -144,8 +142,27 @@ function nextUrlKey(): string {
   urlKeySeed += 1;
   return `url-${urlKeySeed}`;
 }
+function moveUrlRow(urls: UrlRow[], sourceKey: string, targetKey: string): UrlRow[] {
+  const sourceIndex = urls.findIndex((row) => row.key === sourceKey);
+  const targetIndex = urls.findIndex((row) => row.key === targetKey);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return urls;
+
+  const next = [...urls];
+  const [moved] = next.splice(sourceIndex, 1);
+  if (moved === undefined) return urls;
+  next.splice(targetIndex, 0, moved);
+  return next;
+}
 
 function formStateFromPolicy(policy: AdminPolicy): FormState {
+  const urls = [...policy.urls]
+    .sort((left, right) => Number(right.is_default) - Number(left.is_default))
+    .map((item) => ({
+      key: nextUrlKey(),
+      alias: item.alias,
+      url: item.url,
+    }));
+
   return {
     name: policy.name,
     type: policy.type,
@@ -156,12 +173,7 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     password: policy.secrets?.password ?? '',
     pathTemplate: policy.path_template,
     conflictPolicy: policy.conflict_policy,
-    urls: policy.urls.map((item) => ({
-      key: nextUrlKey(),
-      alias: item.alias,
-      url: item.url,
-      is_default: item.is_default,
-    })),
+    urls,
   };
 }
 
@@ -313,6 +325,7 @@ export default function AdminPolicyEditPage() {
   const [form, setForm] = useState<FormState | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [urlTouched, setUrlTouched] = useState(false);
+  const [draggedUrlKey, setDraggedUrlKey] = useState<string | null>(null);
   const [savedOnce, setSavedOnce] = useState(false);
   const [scanPath, setScanPath] = useState('');
   const [dryRun, setDryRun] = useState(false);
@@ -378,7 +391,7 @@ export default function AdminPolicyEditPage() {
           : DEFAULT_PATH_TEMPLATE,
       conflictPolicy:
         CONFLICT_OPTIONS.find((option) => option === rawConflict) ?? DEFAULT_CONFLICT_POLICY,
-      urls: [{ key: nextUrlKey(), alias: '', url: '', is_default: true }],
+      urls: [{ key: nextUrlKey(), alias: '', url: '' }],
     });
   }, [isNew, settingsQuery.data, settingsQuery.isPending]);
 
@@ -397,7 +410,7 @@ export default function AdminPolicyEditPage() {
 
   useEffect(() => {
     const template = debouncedTemplate.trim();
-    if (template === '' || !HASH_VARIABLE_RE.test(template)) {
+    if (template === '' || !PATH_VARIABLE_RE.test(template)) {
       // 模板非法时清空上一次结果, 避免对照表展示过期路径
       resetPreview();
       return;
@@ -419,8 +432,8 @@ export default function AdminPolicyEditPage() {
 
     const template = form.pathTemplate.trim();
     if (template === '') next.pathTemplate = t('adminPolicies.edit.error.templateRequired');
-    else if (!HASH_VARIABLE_RE.test(template))
-      next.pathTemplate = t('adminPolicies.edit.error.templateHash');
+    else if (!PATH_VARIABLE_RE.test(template))
+      next.pathTemplate = t('adminPolicies.edit.error.templateVariable');
     else if (template.startsWith('/') || template.includes('//') || template.includes('..')) {
       next.pathTemplate = t('adminPolicies.edit.error.templateInvalid');
     }
@@ -441,9 +454,6 @@ export default function AdminPolicyEditPage() {
     });
 
     if (form.urls.length === 0) next.urls = t('adminPolicies.edit.error.urlsRequired');
-    else if (form.urls.filter((row) => row.is_default).length !== 1) {
-      next.urls = t('adminPolicies.edit.error.urlsDefaultRequired');
-    }
 
     return next;
   }, [form, t]);
@@ -497,7 +507,7 @@ export default function AdminPolicyEditPage() {
       urls: form.urls.map((row, index) => ({
         alias: row.alias.trim(),
         url: row.url.trim(),
-        is_default: row.is_default,
+        is_default: index === 0,
         sort: index + 1,
       })),
       sort: form.sort.trim() === '' ? 0 : Number(form.sort.trim()),
@@ -522,11 +532,17 @@ export default function AdminPolicyEditPage() {
   const policy = policyQuery.data ?? null;
   const capabilities =
     policy?.capabilities ?? NEW_TYPE_CAPABILITIES[form?.type ?? ''] ?? DEFAULT_NEW_CAPABILITIES;
-  const canOverwrite = capabilities.includes('overwrite');
   const canStat = capabilities.includes('stat');
 
   const updateForm = useCallback((patch: Partial<FormState>) => {
     setForm((current) => (current === null ? current : { ...current, ...patch }));
+  }, []);
+  const moveUrl = useCallback((sourceKey: string, targetKey: string) => {
+    setForm((current) =>
+      current === null
+        ? current
+        : { ...current, urls: moveUrlRow(current.urls, sourceKey, targetKey) },
+    );
   }, []);
 
   const insertVariable = (variable: string) => {
@@ -562,11 +578,13 @@ export default function AdminPolicyEditPage() {
           ? t('adminPolicies.edit.variable.sha512')
           : variable === '{ext}'
             ? t('adminPolicies.edit.variable.ext')
-            : variable === '{uuid}'
-              ? t('adminPolicies.edit.variable.uuid')
-              : variable === '{rand}'
-                ? t('adminPolicies.edit.variable.rand')
-                : t('adminPolicies.edit.variable.randShort', { length });
+            : variable === '{seq}'
+              ? t('adminPolicies.edit.variable.seq')
+              : variable === '{uuid}'
+                ? t('adminPolicies.edit.variable.uuid')
+                : variable === '{rand}'
+                  ? t('adminPolicies.edit.variable.rand')
+                  : t('adminPolicies.edit.variable.randShort', { length });
     return (
       <Tooltip key={variable}>
         <TooltipTrigger asChild>
@@ -591,18 +609,14 @@ export default function AdminPolicyEditPage() {
     const relPath = preview?.rel_path;
     if (relPath === undefined || relPath === '') return [];
     return (
-      form?.urls
-        .filter((row) => URL_RE.test(row.url.trim()))
-        .map((row) => ({
-          key: row.key,
-          alias: row.alias.trim() === '' ? '—' : row.alias.trim(),
-          url: `${row.url.trim().replace(/\/+$/, '')}/${relPath}`,
-          is_default: row.is_default,
-        })) ?? []
+      form?.urls.map((row, index) => ({
+        key: row.key,
+        alias: row.alias.trim() === '' ? '—' : row.alias.trim(),
+        url: `${row.url.trim().replace(/\/+$/, '')}/${relPath}`,
+        is_default: index === 0,
+      })) ?? []
     );
   }, [form?.urls, preview?.rel_path]);
-
-  const defaultUrlKey = form?.urls.find((row) => row.is_default)?.key ?? '';
 
   /* ---------------------------------------------------------------- 渲染 */
 
@@ -652,8 +666,6 @@ export default function AdminPolicyEditPage() {
     );
   }
 
-  const hasOverride = form.conflictPolicy === 'overwrite' && !canOverwrite;
-
   return (
     <form onSubmit={handleSubmit} noValidate>
       <PageHeader
@@ -695,12 +707,6 @@ export default function AdminPolicyEditPage() {
               conflict: t('adminPolicies.conflict.rename'),
             })}
           </AlertDescription>
-        </Alert>
-      )}
-
-      {hasOverride && (
-        <Alert className="border-transparent bg-warning/10 text-warning mb-4">
-          <AlertDescription>{t('adminPolicies.edit.conflictDisabled.overwrite')}</AlertDescription>
         </Alert>
       )}
 
@@ -965,27 +971,42 @@ export default function AdminPolicyEditPage() {
         </TabsContent>
 
         <TabsContent value="urls" className={TAB_PANEL_CLASS}>
-          <PolicySection
-            hint={t('adminPolicies.edit.section.urlsHint')}
-            actions={
-              <Button
-                type="button"
-                size="sm"
-                onClick={() =>
-                  updateForm({
-                    urls: [
-                      ...form.urls,
-                      { key: nextUrlKey(), alias: '', url: '', is_default: form.urls.length === 0 },
-                    ],
-                  })
-                }
-              >
-                <Plus className="size-4" />
-                {t('adminPolicies.edit.url.add')}
-              </Button>
-            }
-          >
+          <PolicySection>
             <div className="flex flex-col gap-4">
+              <div className="grid w-full grid-cols-1 items-center gap-2 sm:grid-cols-[2rem_minmax(0,220px)_minmax(0,1fr)_auto]">
+                {form.urls.length > 0 ? (
+                  <>
+                    <span className="hidden sm:block" aria-hidden="true" />
+                    <Label
+                      className="sm:col-start-2"
+                      htmlFor={`url-alias-${form.urls[0]?.key ?? ''}`}
+                    >
+                      {t('adminPolicies.edit.url.aliasLabel')}
+                    </Label>
+                    <Label
+                      className="sm:col-start-3"
+                      htmlFor={`url-value-${form.urls[0]?.key ?? ''}`}
+                    >
+                      {t('adminPolicies.edit.url.urlLabel')}
+                    </Label>
+                  </>
+                ) : (
+                  <span className="hidden sm:col-span-3 sm:block" aria-hidden="true" />
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-fit justify-self-end sm:col-start-4"
+                  onClick={() =>
+                    updateForm({
+                      urls: [...form.urls, { key: nextUrlKey(), alias: '', url: '' }],
+                    })
+                  }
+                >
+                  <Plus className="size-4" />
+                  {t('adminPolicies.edit.url.add')}
+                </Button>
+              </div>
               {form.urls.length === 0 && (
                 <Alert className="border-transparent bg-info/10 text-info">
                   <AlertDescription>{t('adminPolicies.edit.url.empty')}</AlertDescription>
@@ -993,145 +1014,122 @@ export default function AdminPolicyEditPage() {
               )}
 
               {form.urls.length > 0 && (
-                <RadioGroup
-                  value={defaultUrlKey}
-                  onValueChange={(value) => {
-                    updateForm({
-                      urls: form.urls.map((row) => ({ ...row, is_default: row.key === value })),
-                    });
-                  }}
-                  className="gap-3"
-                >
-                  {form.urls.map((row, index) => (
-                    <div key={row.key} className="flex flex-col gap-2 sm:flex-row sm:items-start">
-                      <label className="flex min-w-24 items-center gap-2 text-sm">
-                        <RadioGroupItem value={row.key} />
-                        {t('adminPolicies.edit.url.default')}
-                      </label>
-                      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
-                        <FormField
-                          id={`url-alias-${row.key}`}
-                          label={t('adminPolicies.edit.url.aliasLabel')}
-                          error={errorFor(`urls.${index}.alias`)}
-                          className="sm:w-[220px]"
-                        >
-                          <Input
-                            id={`url-alias-${row.key}`}
-                            value={row.alias}
-                            onChange={(event) => {
-                              const alias = event.target.value;
-                              updateForm({
-                                urls: form.urls.map((item) =>
-                                  item.key === row.key ? { ...item, alias } : item,
-                                ),
-                              });
-                            }}
-                            onBlur={() => setUrlTouched(true)}
-                            placeholder={t('adminPolicies.edit.url.aliasPlaceholder')}
-                            aria-invalid={errorFor(`urls.${index}.alias`) !== undefined}
-                          />
-                        </FormField>
-                        <FormField
-                          id={`url-value-${row.key}`}
-                          label={t('adminPolicies.edit.url.urlLabel')}
-                          error={errorFor(`urls.${index}.url`)}
-                          className="flex-1"
-                        >
-                          <Input
-                            id={`url-value-${row.key}`}
-                            value={row.url}
-                            onChange={(event) => {
-                              const url = event.target.value;
-                              updateForm({
-                                urls: form.urls.map((item) =>
-                                  item.key === row.key ? { ...item, url } : item,
-                                ),
-                              });
-                            }}
-                            onBlur={() => setUrlTouched(true)}
-                            placeholder={t('adminPolicies.edit.url.urlPlaceholder')}
-                            aria-invalid={errorFor(`urls.${index}.url`) !== undefined}
-                          />
-                        </FormField>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={index === 0}
-                                aria-label={t('adminPolicies.edit.url.moveUp')}
-                                onClick={() => {
-                                  const next = [...form.urls];
-                                  const previous = next[index - 1];
-                                  next[index - 1] = next[index];
-                                  next[index] = previous;
-                                  updateForm({ urls: next });
-                                }}
-                              >
-                                <ArrowUp className="size-4" />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('adminPolicies.edit.url.moveUp')}</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={index === form.urls.length - 1}
-                                aria-label={t('adminPolicies.edit.url.moveDown')}
-                                onClick={() => {
-                                  const next = [...form.urls];
-                                  const following = next[index + 1];
-                                  next[index + 1] = next[index];
-                                  next[index] = following;
-                                  updateForm({ urls: next });
-                                }}
-                              >
-                                <ArrowDown className="size-4" />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('adminPolicies.edit.url.moveDown')}</TooltipContent>
-                        </Tooltip>
+                <div className="flex w-full flex-col gap-3">
+                  {form.urls.map((row, index) => {
+                    const aliasError = errorFor(`urls.${index}.alias`);
+                    const urlError = errorFor(`urls.${index}.url`);
+
+                    return (
+                      <div
+                        key={row.key}
+                        className={cn(
+                          'grid min-w-0 grid-cols-1 items-center gap-2 sm:grid-cols-[2rem_minmax(0,220px)_minmax(0,1fr)_auto]',
+                          draggedUrlKey === row.key && 'opacity-50',
+                        )}
+                        onDragOver={(event) => {
+                          if (draggedUrlKey === null || draggedUrlKey === row.key) return;
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const sourceKey =
+                            event.dataTransfer.getData('text/plain') || draggedUrlKey;
+                          if (sourceKey !== null) moveUrl(sourceKey, row.key);
+                          setDraggedUrlKey(null);
+                        }}
+                      >
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
                               type="button"
                               variant="ghost"
                               size="icon-sm"
-                              className="text-destructive"
-                              aria-label={t('adminPolicies.edit.url.remove')}
-                              onClick={() => {
-                                const remaining = form.urls.filter((item) => item.key !== row.key);
-                                const needsDefault = !remaining.some((item) => item.is_default);
-                                updateForm({
-                                  urls:
-                                    needsDefault && remaining.length > 0
-                                      ? remaining.map((item, position) => ({
-                                          ...item,
-                                          is_default: position === 0,
-                                        }))
-                                      : remaining,
-                                });
+                              className="cursor-grab active:cursor-grabbing"
+                              aria-label={t('adminPolicies.edit.url.dragHandle')}
+                              draggable
+                              onDragStart={(event) => {
+                                event.dataTransfer.effectAllowed = 'move';
+                                event.dataTransfer.setData('text/plain', row.key);
+                                setDraggedUrlKey(row.key);
+                              }}
+                              onDragEnd={() => setDraggedUrlKey(null)}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                                event.preventDefault();
+                                const targetIndex = index + (event.key === 'ArrowUp' ? -1 : 1);
+                                const target = form.urls[targetIndex];
+                                if (target !== undefined) moveUrl(row.key, target.key);
                               }}
                             >
-                              <Trash2 className="size-4" />
+                              <GripVertical className="size-4" />
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent>{t('adminPolicies.edit.url.remove')}</TooltipContent>
+                          <TooltipContent>{t('adminPolicies.edit.url.dragHandle')}</TooltipContent>
                         </Tooltip>
+                        <Input
+                          id={`url-alias-${row.key}`}
+                          value={row.alias}
+                          onChange={(event) => {
+                            const alias = event.target.value;
+                            updateForm({
+                              urls: form.urls.map((item) =>
+                                item.key === row.key ? { ...item, alias } : item,
+                              ),
+                            });
+                          }}
+                          onBlur={() => setUrlTouched(true)}
+                          placeholder={t('adminPolicies.edit.url.aliasPlaceholder')}
+                          aria-label={t('adminPolicies.edit.url.aliasLabel')}
+                          aria-invalid={aliasError !== undefined}
+                        />
+                        <Input
+                          id={`url-value-${row.key}`}
+                          value={row.url}
+                          onChange={(event) => {
+                            const url = event.target.value;
+                            updateForm({
+                              urls: form.urls.map((item) =>
+                                item.key === row.key ? { ...item, url } : item,
+                              ),
+                            });
+                          }}
+                          onBlur={() => setUrlTouched(true)}
+                          placeholder={t('adminPolicies.edit.url.urlPlaceholder')}
+                          aria-label={t('adminPolicies.edit.url.urlLabel')}
+                          aria-invalid={urlError !== undefined}
+                        />
+                        <div className="flex shrink-0 items-center justify-end gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="text-destructive"
+                                aria-label={t('adminPolicies.edit.url.remove')}
+                                onClick={() => {
+                                  updateForm({
+                                    urls: form.urls.filter((item) => item.key !== row.key),
+                                  });
+                                }}
+                              >
+                                <Trash2 className="size-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{t('adminPolicies.edit.url.remove')}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        {aliasError !== undefined && (
+                          <p className="text-destructive text-sm sm:col-start-2">{aliasError}</p>
+                        )}
+                        {urlError !== undefined && (
+                          <p className="text-destructive text-sm sm:col-start-3">{urlError}</p>
+                        )}
                       </div>
-                    </div>
-                  ))}
-                </RadioGroup>
+                    );
+                  })}
+                </div>
               )}
 
               {submitted && errors.urls !== undefined && (
@@ -1171,11 +1169,7 @@ export default function AdminPolicyEditPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {CONFLICT_OPTIONS.map((option) => (
-                      <SelectItem
-                        key={option}
-                        value={option}
-                        disabled={option === 'overwrite' && !canOverwrite}
-                      >
+                      <SelectItem key={option} value={option}>
                         {t(`adminPolicies.conflict.${option}`)}
                       </SelectItem>
                     ))}
@@ -1185,11 +1179,6 @@ export default function AdminPolicyEditPage() {
               <p className="text-muted-foreground text-sm">
                 {t(`adminPolicies.conflict.${form.conflictPolicy}Hint`)}
               </p>
-              {!canOverwrite && (
-                <p className="text-warning text-sm">
-                  {t('adminPolicies.edit.conflictDisabled.overwrite')}
-                </p>
-              )}
               {!canStat && (
                 <p className="text-warning text-sm">
                   {t('adminPolicies.edit.conflictDisabled.stat')}

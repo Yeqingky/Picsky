@@ -143,10 +143,8 @@ export const adminSystem = {
       none: '不加密',
     },
     conflict: {
-      rename: '重命名',
+      rename: '重命名 (递增序号)',
       skip: '跳过',
-      overwrite: '覆盖',
-      fail: '失败报错',
     },
   },
 };

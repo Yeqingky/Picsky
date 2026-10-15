@@ -22,32 +22,132 @@ const (
 	maxPathLen        = 512
 )
 
-// RenderPath 按模板渲染相对路径; 模板校验失败或变量缺失都返回错误.
-func RenderPath(template string, vars PathVars) (string, error) {
+// pathPart 是解析后的模板片段; 序号片段在每次渲染时替换, 其他变量只生成一次.
+type pathPart struct {
+	literal  string
+	sequence bool
+}
+
+// PathRenderer 解析一次路径模板, 并在多次渲染时保持随机变量不变.
+type PathRenderer struct {
+	parts          []pathPart
+	basePath       string
+	hasSequence    bool
+	sequencePrefix string
+	sequenceSuffix string
+}
+
+// NewPathRenderer 校验并解析模板; 除 {seq} 外的变量只渲染一次.
+func NewPathRenderer(template string, vars PathVars) (*PathRenderer, error) {
 	if err := ValidateTemplate(template); err != nil {
-		return "", err
+		return nil, err
 	}
-	var out strings.Builder
+	renderer := &PathRenderer{}
+	var base strings.Builder
 	for i := 0; i < len(template); {
 		if template[i] != '{' {
-			out.WriteByte(template[i])
-			i++
+			start := i
+			for i < len(template) && template[i] != '{' {
+				i++
+			}
+			literal := template[start:i]
+			renderer.parts = append(renderer.parts, pathPart{literal: literal})
+			base.WriteString(literal)
 			continue
 		}
 		end := strings.IndexByte(template[i:], '}')
 		if end < 0 {
-			return "", fmt.Errorf("模板存在未闭合的变量: %s", template[i:])
+			return nil, fmt.Errorf("模板存在未闭合的变量: %s", template[i:])
 		}
 		token := template[i+1 : i+end]
+		if token == "seq" {
+			renderer.parts = append(renderer.parts, pathPart{sequence: true})
+			renderer.hasSequence = true
+			i += end + 1
+			continue
+		}
 		value, err := renderToken(token, vars)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		out.WriteString(value)
+		renderer.parts = append(renderer.parts, pathPart{literal: value})
+		base.WriteString(value)
 		i += end + 1
 	}
+	renderer.basePath = base.String()
 
-	rel := out.String()
+	if renderer.hasSequence {
+		afterSequence := false
+		for _, part := range renderer.parts {
+			if part.sequence {
+				afterSequence = true
+				continue
+			}
+			if afterSequence {
+				renderer.sequenceSuffix += part.literal
+			} else {
+				renderer.sequencePrefix += part.literal
+			}
+		}
+	} else {
+		renderer.sequencePrefix, renderer.sequenceSuffix = sequencePathPattern(renderer.basePath)
+	}
+	return renderer, nil
+}
+
+// HasSequence reports whether the template contains {seq}.
+func (r *PathRenderer) HasSequence() bool {
+	return r != nil && r.hasSequence
+}
+
+// SequencePattern 返回序号所在路径的固定前缀与后缀.
+// 未显式使用 {seq} 时, 对应重命名策略追加到文件名末尾的 -N.
+func (r *PathRenderer) SequencePattern() (string, string) {
+	if r == nil {
+		return "", ""
+	}
+	return r.sequencePrefix, r.sequenceSuffix
+}
+
+// Render 渲染路径. 显式 {seq} 从 1 开始; 无 {seq} 时 0 返回原路径, 正数生成 -N 后缀.
+func (r *PathRenderer) Render(sequence uint64) (string, error) {
+	if r == nil {
+		return "", errors.New("路径渲染器不能为空")
+	}
+	if r.hasSequence && sequence == 0 {
+		return "", errors.New("变量 {seq} 必须大于 0")
+	}
+	if !r.hasSequence {
+		if sequence == 0 {
+			return validateRenderedPath(r.basePath)
+		}
+		return validateRenderedPath(appendSequenceSuffix(r.basePath, sequence))
+	}
+	var out strings.Builder
+	for _, part := range r.parts {
+		if part.sequence {
+			out.WriteString(strconv.FormatUint(sequence, 10))
+		} else {
+			out.WriteString(part.literal)
+		}
+	}
+	return validateRenderedPath(out.String())
+}
+
+// RenderPath 按模板渲染相对路径; 模板校验失败或变量缺失都返回错误.
+func RenderPath(template string, vars PathVars) (string, error) {
+	renderer, err := NewPathRenderer(template, vars)
+	if err != nil {
+		return "", err
+	}
+	sequence := uint64(0)
+	if renderer.HasSequence() {
+		sequence = 1
+	}
+	return renderer.Render(sequence)
+}
+
+func validateRenderedPath(rel string) (string, error) {
 	if strings.Contains(rel, "//") {
 		return "", errors.New("模板渲染结果包含连续斜杠")
 	}
@@ -66,6 +166,32 @@ func RenderPath(template string, vars PathVars) (string, error) {
 		return "", fmt.Errorf("路径超过 %d 字符", maxPathLen)
 	}
 	return rel, nil
+}
+
+func sequencePathPattern(rel string) (string, string) {
+	dir := ""
+	name := rel
+	if slash := strings.LastIndexByte(rel, '/'); slash >= 0 {
+		dir = rel[:slash+1]
+		name = rel[slash+1:]
+	}
+	if dot := strings.LastIndexByte(name, '.'); dot > 0 {
+		return dir + name[:dot] + "-", name[dot:]
+	}
+	return rel + "-", ""
+}
+
+func appendSequenceSuffix(rel string, sequence uint64) string {
+	dir := ""
+	name := rel
+	if slash := strings.LastIndexByte(rel, '/'); slash >= 0 {
+		dir = rel[:slash+1]
+		name = rel[slash+1:]
+	}
+	if dot := strings.LastIndexByte(name, '.'); dot > 0 {
+		return dir + name[:dot] + "-" + strconv.FormatUint(sequence, 10) + name[dot:]
+	}
+	return rel + "-" + strconv.FormatUint(sequence, 10)
 }
 
 // renderToken 渲染单个变量.
@@ -155,7 +281,7 @@ func validateTruncation(name string, limit int) error {
 	return nil
 }
 
-// ValidateTemplate 校验模板: 必须含内容哈希变量, 不允许上跳与绝对路径.
+// ValidateTemplate 校验模板: 必须含内容哈希变量或 {seq}, 不允许上跳与绝对路径.
 func ValidateTemplate(template string) error {
 	if strings.TrimSpace(template) == "" {
 		return errors.New("魔法路径模板不能为空")
@@ -182,6 +308,7 @@ func ValidateTemplate(template string) error {
 	}
 
 	hasContentHash := false
+	sequenceCount := 0
 	for i := 0; i < len(template); {
 		if template[i] != '{' {
 			i++
@@ -206,14 +333,19 @@ func ValidateTemplate(template string) error {
 		switch name {
 		case "md5", "sha256", "sha512":
 			hasContentHash = true
+		case "seq":
+			sequenceCount++
 		case "ext", "uuid", "rand":
 		default:
 			return fmt.Errorf("未知或不允许的路径变量: {%s}", token)
 		}
 		i += end + 1
 	}
-	if !hasContentHash {
-		return errors.New("魔法路径模板必须包含内容哈希变量 ({md5} / {sha256} / {sha512})")
+	if sequenceCount > 1 {
+		return errors.New("魔法路径模板最多包含一个 {seq}")
+	}
+	if !hasContentHash && sequenceCount == 0 {
+		return errors.New("魔法路径模板必须包含内容哈希变量或 {seq}")
 	}
 	return nil
 }
@@ -290,7 +422,7 @@ func NormalizeURLBase(raw string) (string, error) {
 	return strings.TrimRight(value, "/"), nil
 }
 
-// RandomString 生成 n 位小写字母数字随机串, 用于冲突重命名与探测对象名.
+// RandomString 生成 n 位小写字母数字随机串, 用于路径随机变量与探测对象名.
 func RandomString(n int) (string, error) {
 	return randomString(n)
 }

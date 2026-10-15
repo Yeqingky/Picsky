@@ -30,10 +30,8 @@ const (
 
 // 冲突策略.
 const (
-	ConflictRename    = "rename"
-	ConflictSkip      = "skip"
-	ConflictOverwrite = "overwrite"
-	ConflictFail      = "fail"
+	ConflictRename = "rename"
+	ConflictSkip   = "skip"
 )
 
 // 维护任务类型.

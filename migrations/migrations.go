@@ -14,7 +14,7 @@ import (
 )
 
 // schemaVersion 是当前迁移版本, 每次结构变更递增并追加一个迁移函数.
-const schemaVersion = 4
+const schemaVersion = 5
 
 // SchemaMigration 记录已应用的迁移版本.
 type SchemaMigration struct {
@@ -123,6 +123,17 @@ var steps = map[int]func(*gorm.DB) error{
 		}
 		// 清理已下线的任务类型: 软删记录清理与 CDN 刷新.
 		return db.Where("type IN ?", []string{"record_purge", "cdn_purge"}).Delete(&model.MaintenanceTask{}).Error
+	},
+	5: func(db *gorm.DB) error {
+		// 旧冲突策略不再支持; 跳过冲突可避免旧覆盖策略继续改写外部对象.
+		if err := db.Model(&model.StoragePolicy{}).
+			Where("conflict_policy IN ?", []string{"overwrite", "fail"}).
+			Update("conflict_policy", model.ConflictSkip).Error; err != nil {
+			return err
+		}
+		return db.Model(&model.Setting{}).
+			Where("key = ? AND value IN ?", "default_conflict_policy", []string{"overwrite", "fail"}).
+			Update("value", model.ConflictSkip).Error
 	},
 }
 
