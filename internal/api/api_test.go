@@ -356,6 +356,117 @@ func (s *server) bootstrap() (*http.Cookie, int64) {
 	return cookie, int64(policy["id"].(float64))
 }
 
+func TestClientIPSourceDiscoveryAndLoginRateLimit(t *testing.T) {
+	s := newServer(t)
+
+	unauthorized := s.raw(http.MethodGet, "/api/v1/admin/settings/client-ip-sources", nil, nil, nil)
+	if unauthorized.Status != http.StatusUnauthorized {
+		t.Fatalf("IP 来源探测接口必须认证, 实际状态码 %d", unauthorized.Status)
+	}
+
+	registered := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
+		"username": "admin",
+		"email":    "admin@example.com",
+		"password": "password123",
+	}, nil)
+	if registered.Status != http.StatusCreated {
+		t.Fatalf("注册管理员失败: %d %s", registered.Status, string(registered.Body))
+	}
+	cookie := s.sessionCookie(registered)
+
+	sourcesResponse := s.raw(http.MethodGet, "/api/v1/admin/settings/client-ip-sources", nil, map[string]string{
+		"X-Forwarded-For": "203.0.113.10, 10.0.0.1",
+		"X-Real-IP":       "198.51.100.10",
+	}, []*http.Cookie{cookie})
+	if sourcesResponse.Status != http.StatusOK {
+		t.Fatalf("读取 IP 来源失败: %d %s", sourcesResponse.Status, string(sourcesResponse.Body))
+	}
+	var sources []struct {
+		Source string `json:"source"`
+		IP     string `json:"ip"`
+	}
+	if err := json.Unmarshal(sourcesResponse.Body, &sources); err != nil {
+		t.Fatalf("解析 IP 来源失败: %v", err)
+	}
+	found := make(map[string]string, len(sources))
+	for _, source := range sources {
+		found[source.Source] = source.IP
+	}
+	if found["REMOTE_ADDR"] != "127.0.0.1" ||
+		found["HTTP_X_FORWARDED_FOR"] != "203.0.113.10" ||
+		found["HTTP_X_REAL_IP"] != "198.51.100.10" {
+		t.Fatalf("探测接口未返回预期来源: %#v", found)
+	}
+
+	invalidSetting := s.json(http.MethodPatch, "/api/v1/admin/settings", map[string]string{
+		"client_ip_source": "HTTP_X-FORWARDED-FOR",
+	}, []*http.Cookie{cookie})
+	if invalidSetting.Status != http.StatusBadRequest {
+		t.Fatalf("非法 IP 来源应被拒绝, 实际状态码 %d", invalidSetting.Status)
+	}
+
+	loginBody, err := json.Marshal(map[string]string{"identifier": "missing-user", "password": "invalid"})
+	if err != nil {
+		t.Fatalf("编码登录请求失败: %v", err)
+	}
+	loginHeaders := func(forwarded, realIP string) map[string]string {
+		return map[string]string{
+			"Content-Type":    "application/json",
+			"X-Forwarded-For": forwarded,
+			"X-Real-IP":       realIP,
+		}
+	}
+
+	for attempt := range service.LoginFailureLimit {
+		response := s.raw(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody), loginHeaders(fmt.Sprintf("203.0.113.%d", attempt+1), ""), nil)
+		if response.Status != http.StatusUnauthorized {
+			t.Fatalf("默认 socket 来源下第 %d 次失败登录应为 401, 实际 %d", attempt+1, response.Status)
+		}
+	}
+	limited := s.raw(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody), loginHeaders("203.0.113.99", ""), nil)
+	if limited.Status != http.StatusTooManyRequests {
+		t.Fatalf("伪造不同 X-Forwarded-For 不应绕过来源限流, 实际状态码 %d", limited.Status)
+	}
+
+	var firstFailure struct {
+		IP string
+	}
+	if err := s.db.Table("audit_logs").Select("ip").Where("action = ?", "login_failed").Order("id ASC").Take(&firstFailure).Error; err != nil {
+		t.Fatalf("读取登录审计记录失败: %v", err)
+	}
+	if firstFailure.IP != "127.0.0.1" {
+		t.Fatalf("默认审计 IP 应使用 socket 来源, 得到 %q", firstFailure.IP)
+	}
+
+	updated := s.json(http.MethodPatch, "/api/v1/admin/settings", map[string]string{
+		"client_ip_source": "HTTP_X_REAL_IP",
+	}, []*http.Cookie{cookie})
+	if updated.Status != http.StatusOK {
+		t.Fatalf("设置可信 IP 请求头失败: %d %s", updated.Status, string(updated.Body))
+	}
+
+	for attempt := range service.LoginFailureLimit {
+		response := s.raw(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody), loginHeaders(fmt.Sprintf("203.0.113.%d", attempt+1), "198.51.100.20"), nil)
+		if response.Status != http.StatusUnauthorized {
+			t.Fatalf("选择 X-Real-IP 后第 %d 次失败登录应为 401, 实际 %d", attempt+1, response.Status)
+		}
+	}
+	limited = s.raw(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody), loginHeaders("203.0.113.99", "198.51.100.20"), nil)
+	if limited.Status != http.StatusTooManyRequests {
+		t.Fatalf("未选中的 X-Forwarded-For 不应绕过限流, 实际状态码 %d", limited.Status)
+	}
+
+	var latestFailure struct {
+		IP string
+	}
+	if err := s.db.Table("audit_logs").Select("ip").Where("action = ?", "login_failed").Order("id DESC").Take(&latestFailure).Error; err != nil {
+		t.Fatalf("读取最新登录审计记录失败: %v", err)
+	}
+	if latestFailure.IP != "198.51.100.20" {
+		t.Fatalf("审计 IP 应使用设置的 X-Real-IP, 得到 %q", latestFailure.IP)
+	}
+}
+
 func TestHealthAndAuthFlow(t *testing.T) {
 	s := newServer(t)
 
@@ -1261,5 +1372,32 @@ func TestJSONBodySizeLimit(t *testing.T) {
 	}, []*http.Cookie{session})
 	if oversized.Status != http.StatusBadRequest {
 		t.Errorf("超大可写请求体应被拒绝, 实际 %d", oversized.Status)
+	}
+}
+
+func TestRegisterEmailAllowlistAPI(t *testing.T) {
+	s := newServer(t)
+	if err := s.svc.Settings.Update(map[string]string{
+		"registration_email_allowlist": "example.com",
+	}); err != nil {
+		t.Fatalf("设置邮箱白名单失败: %v", err)
+	}
+
+	blocked := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
+		"username": "blocked",
+		"email":    "blocked@example.net",
+		"password": "password123",
+	}, nil)
+	if blocked.Status != http.StatusForbidden || s.decode(blocked)["code"] != "email_not_allowed" {
+		t.Fatalf("非白名单邮箱应返回 email_not_allowed, 实际 %d %s", blocked.Status, string(blocked.Body))
+	}
+
+	allowed := s.json(http.MethodPost, "/api/v1/auth/register", map[string]any{
+		"username": "allowed",
+		"email":    "allowed@EXAMPLE.COM",
+		"password": "password123",
+	}, nil)
+	if allowed.Status != http.StatusCreated {
+		t.Fatalf("白名单域名应允许注册, 实际 %d %s", allowed.Status, string(allowed.Body))
 	}
 }

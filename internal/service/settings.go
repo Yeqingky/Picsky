@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/yeqingky/Picsky/internal/apperr"
+	"github.com/yeqingky/Picsky/internal/clientip"
 	"github.com/yeqingky/Picsky/internal/crypto"
 	"github.com/yeqingky/Picsky/internal/model"
 	"github.com/yeqingky/Picsky/migrations"
@@ -145,8 +146,21 @@ func (s *Settings) Update(values map[string]string) error {
 		if _, known := migrations.DefaultSettings[key]; !known {
 			return apperr.ErrInvalidRequest.WithMessage("未知设置项: " + key)
 		}
+		if key == clientip.SettingKey {
+			source := clientip.NormalizeSource(value)
+			if !clientip.ValidSource(source) {
+				return apperr.ErrInvalidRequest.WithMessage("客户端 IP 来源格式无效")
+			}
+			prepared[key] = source
+			continue
+		}
 		if key == "default_group_id" {
 			if err := s.checkDefaultGroup(value); err != nil {
+				return err
+			}
+		}
+		if key == "registration_email_allowlist" {
+			if err := validateEmailDomainAllowlist(value); err != nil {
 				return err
 			}
 		}
@@ -172,6 +186,47 @@ func (s *Settings) Update(values map[string]string) error {
 		return fmt.Errorf("写入系统设置失败: %w", err)
 	}
 	return s.Reload()
+}
+
+func validateEmailDomainAllowlist(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	for remaining := raw; ; {
+		domain, rest, found := strings.Cut(remaining, ",")
+		if !validEmailDomain(strings.TrimSpace(domain)) {
+			return apperr.ErrInvalidRequest.WithMessage("邮箱白名单包含无效的域名")
+		}
+		if !found {
+			return nil
+		}
+		remaining = rest
+	}
+}
+
+func validEmailDomain(domain string) bool {
+	if len(domain) == 0 || len(domain) > 253 {
+		return false
+	}
+	for remaining := domain; ; {
+		label, rest, found := strings.Cut(remaining, ".")
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := range label {
+			char := label[i]
+			if !((char >= 'a' && char <= 'z') ||
+				(char >= 'A' && char <= 'Z') ||
+				(char >= '0' && char <= '9') ||
+				char == '-') {
+				return false
+			}
+		}
+		if !found {
+			return true
+		}
+		remaining = rest
+	}
 }
 
 // checkDefaultGroup 拒绝把内置用户组写为新用户默认组; 非数字与不存在的组沿用读取时的静默回退行为.

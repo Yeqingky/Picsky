@@ -89,9 +89,11 @@ export function GalleryFilters({
         </Select>
       </div>
 
-      <Button variant="ghost" size="sm" onClick={onClear} disabled={!hasFilters}>
-        {t('gallery.filters.clear')}
-      </Button>
+      {hasFilters && (
+        <Button variant="ghost" size="sm" onClick={onClear}>
+          {t('gallery.filters.clear')}
+        </Button>
+      )}
     </div>
   );
 }

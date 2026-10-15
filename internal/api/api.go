@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/yeqingky/Picsky/internal/apperr"
+	"github.com/yeqingky/Picsky/internal/clientip"
 	"github.com/yeqingky/Picsky/internal/config"
 	"github.com/yeqingky/Picsky/internal/lsky"
 	"github.com/yeqingky/Picsky/internal/middleware"
@@ -40,7 +41,10 @@ func New(svc *service.Services, cfg *config.Config, log *slog.Logger) *Server {
 
 // Register 注册全部路由.
 func (s *Server) Register(router *gin.Engine) {
-	router.Use(s.recoverer(), s.limitBody())
+	router.Use(func(c *gin.Context) {
+		clientip.SetContext(c, s.svc.Settings.String(clientip.SettingKey))
+		c.Next()
+	}, s.recoverer(), s.limitBody())
 
 	group := router.Group(s.cfg.APIPrefix)
 	group.GET("/health", s.health)
@@ -108,6 +112,7 @@ func (s *Server) Register(router *gin.Engine) {
 
 	settings := admin.Group("/settings", middleware.Require(model.PermManageSettings))
 	settings.GET("", s.adminGetSettings)
+	settings.GET("/client-ip-sources", s.adminClientIPSources)
 	settings.PATCH("", s.adminUpdateSettings)
 
 	tasks := admin.Group("/tasks", middleware.Require(model.PermManageSettings))
@@ -194,6 +199,11 @@ func (s *Server) publicSite(c *gin.Context) {
 		"password_reset_enabled": s.svc.Mailer.Configured(),
 		"captcha":                s.svc.Captcha.Public(),
 	})
+}
+
+// adminClientIPSources 返回本次请求中包含有效 IP 的来源.
+func (s *Server) adminClientIPSources(c *gin.Context) {
+	c.JSON(http.StatusOK, clientip.Candidates(c.Request))
 }
 
 // mountFrontend 托管前端静态资源; 非 API 路径回落到 index.html.
@@ -491,7 +501,7 @@ func timeParam(c *gin.Context, name string) (*time.Time, error) {
 }
 
 // clientIP 返回请求来源地址.
-func clientIP(c *gin.Context) string { return c.ClientIP() }
+func clientIP(c *gin.Context) string { return clientip.FromContext(c) }
 
 // serviceEntry 构造审计日志条目.
 func serviceEntry(principal *service.Principal, action, targetType string, targetID int64, detail map[string]any, ip, userAgentValue string) service.Entry {

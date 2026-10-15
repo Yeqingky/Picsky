@@ -131,6 +131,9 @@ func (a *Auth) Register(ctx context.Context, in RegisterInput, ip, userAgent str
 	if err := validateEmail(email); err != nil {
 		return nil, err
 	}
+	if !emailDomainAllowed(email, a.settings.String("registration_email_allowlist")) {
+		return nil, apperr.ErrEmailNotAllowed
+	}
 	if err := validatePassword(in.Password); err != nil {
 		return nil, err
 	}
@@ -882,6 +885,27 @@ func validateEmail(email string) error {
 		return apperr.ErrInvalidRequest.WithMessage("邮箱格式不正确")
 	}
 	return nil
+}
+
+func emailDomainAllowed(email, allowlist string) bool {
+	if strings.TrimSpace(allowlist) == "" {
+		return true
+	}
+	at := strings.LastIndexByte(email, '@')
+	if at < 0 {
+		return false
+	}
+	domain := email[at+1:]
+	for remaining := allowlist; ; {
+		allowedDomain, rest, found := strings.Cut(remaining, ",")
+		if strings.EqualFold(strings.TrimSpace(allowedDomain), domain) {
+			return true
+		}
+		if !found {
+			return false
+		}
+		remaining = rest
+	}
 }
 
 // validatePassword 校验密码强度.

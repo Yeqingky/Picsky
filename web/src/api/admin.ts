@@ -10,6 +10,7 @@ import type {
   AdminUserListParams,
   AdminUserUpdateRequest,
   AuditLog,
+  ClientIPSource,
   LogListParams,
   MaintenanceTask,
   Paginated,
@@ -86,6 +87,9 @@ export const adminPoliciesApi = {
 };
 
 export const adminSettingsApi = {
+  clientIPSources: () =>
+    api.get<ClientIPSource[]>('/admin/settings/client-ip-sources').then((r) => r.data),
+
   get: () => api.get<SettingsPayload>('/admin/settings').then((r) => r.data),
 
   /** 未出现的键不改动; 出现且为空串表示清空 */

@@ -26,6 +26,7 @@ Picsky/
 │   ├── api/        原生 REST handler 与路由
 │   ├── apperr/     API 错误码
 │   ├── config/     环境变量配置
+│   ├── clientip/    请求 IP 来源探测与解析
 │   ├── crypto/     AES-256-GCM 凭据加密
 │   ├── db/         数据库连接 (SQLite WAL / PostgreSQL)
 │   ├── hashing/    单遍多哈希
@@ -45,7 +46,7 @@ Picsky/
 ├── web/            前端工程 (独立 npm 项目, React + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui, 产物输出 build/)
 │   └── src/
 │       ├── components/ui/  shadcn 基元 (CLI 生成, 已排除 Prettier)
-│       ├── components/     业务组件 (DataTable, DatePicker, States, gallery/, upload/ 等)
+│       ├── components/     业务组件 (DataTable, DatePicker, TagsInput, States, gallery/, upload/ 等)
 │       ├── lib/utils.ts    类名合并 (cn)
 │       ├── index.css       全局样式与设计令牌 (语义颜色, 圆角, 骨架扫光)
 │       └── theme/          主题模式 (light / dark / system)
@@ -67,14 +68,16 @@ Picsky/
 - Lsky Pro 兼容层是适配层: 不得绕过认证, 权限, 配额与能力降级; 兼容字段有变更时先更新 `docs/lsky-compat.md`.
 - 不实现本地人机验证: 只接入 Cap 与 Cloudflare Turnstile; 注册, 邮箱验证, 人机验证都必须是可开关项.
 - 启用 TOTP 的登录使用两步流程: 首次请求校验用户名/密码与人机验证并返回短时挑战; 前端在模态框自动提交动态口令, 挑战必须一次性消费并绑定来源 IP / User-Agent.
+- 登录限流、TOTP 挑战、审计与上传记录统一使用 `client_ip_source` 解析的地址; 默认使用 `REMOTE_ADDR`, 只有可信反向代理会覆盖所选请求头且应用端口不对公网开放时才配置代理头.
 - 密码找回令牌必须限时、一次性且绑定当前密码散列; 重置密码与清除 TOTP 秘钥必须在同一事务中完成; 登录页仅在公开站点信息报告 SMTP 发信已配置时显示找回入口.
 - 维护任务 (队列) 必须幂等可重试, 不得绕过权限与能力降级; WebDAV 只是内部存储通道, 不得对外暴露.
 - 内置用户组 (`管理员` / `只读`, 由 `groups.is_system` 标记) 的权限位固定, 不可删除, 不可设为默认组; 调整组规则时同步更新 `docs/permissions.md`.
 - 前端样式只使用 Tailwind CSS v4 与 `src/index.css` 的语义令牌 (`background`, `card`, `muted`, `primary`, `destructive`, `success`, `warning`, `info`, `border`, `ring`, `chart-*`), 禁止硬编码色值与 CSS-in-JS.
-- 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示.
+- 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示; 注册邮箱白名单按完整域名精确匹配, 留空时不限制; 列表输入复用 `TagsInput`.
 - 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 不引入 MUI, Emotion, 其它 UI 库或图标库, 图标统一 lucide-react, 全局提示统一 sonner.
 - 表格统一用 `src/components/DataTable.tsx`, 日期选择统一用 `src/components/DatePicker.tsx`, 空/错状态统一用 `src/components/States.tsx`; 需要新交互时先扩展这些共享组件.
-- 图库筛选使用原始文件名, 格式与存储策略; 不提供开始时间和结束时间筛选.
+- 图库筛选使用原始文件名, 格式与存储策略; 不提供开始时间和结束时间筛选; 仅存在筛选条件时渲染清空筛选按钮.
+- `LazyImage` 的加载与失败状态必须绑定当前图片直链; 直链变化时应同步派生 `loading` 状态, 不依赖 effect 异步重置.
 - 前端验证顺序: `npm run typecheck` -> `npm run lint` -> `npm run format:check` -> `npm run build`; 代码逻辑变更后必须同步更新 `docs/webui.md` 与 `docs/tech-stack.md` 的对应描述.
 
 ## 构建与运行

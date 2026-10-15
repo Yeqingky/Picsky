@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Loader2, RotateCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useThemeMode } from '../theme/ThemeModeProvider';
@@ -42,16 +42,16 @@ export function LazyImage({
   const { t } = useTranslation();
   const { resolvedMode } = useThemeMode();
   const [attempt, setAttempt] = useState(0);
-  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [imageState, setImageState] = useState<{
+    src: string;
+    status: 'loaded' | 'error';
+  } | null>(null);
 
   const resolvedSrc = useMemo(
     () => (attempt === 0 ? src : `${src}#retry-${attempt}`),
     [src, attempt],
   );
-
-  useEffect(() => {
-    setStatus('loading');
-  }, [resolvedSrc]);
+  const status = imageState?.src === resolvedSrc ? imageState.status : 'loading';
 
   const retry = () => {
     setAttempt((value) => value + 1);
@@ -97,8 +97,8 @@ export function LazyImage({
           loading={eager ? 'eager' : 'lazy'}
           decoding="async"
           onClick={onClick}
-          onLoad={() => setStatus('loaded')}
-          onError={() => setStatus('error')}
+          onLoad={() => setImageState({ src: resolvedSrc, status: 'loaded' })}
+          onError={() => setImageState({ src: resolvedSrc, status: 'error' })}
           className={cn(
             'block h-full w-full transition-opacity duration-200',
             objectFit === 'contain' ? 'object-contain' : 'object-cover',

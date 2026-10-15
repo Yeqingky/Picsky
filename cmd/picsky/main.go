@@ -72,6 +72,9 @@ func run() error {
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	if err := router.SetTrustedProxies(nil); err != nil {
+		return err
+	}
 	// 访问日志不记录查询串, 避免 Lsky 客户端把 token 放在查询参数时泄漏密钥.
 	router.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipQueryString: true}))
 	api.New(services, cfg, log).Register(router)

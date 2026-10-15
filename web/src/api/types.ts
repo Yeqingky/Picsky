@@ -425,6 +425,12 @@ export interface PolicyPreviewResult {
   urls: { alias: string; url: string }[];
 }
 
+/** GET /admin/settings/client-ip-sources */
+export interface ClientIPSource {
+  source: string;
+  ip: string;
+}
+
 /** 系统设置: key -> value; 加密项始终返回空串并附带 *_set 布尔 */
 export type SettingsPayload = Record<string, string | boolean | undefined> & {
   captcha_secret_set?: boolean;

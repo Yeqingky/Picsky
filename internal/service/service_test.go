@@ -1063,6 +1063,45 @@ func TestUsedBytesReconcile(t *testing.T) {
 	}
 }
 
+func TestRegisterEmailAllowlist(t *testing.T) {
+	f := newFixture(t)
+	if err := f.svc.Settings.Update(map[string]string{
+		"registration_email_allowlist": "example..com",
+	}); !errors.Is(err, apperr.ErrInvalidRequest) {
+		t.Fatalf("无效邮箱域名应被拒绝, 实际错误: %v", err)
+	}
+	if _, err := f.svc.Auth.Register(context.Background(), service.RegisterInput{
+		Username: "unrestricted",
+		Email:    "user@outside.net",
+		Password: "password123",
+	}, "127.0.0.1", "test"); err != nil {
+		t.Fatalf("空白白名单应允许任意邮箱域名: %v", err)
+	}
+
+	if err := f.svc.Settings.Update(map[string]string{
+		"registration_email_allowlist": "Example.com,corp.test",
+	}); err != nil {
+		t.Fatalf("设置邮箱白名单失败: %v", err)
+	}
+
+	if _, err := f.svc.Auth.Register(context.Background(), service.RegisterInput{
+		Username: "allowed",
+		Email:    "allowed@EXAMPLE.COM",
+		Password: "password123",
+	}, "127.0.0.1", "test"); err != nil {
+		t.Fatalf("白名单域名应允许注册: %v", err)
+	}
+	for index, email := range []string{"nested@sub.example.com", "outside@example.net"} {
+		if _, err := f.svc.Auth.Register(context.Background(), service.RegisterInput{
+			Username: fmt.Sprintf("blocked-%d", index),
+			Email:    email,
+			Password: "password123",
+		}, "127.0.0.1", "test"); !errors.Is(err, apperr.ErrEmailNotAllowed) {
+			t.Errorf("非白名单邮箱 %q 应被拒绝, 实际错误: %v", email, err)
+		}
+	}
+}
+
 func TestAuthRegisterLoginAndTotp(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

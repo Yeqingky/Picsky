@@ -16,10 +16,11 @@ import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { adminGroupsApi, adminSettingsApi } from '../../api';
-import type { SettingsPayload } from '../../api';
+import type { ClientIPSource, SettingsPayload } from '../../api';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorState } from '../../components/States';
 import { SizeInput } from '../../components/SizeInput';
+import { TagsInput } from '../../components/TagsInput';
 import { FormSkeleton, SkeletonSurface } from '../../components/skeletons';
 import { SITE_QUERY_KEY } from '../../hooks/useSite';
 import { Alert, AlertDescription } from '../../components/ui/alert';
@@ -41,13 +42,16 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/too
 import { cn } from '../../lib/utils';
 import { formatBytes } from '../../utils/format';
 
+const DEFAULT_CLIENT_IP_SOURCE = 'REMOTE_ADDR';
 /** 系统设置项 (docs/database.md 第 7 节); 全部以字符串与后端交互 */
 const SETTING_KEYS = [
   'site_name',
   'site_url',
+  'client_ip_source',
   'timezone',
   'register_enabled',
   'email_verification_enabled',
+  'registration_email_allowlist',
   'captcha_provider',
   'captcha_site_key',
   'captcha_endpoint',
@@ -74,9 +78,11 @@ type SettingKey = (typeof SETTING_KEYS)[number];
 const DEFAULTS: Record<SettingKey, string> = {
   site_name: 'Picsky',
   site_url: '',
+  client_ip_source: DEFAULT_CLIENT_IP_SOURCE,
   timezone: 'Asia/Shanghai',
   register_enabled: 'true',
   email_verification_enabled: 'false',
+  registration_email_allowlist: '',
   captcha_provider: 'none',
   captcha_site_key: '',
   captcha_endpoint: '',
@@ -181,11 +187,22 @@ function isInteger(value: string): boolean {
   return /^\d+$/.test(value.trim());
 }
 
-function splitFormats(value: string): string[] {
+function splitTags(value: string): string[] {
   return value
     .split(',')
     .map((token) => token.trim())
     .filter((token) => token.length > 0);
+}
+function isEmailDomain(value: string): boolean {
+  if (value.length === 0 || value.length > 253) return false;
+  return value
+    .split('.')
+    .every(
+      (label) =>
+        label.length > 0 &&
+        label.length <= 63 &&
+        /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label),
+    );
 }
 
 function validateSettings(values: Draft, t: TFunction): Errors {
@@ -217,13 +234,18 @@ function validateSettings(values: Draft, t: TFunction): Errors {
   integer('gallery_page_size', 1, undefined, t('adminSystem.settings.validation.positive'));
   integer('log_retention_days', 0, undefined, t('adminSystem.settings.validation.nonNegative'));
 
-  const formats = splitFormats(values.default_allowed_formats);
+  const formats = splitTags(values.default_allowed_formats);
   if (formats.length === 0) {
     errors.default_allowed_formats = t('adminSystem.settings.validation.formatsRequired');
   } else if (formats.some((token) => token.toLowerCase() === 'svg')) {
     errors.default_allowed_formats = t('adminSystem.settings.validation.formatsSvg');
   } else if (formats.some((token) => !/^[A-Za-z0-9]+$/.test(token))) {
     errors.default_allowed_formats = t('adminSystem.settings.validation.formatsToken');
+  }
+
+  const emailDomains = splitTags(values.registration_email_allowlist);
+  if (emailDomains.some((domain) => !isEmailDomain(domain))) {
+    errors.registration_email_allowlist = t('adminSystem.settings.validation.emailDomains');
   }
 
   const pathTemplate = values.default_path_template.trim();
@@ -392,6 +414,14 @@ export default function AdminSettingsPage() {
     refetchOnReconnect: false,
     retry: false,
   });
+  const clientIPSourcesQuery = useQuery({
+    queryKey: ['admin', 'settings', 'client-ip-sources'],
+    queryFn: adminSettingsApi.clientIPSources,
+    enabled: tab === 'site',
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
 
   const groupsQuery = useQuery({
     queryKey: ['admin', 'groups'],
@@ -538,7 +568,7 @@ export default function AdminSettingsPage() {
       ? [draft.timezone, ...TIMEZONES]
       : [...TIMEZONES];
   const groups = groupsQuery.data ?? [];
-  const formatTokens = splitFormats(draft.default_allowed_formats);
+  const formatTokens = splitTags(draft.default_allowed_formats);
   const maxFileSize = isInteger(draft.max_file_size_bytes)
     ? Number(draft.max_file_size_bytes)
     : null;
@@ -546,6 +576,14 @@ export default function AdminSettingsPage() {
     !groupsQuery.isPending &&
     draft.default_group_id.length > 0 &&
     !groups.some((group) => String(group.id) === draft.default_group_id);
+
+  const currentClientIPSource = draft.client_ip_source || DEFAULT_CLIENT_IP_SOURCE;
+  const detectedClientIPSources = clientIPSourcesQuery.data ?? [];
+  const clientIPSourceOptions: ClientIPSource[] = detectedClientIPSources.some(
+    (source) => source.source === currentClientIPSource,
+  )
+    ? detectedClientIPSources
+    : [{ source: currentClientIPSource, ip: '' }, ...detectedClientIPSources];
 
   return (
     <>
@@ -609,6 +647,31 @@ export default function AdminSettingsPage() {
             />
           </Field>
           <Field
+            id="setting-client-ip-source"
+            label={t('adminSystem.settings.field.clientIPSource')}
+            className={SETTING_FIELD_WIDTH.wide}
+            hint={t('adminSystem.settings.field.clientIPSourceHint')}
+          >
+            <Select
+              value={currentClientIPSource}
+              onValueChange={(value) => setField('client_ip_source', value)}
+            >
+              <SelectTrigger id="setting-client-ip-source" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {clientIPSourceOptions.map((source) => (
+                  <SelectItem key={source.source} value={source.source}>
+                    {source.ip
+                      ? `${source.source} - ${source.ip}`
+                      : `${source.source} - ${t('adminSystem.settings.field.clientIPSourceMissing')}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field
             id="setting-timezone"
             label={t('adminSystem.settings.field.timezone')}
             className={SETTING_FIELD_WIDTH.short}
@@ -644,6 +707,21 @@ export default function AdminSettingsPage() {
             checked={draft.email_verification_enabled === 'true'}
             onChange={(next) => setField('email_verification_enabled', next ? 'true' : 'false')}
           />
+          <Field
+            id="setting-registration-email-allowlist"
+            label={t('adminSystem.settings.field.emailAllowlist')}
+            className={SETTING_FIELD_WIDTH.wide}
+            hint={t('adminSystem.settings.field.emailAllowlistHint')}
+            error={errors.registration_email_allowlist}
+          >
+            <TagsInput
+              id="setting-registration-email-allowlist"
+              value={splitTags(draft.registration_email_allowlist)}
+              onChange={(domains) => setField('registration_email_allowlist', domains.join(','))}
+              placeholder={t('adminSystem.settings.field.emailAllowlistPlaceholder')}
+              invalid={Boolean(errors.registration_email_allowlist)}
+            />
+          </Field>
           {groupsQuery.isError ? (
             <Field
               id="setting-default-group"
@@ -862,11 +940,12 @@ export default function AdminSettingsPage() {
             }
             error={errors.default_allowed_formats}
           >
-            <Input
+            <TagsInput
               id="setting-allowed-formats"
-              value={draft.default_allowed_formats}
-              aria-invalid={Boolean(errors.default_allowed_formats)}
-              onChange={(event) => setField('default_allowed_formats', event.target.value)}
+              value={formatTokens}
+              onChange={(formats) => setField('default_allowed_formats', formats.join(','))}
+              placeholder={t('adminSystem.settings.field.allowedFormatsPlaceholder')}
+              invalid={Boolean(errors.default_allowed_formats)}
             />
           </Field>
           <Field

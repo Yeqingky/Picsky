@@ -2,11 +2,13 @@ package migrations
 
 // DefaultSettings 是系统设置默认值, 与 docs/database.md 第 7 节一致.
 var DefaultSettings = map[string]string{
+	"client_ip_source":                "REMOTE_ADDR",
 	"site_name":                       "Picsky",
 	"site_url":                        "",
 	"timezone":                        "Asia/Shanghai",
 	"register_enabled":                "true",
 	"email_verification_enabled":      "false",
+	"registration_email_allowlist":    "",
 	"captcha_provider":                "none",
 	"captcha_endpoint":                "",
 	"captcha_site_key":                "",
@@ -55,9 +57,11 @@ var SettingDefinitions = []SettingDefinition{
 	{Key: "site_name", Label: "站点名称", Type: "string", Group: "站点"},
 	{Key: "site_url", Label: "站点对外地址", Type: "string", Group: "站点", Help: "例如 https://picsky.example.com"},
 	{Key: "timezone", Label: "时区", Type: "string", Group: "站点", Help: "界面显示与筛选时区, 例如 Asia/Shanghai"},
+	{Key: "client_ip_source", Label: "客户端 IP 获取方式", Type: "select", Group: "站点", Help: "默认使用 socket 来源; 代理头仅在可信反向代理覆盖该头且应用端口不对公网开放时使用", Options: []string{"REMOTE_ADDR"}},
 
 	{Key: "register_enabled", Label: "开放注册", Type: "bool", Group: "注册与安全"},
 	{Key: "email_verification_enabled", Label: "注册需要邮箱验证", Type: "bool", Group: "注册与安全"},
+	{Key: "registration_email_allowlist", Label: "邮箱域名白名单", Type: "string", Group: "注册与安全", Help: "逗号分隔的邮箱域名; 精确匹配; 留空不限制"},
 	{Key: "captcha_provider", Label: "人机验证", Type: "select", Group: "注册与安全", Options: []string{"none", "cap", "turnstile"}},
 	{Key: "captcha_endpoint", Label: "人机验证服务地址", Type: "string", Group: "注册与安全", Help: "Cap 自建实例地址, 例如 https://cap.example.com; Turnstile 留空"},
 	{Key: "captcha_site_key", Label: "人机验证站点 Key", Type: "string", Group: "注册与安全"},

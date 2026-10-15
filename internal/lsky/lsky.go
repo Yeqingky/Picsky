@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/yeqingky/Picsky/internal/apperr"
+	"github.com/yeqingky/Picsky/internal/clientip"
 	"github.com/yeqingky/Picsky/internal/httpupload"
 	"github.com/yeqingky/Picsky/internal/middleware"
 	"github.com/yeqingky/Picsky/internal/model"
@@ -295,7 +296,7 @@ func (h *Handler) handleParsedUpload(c *gin.Context, principal *service.Principa
 		PolicyID:  policyID,
 		Spooled:   result.Spooled,
 		Source:    model.SourceAPI,
-		ClientIP:  c.ClientIP(),
+		ClientIP:  clientip.FromContext(c),
 		UserAgent: c.GetHeader("User-Agent"),
 	})
 	if err != nil {
@@ -364,7 +365,7 @@ func (h *Handler) deleteImage(c *gin.Context) {
 			Action:     "delete_missing",
 			TargetType: "image",
 			Detail:     map[string]any{"key": rawKey},
-			IP:         c.ClientIP(),
+			IP:         clientip.FromContext(c),
 			UserAgent:  c.GetHeader("User-Agent"),
 		})
 		ok(c, gin.H{}, "删除成功")
@@ -381,7 +382,7 @@ func (h *Handler) deleteImage(c *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.Images.Delete(principal, id, c.ClientIP(), c.GetHeader("User-Agent"))
+	result, err := h.svc.Images.Delete(principal, id, clientip.FromContext(c), c.GetHeader("User-Agent"))
 	if err != nil {
 		h.writeError(c, err)
 		return
