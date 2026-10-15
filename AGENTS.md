@@ -78,6 +78,7 @@ Picsky/
 - 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示; 注册邮箱白名单按完整域名精确匹配, 留空时不限制; 列表输入复用 `TagsInput`.
 - 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 不引入 MUI, Emotion, 其它 UI 库或图标库, 图标统一 lucide-react, 全局提示统一 sonner.
 - 表格统一用 `src/components/DataTable.tsx`, 日期选择统一用 `src/components/DatePicker.tsx`, 空/错状态统一用 `src/components/States.tsx`; 需要新交互时先扩展这些共享组件.
+- 加载骨架必须贴合实际页面结构; 表格首屏与局部刷新复用 `DataTable` 的列定义、表头和行高, 瀑布流骨架复用 `MasonryGrid` 排布; 已知页面不得用通用表单/卡片骨架替代真实布局.
 - 存储策略分发域名列表的“别名”与“域名 URL”列名与“添加域名”按钮在顶部同行, 只显示一次; 桌面端拖动手柄排序且首项为默认, 删除首项后新的首项接替, 小屏幕纵向排列.
 - 维护队列表格与类型筛选必须覆盖后端支持的全部任务类型, 并使用中文名称显示.
 - 图库筛选使用原始文件名, 格式与存储策略; 不提供开始时间和结束时间筛选; 仅存在筛选条件时渲染清空筛选按钮.
