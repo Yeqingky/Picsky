@@ -7,7 +7,6 @@ import { adminLogsApi } from '../../api';
 import type { AuditLog } from '../../api';
 import { PageHeader } from '../../components/PageHeader';
 import { EmptyState, ErrorState } from '../../components/States';
-import { TableSkeleton } from '../../components/skeletons';
 import { DataTable } from '../../components/DataTable';
 import type { DataTableColumn } from '../../components/DataTable';
 import { DatePicker } from '../../components/DatePicker';
@@ -230,15 +229,6 @@ export default function AdminLogsPage() {
     );
   }
 
-  if (logsQuery.isPending) {
-    return (
-      <>
-        {header}
-        <TableSkeleton rows={10} columns={8} />
-      </>
-    );
-  }
-
   const filtersActive = action.length > 0 || userId.length > 0 || from !== null || to !== null;
 
   return (
@@ -313,7 +303,7 @@ export default function AdminLogsPage() {
       <DataTable
         columns={columns}
         rows={logsQuery.data?.items ?? []}
-        loading={delayedLoading}
+        loading={logsQuery.isPending || delayedLoading}
         emptyState={
           <EmptyState
             title={t('adminSystem.logs.emptyTitle')}

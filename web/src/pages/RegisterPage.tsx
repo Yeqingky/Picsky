@@ -52,7 +52,8 @@ export default function RegisterPage() {
   const captchaConfig: CaptchaConfig | undefined = captchaQuery.data;
   const captchaRequired = (captchaConfig?.provider ?? 'none') !== 'none';
 
-  if (isLoading) return <AuthCardSkeleton />;
+  if (isLoading)
+    return <AuthCardSkeleton fields={4} captcha={captchaQuery.isPending || captchaRequired} />;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

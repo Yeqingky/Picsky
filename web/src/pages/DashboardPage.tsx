@@ -18,12 +18,8 @@ import { useAuth } from '../hooks/useAuth';
 import { useDelayedLoading } from '../hooks/useDelayedLoading';
 import { PageHeader } from '../components/PageHeader';
 import { EmptyState, ErrorState } from '../components/States';
-import {
-  FormSkeleton,
-  ListRowsSkeleton,
-  SkeletonSurface,
-  TextLinesSkeleton,
-} from '../components/skeletons';
+import { DashboardSkeleton, RecentUploadsSkeleton, SkeletonSurface } from '../components/skeletons';
+import { Skeleton } from '../components/ui/skeleton';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -121,7 +117,7 @@ export default function DashboardPage() {
   );
   const showRecentSkeleton = useDelayedLoading(imagesQuery.isPending);
 
-  if (isLoading) return <FormSkeleton fields={4} grouped />;
+  if (isLoading) return <DashboardSkeleton />;
   if (!user) return <ErrorState onRetry={() => void refresh()} />;
 
   const quota = user.quota;
@@ -257,7 +253,13 @@ export default function DashboardPage() {
                 <SkeletonSurface label={t('common.skeleton.stats')}>
                   <div className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
                     {Array.from({ length: tileCount }, (_, index) => (
-                      <TextLinesSkeleton key={index} lines={2} lastWidth="40%" />
+                      <div key={index} className="flex items-start gap-3">
+                        <Skeleton className="mt-0.5 size-4 shrink-0 rounded-sm" />
+                        <div className="min-w-0">
+                          <Skeleton className="h-3 w-20 rounded-sm" />
+                          <Skeleton className="mt-1.5 h-5 w-24 max-w-full rounded-sm" />
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </SkeletonSurface>
@@ -290,7 +292,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="flex flex-1 flex-col justify-center">
               {showRecentSkeleton ? (
-                <ListRowsSkeleton rows={RECENT_LIMIT} />
+                <RecentUploadsSkeleton rows={RECENT_LIMIT} />
               ) : imagesQuery.isError ? (
                 <ErrorState onRetry={() => void imagesQuery.refetch()} />
               ) : recent.length === 0 ? (

@@ -9,7 +9,7 @@ import { PageHeader } from '../components/PageHeader';
 import { CopyButton } from '../components/CopyButton';
 import { QuotaBar } from '../components/QuotaBar';
 import { ErrorState } from '../components/States';
-import { FormSkeleton } from '../components/skeletons';
+import { ProfileSkeleton } from '../components/skeletons';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -144,7 +144,7 @@ export default function ProfilePage() {
     onError: (error) => setDisableError(errorMessage(error, t('common.error.unknown'))),
   });
 
-  if (isLoading) return <FormSkeleton fields={4} grouped />;
+  if (isLoading) return <ProfileSkeleton />;
   if (!user) return <ErrorState onRetry={() => void refresh()} />;
 
   const handlePasswordSubmit = () => {

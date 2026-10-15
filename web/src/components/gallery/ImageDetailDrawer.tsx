@@ -136,16 +136,76 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
 
         <div className="overflow-y-auto p-4">
           {isPending && (
-            <div aria-busy="true" aria-label={t('common.a11y.loading')}>
-              <Skeleton className="mb-4 h-64 w-full rounded-lg" />
-              <div className="flex flex-col gap-3">
-                {Array.from({ length: 6 }, (_, index) => (
-                  <div key={index} className="flex items-center gap-3">
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-4 flex-1" />
-                  </div>
-                ))}
+            <div
+              aria-busy="true"
+              aria-label={t('common.a11y.loading')}
+              className="flex flex-col gap-4"
+            >
+              <Skeleton className="h-64 w-full rounded-lg" />
+              <div className="flex flex-wrap gap-2">
+                <Skeleton className="h-5 w-12 rounded-full" />
+                <Skeleton className="h-5 w-16 rounded-full" />
+                <Skeleton className="h-5 w-20 rounded-full" />
               </div>
+              <section>
+                <Skeleton className="mb-2 h-5 w-20 rounded-sm" />
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-3 text-sm">
+                    <Skeleton className="h-4 w-24 shrink-0 rounded-sm" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1">
+                        <Skeleton className="h-9 min-w-0 flex-1 rounded-lg" />
+                        <Skeleton className="size-8 shrink-0 rounded-lg" />
+                      </div>
+                      <Skeleton className="mt-1 h-4 w-3/4 rounded-sm" />
+                    </div>
+                  </div>
+                  {Array.from({ length: 9 }, (_, index) => (
+                    <div key={index} className="flex gap-3 text-sm">
+                      <Skeleton className="h-4 w-24 shrink-0 rounded-sm" />
+                      <div className="flex min-w-0 flex-1 items-center gap-1">
+                        <Skeleton
+                          className={
+                            index % 2 === 0 ? 'h-4 w-3/5 rounded-sm' : 'h-4 w-4/5 rounded-sm'
+                          }
+                        />
+                        {index === 2 && <Skeleton className="size-7 shrink-0 rounded-lg" />}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <div className="border-t border-border" />
+              <section>
+                <Skeleton className="mb-2 h-5 w-16 rounded-sm" />
+                <div className="flex flex-col gap-2">
+                  {Array.from({ length: 3 }, (_, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <Skeleton className="h-5 w-16 shrink-0 rounded-full" />
+                      <Skeleton className="h-4 min-w-0 flex-1 rounded-sm" />
+                      <Skeleton className="size-7 shrink-0 rounded-lg" />
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <div className="border-t border-border" />
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <Skeleton className="h-5 w-16 rounded-sm" />
+                  <Skeleton className="size-8 rounded-lg" />
+                </div>
+                <div className="flex flex-col gap-2">
+                  {Array.from({ length: 2 }, (_, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <Skeleton className="h-5 w-16 shrink-0 rounded-full" />
+                      <Skeleton className="h-4 min-w-0 flex-1 rounded-sm" />
+                      <Skeleton className="size-7 shrink-0 rounded-lg" />
+                    </div>
+                  ))}
+                </div>
+                <Skeleton className="mt-2 h-8 w-32 rounded-lg" />
+              </section>
+              {canDelete && <Skeleton className="h-9 w-32 rounded-lg" />}
             </div>
           )}
 

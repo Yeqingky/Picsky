@@ -28,7 +28,6 @@ import type { DataTableColumn } from '../../components/DataTable';
 import { PageHeader } from '../../components/PageHeader';
 import { EmptyState, ErrorState } from '../../components/States';
 import { SizeInput } from '../../components/SizeInput';
-import { TableSkeleton } from '../../components/skeletons';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import {
@@ -530,15 +529,6 @@ export default function AdminUsersPage() {
     />
   );
 
-  if (usersQuery.isPending) {
-    return (
-      <>
-        {header}
-        <TableSkeleton rows={8} columns={6} />
-      </>
-    );
-  }
-
   if (usersQuery.isError) {
     return (
       <>
@@ -574,7 +564,7 @@ export default function AdminUsersPage() {
         columns={columns}
         rows={rows}
         getRowId={(row) => row.id}
-        loading={refreshIndicator}
+        loading={usersQuery.isPending || refreshIndicator}
         emptyState={<EmptyState />}
         pagination={{
           page: paginationModel.page,

@@ -239,21 +239,23 @@ func (h *Handler) upload(c *gin.Context) {
 		h.writeError(c, err)
 		return
 	}
-
-	principalGroup := middleware.Principal(c)
-	if principal == nil && principalGroup != nil {
-		principal = principalGroup
+	if principal == nil {
+		principal = middleware.Principal(c)
 	}
 
+	var multipartReader *httpupload.RequestReader
 	if principal == nil {
-		// 只支持表单 token 的客户端需要先读取请求体: 认证前按全局硬上限读取, 体积校验仍由 Upload 按用户组执行.
-		result, err := httpupload.Read(c, h.svc.Cfg.TempDir, h.svc.Cfg.UploadMemoryLimit, service.MaxUploadSize)
+		// 表单 token 必须是首个 multipart 字段, 以便认证前不读取文件内容.
+		multipartReader, err = httpupload.NewRequestReader(c)
 		if err != nil {
 			h.writeError(c, err)
 			return
 		}
-		defer result.Close()
-		token := strings.TrimSpace(result.Fields["token"])
+		token, err := multipartReader.ReadFirstField("token")
+		if err != nil {
+			h.writeError(c, err)
+			return
+		}
 		if token == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, envelope{Status: false, Message: "Unauthenticated.", Data: gin.H{}})
 			return
@@ -263,22 +265,30 @@ func (h *Handler) upload(c *gin.Context) {
 			h.writeError(c, err)
 			return
 		}
-		h.handleParsedUpload(c, principal, result)
-		return
 	}
 
-	// 认证前无法得知用户组上限: 读取按全局硬上限, 由 Upload 按组上限校验体积.
-	result, err := httpupload.Read(c, h.svc.Cfg.TempDir, h.svc.Cfg.UploadMemoryLimit, service.MaxUploadSize)
+	permit, err := h.svc.Upload.Preflight(principal)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	limit := service.UploadLimit(h.svc.Settings, principal.Group)
+	var result *httpupload.Result
+	if multipartReader == nil {
+		result, err = httpupload.Read(c, h.svc.Cfg.TempDir, h.svc.Cfg.UploadMemoryLimit, limit)
+	} else {
+		result, err = multipartReader.Read(h.svc.Cfg.TempDir, h.svc.Cfg.UploadMemoryLimit, limit)
+	}
 	if err != nil {
 		h.writeError(c, err)
 		return
 	}
 	defer result.Close()
-	h.handleParsedUpload(c, principal, result)
+	h.handleParsedUpload(c, principal, result, permit)
 }
 
 // handleParsedUpload 处理已解析的 multipart 上传.
-func (h *Handler) handleParsedUpload(c *gin.Context, principal *service.Principal, result *httpupload.Result) {
+func (h *Handler) handleParsedUpload(c *gin.Context, principal *service.Principal, result *httpupload.Result, permit *service.UploadPermit) {
 	albumID := strings.TrimSpace(result.Fields["album_id"])
 	if albumID != "" && albumID != strconv.Itoa(LskyDefaultAlbumID) {
 		fail(c, "选定的相册不存在")
@@ -298,6 +308,7 @@ func (h *Handler) handleParsedUpload(c *gin.Context, principal *service.Principa
 		Source:    model.SourceAPI,
 		ClientIP:  clientip.FromContext(c),
 		UserAgent: c.GetHeader("User-Agent"),
+		Permit:    permit,
 	})
 	if err != nil {
 		h.writeError(c, err)

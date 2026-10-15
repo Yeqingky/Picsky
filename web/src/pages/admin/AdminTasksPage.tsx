@@ -7,7 +7,6 @@ import { adminTasksApi } from '../../api';
 import type { MaintenanceTask } from '../../api';
 import { PageHeader } from '../../components/PageHeader';
 import { EmptyState, ErrorState } from '../../components/States';
-import { TableSkeleton } from '../../components/skeletons';
 import { DataTable } from '../../components/DataTable';
 import type { DataTableColumn } from '../../components/DataTable';
 import { Alert, AlertDescription } from '../../components/ui/alert';
@@ -306,15 +305,6 @@ export default function AdminTasksPage() {
     );
   }
 
-  if (tasksQuery.isPending) {
-    return (
-      <>
-        {header}
-        <TableSkeleton rows={10} columns={8} />
-      </>
-    );
-  }
-
   return (
     <>
       {header}
@@ -384,7 +374,7 @@ export default function AdminTasksPage() {
       <DataTable
         columns={columns}
         rows={tasksQuery.data?.items ?? []}
-        loading={delayedLoading}
+        loading={tasksQuery.isPending || delayedLoading}
         emptyState={
           <EmptyState
             title={t('adminSystem.tasks.emptyTitle')}

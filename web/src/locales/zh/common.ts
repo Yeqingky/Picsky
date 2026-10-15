@@ -166,7 +166,6 @@ export const common = {
   skeleton: {
     pageHeader: '页面标题加载中',
     page: '页面加载中',
-    table: '表格加载中',
     stats: '统计加载中',
     chart: '图表加载中',
     form: '表单加载中',

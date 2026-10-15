@@ -51,7 +51,7 @@ export default function AdminOverviewPage() {
           </Card>
           <Card>
             <CardContent>
-              <ChartSkeleton height={CHART_HEIGHT} />
+              <ChartSkeleton height={CHART_HEIGHT} variant="donut" />
             </CardContent>
           </Card>
         </div>

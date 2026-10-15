@@ -10,7 +10,6 @@ import { PageHeader } from '../components/PageHeader';
 import { CopyButton } from '../components/CopyButton';
 import { EmptyState, ErrorState } from '../components/States';
 import { useConfirm } from '../components/ConfirmDialog';
-import { ListRowsSkeleton, PageHeaderSkeleton } from '../components/skeletons';
 import { DataTable } from '../components/DataTable';
 import type { DataTableColumn } from '../components/DataTable';
 import { DateTimePicker } from '../components/DatePicker';
@@ -229,6 +228,7 @@ export default function KeysPage() {
     <DataTable
       columns={columns}
       rows={records}
+      loading={listQuery.isPending || showRefreshSkeleton}
       pagination={{
         page,
         pageSize,
@@ -256,30 +256,22 @@ export default function KeysPage() {
 
   return (
     <>
-      {listQuery.isPending ? (
-        <PageHeaderSkeleton />
-      ) : (
-        <PageHeader
-          title={t('nav.keys')}
-          description={t('account.keys.description')}
-          actions={
-            <Button onClick={openCreateDialog}>
-              <Plus className="size-4" />
-              {t('account.keys.create')}
-            </Button>
-          }
-        />
-      )}
+      <PageHeader
+        title={t('nav.keys')}
+        description={t('account.keys.description')}
+        actions={
+          <Button onClick={openCreateDialog}>
+            <Plus className="size-4" />
+            {t('account.keys.create')}
+          </Button>
+        }
+      />
 
       {listQuery.isError ? (
         <ErrorState
           message={listQuery.error instanceof ApiError ? listQuery.error.message : undefined}
           onRetry={() => void listQuery.refetch()}
         />
-      ) : listQuery.isPending ? (
-        <ListRowsSkeleton rows={4} />
-      ) : showRefreshSkeleton ? (
-        <ListRowsSkeleton rows={Math.max(1, records.length)} />
       ) : (
         listBody
       )}

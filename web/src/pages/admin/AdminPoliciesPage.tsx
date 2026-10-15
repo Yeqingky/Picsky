@@ -11,7 +11,6 @@ import { DataTable } from '../../components/DataTable';
 import type { DataTableColumn } from '../../components/DataTable';
 import { PageHeader } from '../../components/PageHeader';
 import { EmptyState, ErrorState } from '../../components/States';
-import { TableSkeleton } from '../../components/skeletons';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
@@ -216,9 +215,7 @@ export default function AdminPoliciesPage() {
         actions={createButton}
       />
 
-      {policiesQuery.isLoading && <TableSkeleton rows={6} columns={6} />}
-
-      {!policiesQuery.isLoading && policiesQuery.isError && (
+      {policiesQuery.isError ? (
         <ErrorState
           message={
             policiesQuery.error instanceof Error
@@ -229,12 +226,11 @@ export default function AdminPoliciesPage() {
             void policiesQuery.refetch();
           }}
         />
-      )}
-
-      {!policiesQuery.isLoading && !policiesQuery.isError && (
+      ) : (
         <DataTable<AdminPolicy>
           columns={columns}
           rows={policiesQuery.data ?? []}
+          loading={policiesQuery.isPending}
           getRowId={(row) => row.id}
           pagination={{
             page,

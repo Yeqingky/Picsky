@@ -111,6 +111,19 @@ type response struct {
 	Header http.Header
 }
 
+type countingReadCloser struct {
+	reader    *bytes.Reader
+	bytesRead int64
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.bytesRead += int64(n)
+	return n, err
+}
+
+func (r *countingReadCloser) Close() error { return nil }
+
 // raw 发送请求.
 func (s *server) raw(method, path string, body io.Reader, headers map[string]string, cookies []*http.Cookie) *response {
 	s.t.Helper()
@@ -277,7 +290,15 @@ func multipartBody(t *testing.T, filename string, content []byte, fields map[str
 	t.Helper()
 	buffer := &bytes.Buffer{}
 	writer := multipart.NewWriter(buffer)
+	if token, ok := fields["token"]; ok {
+		if err := writer.WriteField("token", token); err != nil {
+			t.Fatalf("写入 token 字段失败: %v", err)
+		}
+	}
 	for key, value := range fields {
+		if key == "token" {
+			continue
+		}
 		if err := writer.WriteField(key, value); err != nil {
 			t.Fatalf("写入表单字段失败: %v", err)
 		}
@@ -1129,6 +1150,72 @@ func TestNativeUploadRejectsInvalidPayloads(t *testing.T) {
 	}
 	if contentType := notFound.Header.Get("Content-Type"); !strings.Contains(contentType, "application/json") {
 		t.Errorf("未知 API 路径应返回 JSON, 实际 %q", contentType)
+	}
+}
+
+func TestLskyUnauthenticatedUploadDoesNotReadFileBody(t *testing.T) {
+	s := newServer(t)
+	body, contentType := multipartBody(t, "large.png", bytes.Repeat([]byte("x"), 2<<20), nil)
+	countedBody := &countingReadCloser{reader: bytes.NewReader(body.Bytes())}
+	request := httptest.NewRequest(http.MethodPost, "/lsky/api/v1/upload", countedBody)
+	request.ContentLength = int64(body.Len())
+	request.Header.Set("Content-Type", contentType)
+	recorder := httptest.NewRecorder()
+
+	s.engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("未认证上传应返回 401, 实际 %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if countedBody.bytesRead >= int64(body.Len())/2 {
+		t.Errorf("认证失败前读取了大部分请求体: %d/%d 字节", countedBody.bytesRead, body.Len())
+	}
+}
+
+func TestLskyRateLimitRejectsBeforeReadingFileBody(t *testing.T) {
+	s := newServer(t)
+	cookie, policyID := s.bootstrap()
+	userID, err := s.svc.Auth.ParseSession(cookie.Value)
+	if err != nil {
+		t.Fatalf("解析会话失败: %v", err)
+	}
+	principal, err := s.svc.Auth.PrincipalFor(userID, nil, nil)
+	if err != nil {
+		t.Fatalf("读取主体失败: %v", err)
+	}
+	if err := s.db.Model(&model.Group{}).Where("id = ?", principal.Group.ID).Update("upload_rate_limit", 1).Error; err != nil {
+		t.Fatalf("设置上传速率限制失败: %v", err)
+	}
+	createdKey := s.json(http.MethodPost, "/api/v1/keys", map[string]any{"name": "lsky-limit"}, []*http.Cookie{cookie})
+	if createdKey.Status != http.StatusCreated {
+		t.Fatalf("创建 API 密钥失败: %d %s", createdKey.Status, string(createdKey.Body))
+	}
+	token := s.decode(createdKey)["secret"].(string)
+	first := s.upload("/lsky/api/v1/upload", "first.png", pngContent(t, 31), map[string]string{
+		"token":       token,
+		"strategy_id": fmt.Sprint(policyID),
+	}, map[string]string{}, nil)
+	if first.Status != http.StatusOK {
+		t.Fatalf("首次上传应成功: %d %s", first.Status, string(first.Body))
+	}
+
+	body, contentType := multipartBody(t, "large.png", bytes.Repeat([]byte("x"), 2<<20), map[string]string{
+		"token":       token,
+		"strategy_id": fmt.Sprint(policyID),
+	})
+	countedBody := &countingReadCloser{reader: bytes.NewReader(body.Bytes())}
+	request := httptest.NewRequest(http.MethodPost, "/lsky/api/v1/upload", countedBody)
+	request.ContentLength = int64(body.Len())
+	request.Header.Set("Content-Type", contentType)
+	recorder := httptest.NewRecorder()
+
+	s.engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("超限请求应返回 429, 实际 %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if countedBody.bytesRead >= int64(body.Len())/2 {
+		t.Errorf("限流拒绝前读取了大部分请求体: %d/%d 字节", countedBody.bytesRead, body.Len())
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -105,6 +106,14 @@ type UploadRequest struct {
 	Source    string
 	ClientIP  string
 	UserAgent string
+	Permit    *UploadPermit
+}
+
+// UploadPermit 是在读取请求体前预留的单次上传许可.
+type UploadPermit struct {
+	upload *Upload
+	userID int64
+	used   atomic.Bool
 }
 
 // UploadResult 是上传结果.
@@ -116,6 +125,33 @@ type UploadResult struct {
 	Status       int
 }
 
+// Preflight 校验上传权限并预留限流额度, 应在读取 multipart 文件内容前调用.
+func (u *Upload) Preflight(principal *Principal) (*UploadPermit, error) {
+	if principal == nil || principal.User == nil {
+		return nil, apperr.ErrUnauthorized
+	}
+	if !principal.Has(model.PermUpload) {
+		return nil, apperr.ErrForbidden.WithMessage("当前用户组没有上传权限")
+	}
+	if err := u.allowRateLimit(principal); err != nil {
+		return nil, err
+	}
+	return &UploadPermit{upload: u, userID: principal.User.ID}, nil
+}
+
+func (u *Upload) allowRateLimit(principal *Principal) error {
+	rateLimit := EffectiveUploadRateLimit(principal.Group)
+	if rateLimit <= 0 {
+		return nil
+	}
+	allowed, retryAfter := u.limiter.Allow(fmt.Sprintf("upload:%d", principal.User.ID), rateLimit)
+	if allowed {
+		return nil
+	}
+	seconds := int(retryAfter.Seconds()) + 1
+	return apperr.ErrRateLimited.WithDetails(map[string]any{"retry_after_seconds": seconds})
+}
+
 // Upload 执行上传.
 func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, error) {
 	if req.Principal == nil || req.Principal.User == nil {
@@ -124,6 +160,10 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	user := req.Principal.User
 	if !req.Principal.Has(model.PermUpload) {
 		return nil, apperr.ErrForbidden.WithMessage("当前用户组没有上传权限")
+	}
+
+	if req.Permit != nil && (req.Permit.upload != u || req.Permit.userID != user.ID || !req.Permit.used.CompareAndSwap(false, true)) {
+		return nil, apperr.ErrInvalidRequest.WithMessage("上传预检许可无效")
 	}
 	if req.Spooled == nil || req.Spooled.Spool == nil {
 		return nil, apperr.ErrInvalidRequest.WithMessage("缺少上传内容")
@@ -149,10 +189,9 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if req.Spooled.Truncated || (maxSize > 0 && sums.Size > maxSize) {
 		return nil, apperr.ErrFileTooLarge.WithDetails(map[string]any{"size": sums.Size, "limit": maxSize})
 	}
-	if rateLimit := EffectiveUploadRateLimit(req.Principal.Group); rateLimit > 0 {
-		if allowed, retryAfter := u.limiter.Allow(fmt.Sprintf("upload:%d", user.ID), rateLimit); !allowed {
-			seconds := int(retryAfter.Seconds()) + 1
-			return nil, apperr.ErrRateLimited.WithDetails(map[string]any{"retry_after_seconds": seconds})
+	if req.Permit == nil {
+		if err := u.allowRateLimit(req.Principal); err != nil {
+			return nil, err
 		}
 	}
 

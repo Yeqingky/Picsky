@@ -21,7 +21,7 @@ import { PageHeader } from '../../components/PageHeader';
 import { ErrorState } from '../../components/States';
 import { SizeInput } from '../../components/SizeInput';
 import { TagsInput } from '../../components/TagsInput';
-import { FormSkeleton, SkeletonSurface } from '../../components/skeletons';
+import { SkeletonSurface } from '../../components/skeletons';
 import { SITE_QUERY_KEY } from '../../hooks/useSite';
 import { Alert, AlertDescription } from '../../components/ui/alert';
 import { Badge } from '../../components/ui/badge';
@@ -375,17 +375,79 @@ function SecretField({
 }
 
 /** 首屏骨架: 标签栏与表单行, 与真实内容同尺寸 */
-function SettingsSkeleton() {
+function SettingsSkeleton({ tab }: { tab: SettingTabId }) {
   const { t } = useTranslation();
+  const rowCounts: Record<SettingTabId, number> = {
+    site: 4,
+    register: 4,
+    captcha: 4,
+    email: 6,
+    quota: 2,
+    other: 5,
+  };
+  const widths: Record<SettingTabId, readonly string[]> = {
+    site: ['sm:max-w-[220px]', 'sm:max-w-lg', 'sm:max-w-lg', 'sm:max-w-[220px]'],
+    register: ['', '', 'sm:max-w-lg', 'sm:max-w-sm'],
+    captcha: ['sm:max-w-[220px]', 'sm:max-w-lg', 'sm:max-w-lg', 'sm:max-w-sm'],
+    email: [
+      'sm:max-w-sm',
+      'sm:max-w-40',
+      'sm:max-w-sm',
+      'sm:max-w-sm',
+      'sm:max-w-sm',
+      'sm:max-w-[220px]',
+    ],
+    quota: ['sm:max-w-lg', 'sm:max-w-40'],
+    other: ['sm:max-w-[220px]', 'sm:max-w-lg', '', 'sm:max-w-40', 'sm:max-w-40'],
+  };
   return (
     <SkeletonSurface label={t('common.skeleton.settings')}>
-      <div className="border-border flex flex-wrap gap-2 border-b pb-[5px]">
-        {SETTING_TABS.map((tab) => (
-          <Skeleton key={tab.id} className="h-9 w-24 rounded-sm" />
+      <div className="border-border flex flex-wrap gap-1 border-b pb-[5px]">
+        {SETTING_TABS.map((item) => (
+          <div
+            key={item.id}
+            className={cn(
+              'relative flex h-9 items-center gap-2 px-3',
+              item.id === tab &&
+                'after:absolute after:inset-x-3 after:bottom-[-6px] after:h-0.5 after:bg-primary',
+            )}
+          >
+            <Skeleton className="size-4 rounded-sm" />
+            <Skeleton className="h-4 w-12 rounded-sm" />
+          </div>
         ))}
       </div>
-      <div className="mt-6 max-w-2xl">
-        <FormSkeleton fields={6} />
+      <div className="mt-6 flex max-w-2xl flex-col gap-5">
+        {Array.from({ length: rowCounts[tab] }, (_, index) => {
+          const switchField = (tab === 'register' && index < 2) || (tab === 'other' && index === 2);
+          const hasHint =
+            (tab === 'site' && index > 0) ||
+            tab === 'register' ||
+            (tab === 'captcha' && index > 0) ||
+            (tab === 'email' && (index === 3 || index === 4)) ||
+            tab === 'quota' ||
+            (tab === 'other' && (index === 1 || index === 2));
+
+          if (switchField) {
+            return (
+              <div key={index} className="flex items-start gap-2">
+                <Skeleton className="mt-0.5 h-5 w-9 shrink-0 rounded-full" />
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-4 w-32 rounded-sm" />
+                  {hasHint && <Skeleton className="h-3 w-64 max-w-full rounded-sm" />}
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div key={index} className={cn('flex w-full flex-col gap-1.5', widths[tab][index])}>
+              <Skeleton className="h-4 w-28 rounded-sm" />
+              <Skeleton className="h-10 w-full rounded-lg" />
+              {hasHint && <Skeleton className="h-3 w-64 max-w-full rounded-sm" />}
+            </div>
+          );
+        })}
       </div>
     </SkeletonSurface>
   );
@@ -536,7 +598,16 @@ export default function AdminSettingsPage() {
     <PageHeader
       title={t('adminSystem.settings.title')}
       description={t('adminSystem.settings.description')}
-      actions={draft ? saveActions : undefined}
+      actions={
+        draft ? (
+          saveActions
+        ) : settingsQuery.isPending ? (
+          <>
+            <Skeleton className="h-9 w-20 rounded-lg" />
+            <Skeleton className="h-9 w-24 rounded-lg" />
+          </>
+        ) : undefined
+      }
     />
   );
 
@@ -558,7 +629,7 @@ export default function AdminSettingsPage() {
     return (
       <>
         {header}
-        <SettingsSkeleton />
+        <SettingsSkeleton tab={tab} />
       </>
     );
   }

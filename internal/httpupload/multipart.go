@@ -24,17 +24,63 @@ type Result struct {
 	Fields   map[string]string
 }
 
-// Read 解析 multipart 请求: file 字段写入缓冲并计算哈希, 其余字段收集为字符串.
-// limit 为文件读取上限 (字节), 0 表示不限.
-func Read(c *gin.Context, tempDir string, memLimit int64, limit int64) (*Result, error) {
+// RequestReader 保留 multipart 流, 支持在读取文件前检查首个表单字段.
+type RequestReader struct {
+	reader    *multipart.Reader
+	fields    map[string]string
+	firstRead bool
+	consumed  bool
+}
+
+// NewRequestReader 创建 multipart 流读取器.
+func NewRequestReader(c *gin.Context) (*RequestReader, error) {
 	reader, err := c.Request.MultipartReader()
 	if err != nil {
 		return nil, apperr.ErrInvalidRequest.WithMessage("请求不是合法的 multipart/form-data: " + err.Error())
 	}
+	return &RequestReader{reader: reader, fields: map[string]string{}}, nil
+}
 
-	result := &Result{Fields: map[string]string{}}
+// ReadFirstField 仅在首个 part 匹配且不是文件时读取字段值; 其他 part 不读取其内容.
+func (r *RequestReader) ReadFirstField(name string) (string, error) {
+	if r == nil || r.reader == nil || r.firstRead || r.consumed {
+		return "", apperr.ErrInvalidRequest.WithMessage("multipart 请求读取状态无效")
+	}
+	r.firstRead = true
+	part, err := r.reader.NextPart()
+	if errors.Is(err, io.EOF) {
+		return "", nil
+	}
+	if err != nil {
+		return "", apperr.ErrInvalidRequest.WithMessage("解析上传请求失败: " + err.Error())
+	}
+	if part.FormName() != name || part.FileName() != "" {
+		return "", nil
+	}
+	value, err := io.ReadAll(io.LimitReader(part, maxFormFieldLength+1))
+	if err != nil {
+		return "", apperr.ErrInvalidRequest.WithMessage("读取表单字段失败: " + err.Error())
+	}
+	if len(value) > maxFormFieldLength {
+		return "", apperr.ErrInvalidRequest.WithMessage("表单字段过长")
+	}
+	if err := part.Close(); err != nil {
+		return "", apperr.ErrInvalidRequest.WithMessage("读取表单字段失败: " + err.Error())
+	}
+	field := strings.TrimSpace(string(value))
+	r.fields[name] = field
+	return field, nil
+}
+
+// Read 解析剩余 multipart part; 首个字段 (如有) 会保留在 Fields 中.
+func (r *RequestReader) Read(tempDir string, memLimit, limit int64) (*Result, error) {
+	if r == nil || r.reader == nil || r.consumed {
+		return nil, apperr.ErrInvalidRequest.WithMessage("multipart 请求读取状态无效")
+	}
+	r.consumed = true
+	result := &Result{Fields: r.fields}
 	for {
-		part, err := reader.NextPart()
+		part, err := r.reader.NextPart()
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -47,11 +93,20 @@ func Read(c *gin.Context, tempDir string, memLimit int64, limit int64) (*Result,
 			return nil, err
 		}
 	}
-
 	if result.Spooled == nil {
 		return nil, apperr.ErrInvalidRequest.WithMessage("缺少 file 字段")
 	}
 	return result, nil
+}
+
+// Read 解析 multipart 请求: file 字段写入缓冲并计算哈希, 其余字段收集为字符串.
+// limit 为文件读取上限 (字节), 0 表示不限.
+func Read(c *gin.Context, tempDir string, memLimit int64, limit int64) (*Result, error) {
+	reader, err := NewRequestReader(c)
+	if err != nil {
+		return nil, err
+	}
+	return reader.Read(tempDir, memLimit, limit)
 }
 
 // handlePart 处理单个 part.

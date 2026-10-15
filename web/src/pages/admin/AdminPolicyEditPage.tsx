@@ -30,7 +30,11 @@ import type {
 import { CopyButton } from '../../components/CopyButton';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorState } from '../../components/States';
-import { FormSkeleton, TextLineSkeleton, TextLinesSkeleton } from '../../components/skeletons';
+import {
+  PolicyEditorSkeleton,
+  TextLineSkeleton,
+  TextLinesSkeleton,
+} from '../../components/skeletons';
 import { Alert, AlertDescription } from '../../components/ui/alert';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
@@ -44,6 +48,7 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import { Separator } from '../../components/ui/separator';
+import { Skeleton } from '../../components/ui/skeleton';
 import { Switch } from '../../components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
@@ -660,8 +665,14 @@ export default function AdminPolicyEditPage() {
           description={
             isNew ? t('adminPolicies.edit.descriptionNew') : t('adminPolicies.edit.descriptionEdit')
           }
+          actions={
+            <>
+              <Skeleton className="h-9 w-20 rounded-lg" />
+              <Skeleton className="h-9 w-24 rounded-lg" />
+            </>
+          }
         />
-        <FormSkeleton fields={6} grouped />
+        <PolicyEditorSkeleton tabs={visibleTabs.length} />
       </div>
     );
   }

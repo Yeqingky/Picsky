@@ -17,11 +17,12 @@ import type { DataTableColumn } from '../../components/DataTable';
 import { PageHeader } from '../../components/PageHeader';
 import { EmptyState, ErrorState } from '../../components/States';
 import { SizeInput } from '../../components/SizeInput';
-import { FormSkeleton, TableSkeleton } from '../../components/skeletons';
+import { SkeletonSurface } from '../../components/skeletons';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Checkbox } from '../../components/ui/checkbox';
+import { Skeleton } from '../../components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
@@ -359,15 +360,6 @@ export default function AdminGroupsPage() {
     />
   );
 
-  if (groupsQuery.isPending) {
-    return (
-      <>
-        {header}
-        <TableSkeleton rows={5} columns={6} />
-      </>
-    );
-  }
-
   if (groupsQuery.isError) {
     return (
       <>
@@ -391,7 +383,7 @@ export default function AdminGroupsPage() {
         rows={groups}
         columns={columns}
         getRowId={(row) => row.id}
-        loading={refreshIndicator}
+        loading={groupsQuery.isPending || refreshIndicator}
         pagination={{
           page: currentPage,
           pageSize,
@@ -736,7 +728,25 @@ function GroupPoliciesDialog({
         </DialogHeader>
         <div className="flex flex-col gap-3">
           {loading ? (
-            <FormSkeleton fields={2} />
+            <SkeletonSurface label={t('common.skeleton.list')}>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Skeleton className="h-4 w-24 rounded-sm" />
+                  <Skeleton className="h-4 w-16 rounded-sm" />
+                </div>
+                <div className="border-border flex max-h-64 flex-col gap-3 overflow-hidden rounded-lg border p-3">
+                  {Array.from({ length: 5 }, (_, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <Skeleton className="size-4 rounded-sm" />
+                      <Skeleton
+                        className={cn('h-4 rounded-sm', index % 2 === 0 ? 'w-2/5' : 'w-3/5')}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <Skeleton className="h-4 w-64 max-w-full rounded-sm" />
+              </div>
+            </SkeletonSurface>
           ) : failed ? (
             <ErrorState message={t('common.state.loadFailed')} onRetry={onRetry} />
           ) : policies.length === 0 ? (

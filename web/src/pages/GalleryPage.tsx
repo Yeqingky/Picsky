@@ -18,7 +18,7 @@ import type { GalleryView } from '../utils/constants';
 import { PageHeader } from '../components/PageHeader';
 import { EmptyState, ErrorState } from '../components/States';
 import { MasonryGrid } from '../components/MasonryGrid';
-import { MasonrySkeleton, SkeletonSurface, TableSkeleton } from '../components/skeletons';
+import { MasonrySkeleton, SkeletonSurface } from '../components/skeletons';
 import { GalleryImageCard } from '../components/gallery/GalleryImageCard';
 import { GalleryFilters } from '../components/gallery/GalleryFilters';
 import type { GalleryFiltersValue } from '../components/gallery/GalleryFilters';
@@ -351,15 +351,13 @@ export default function GalleryPage() {
         onClear={() => setFilters({ keyword: '', format: '', policyId: null })}
       />
 
-      {showSkeleton && <MasonrySkeleton />}
+      {showSkeleton && view === 'masonry' && <MasonrySkeleton />}
 
-      {!showSkeleton && view === 'list' && listRefreshing && <TableSkeleton rows={6} columns={7} />}
-
-      {!showSkeleton && view === 'list' && !listRefreshing && (
+      {view === 'list' && (
         <GalleryListView
           rows={records}
           rowCount={total}
-          loading={false}
+          loading={pending || listRefreshing}
           paginationModel={paginationModel}
           onPaginationModelChange={setPaginationModel}
           selectionMode={selectionMode}

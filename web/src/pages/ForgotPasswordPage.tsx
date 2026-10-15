@@ -37,7 +37,8 @@ export default function ForgotPasswordPage() {
   const siteQuery = useSiteInfo();
   const siteInfo = siteQuery.data;
 
-  if (isLoading || siteQuery.isLoading) return <AuthCardSkeleton />;
+  if (isLoading || siteQuery.isLoading)
+    return <AuthCardSkeleton fields={1} captcha={captchaQuery.isPending || captchaRequired} />;
 
   if (!siteInfo?.password_reset_enabled) {
     return (

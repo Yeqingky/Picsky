@@ -43,12 +43,15 @@ export function UploadQueueRow({
     return (
       <div aria-busy="true" aria-label={t(STATUS_LABEL_KEY[item.status])} className="w-full">
         <div className="flex items-center gap-4 rounded-lg border border-border p-3">
-          <Skeleton className="size-14 shrink-0 rounded-lg" />
-          <div className="flex flex-1 flex-col gap-1.5">
-            <Skeleton className="h-4 w-[45%]" />
-            <Skeleton className="h-1.5 w-full" />
+          <div className="flex w-14 shrink-0 justify-center">
+            <Skeleton className="size-4 rounded-sm" />
           </div>
-          <Skeleton className="h-5 w-16" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <Skeleton className="h-4 w-[45%] rounded-sm" />
+            <Skeleton className="h-3 w-20 rounded-sm" />
+          </div>
+          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="size-8 rounded-lg" />
         </div>
       </div>
     );

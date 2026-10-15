@@ -60,6 +60,7 @@ export interface DataTableProps<T> {
 
 const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [20, 50, 100];
 const SKELETON_ROWS = 5;
+const SKELETON_CELL_WIDTHS = ['w-2/3', 'w-3/5', 'w-4/5', 'w-1/2', 'w-3/4'];
 
 const ALIGN_CLASS: Record<NonNullable<DataTableColumn<unknown>['align']>, string> = {
   left: 'text-left',
@@ -164,6 +165,7 @@ export function DataTable<T>({
   const page = pagination?.page ?? 0;
   const pages = pagination ? Math.max(1, Math.ceil(pagination.total / pagination.pageSize)) : 1;
   const pageSizeOptions = pagination?.pageSizeOptions ?? DEFAULT_PAGE_SIZE_OPTIONS;
+  const initialLoading = loading && rows.length === 0;
 
   return (
     <div className={cn('w-full rounded-lg border bg-card', className)}>
@@ -172,12 +174,16 @@ export function DataTable<T>({
           <TableRow className="hover:bg-muted/50">
             {selectable && (
               <TableHead className="bg-muted/50 text-muted-foreground w-10">
-                <Checkbox
-                  checked={allSelected ? true : someSelected ? 'indeterminate' : false}
-                  onCheckedChange={toggleAll}
-                  disabled={visibleRows.length === 0}
-                  aria-label={t('common.action.selectAll')}
-                />
+                {initialLoading ? (
+                  <Skeleton className="size-4" />
+                ) : (
+                  <Checkbox
+                    checked={allSelected ? true : someSelected ? 'indeterminate' : false}
+                    onCheckedChange={toggleAll}
+                    disabled={visibleRows.length === 0}
+                    aria-label={t('common.action.selectAll')}
+                  />
+                )}
               </TableHead>
             )}
             {columns.map((column) => {
@@ -233,11 +239,32 @@ export function DataTable<T>({
                     <Skeleton className="size-4" />
                   </TableCell>
                 )}
-                {columns.map((column) => (
-                  <TableCell key={column.id}>
-                    <Skeleton className="h-4 w-full" />
-                  </TableCell>
-                ))}
+                {columns.map((column, columnIndex) => {
+                  return (
+                    <TableCell
+                      key={column.id}
+                      className={cn(ALIGN_CLASS[column.align ?? 'left'], column.className)}
+                    >
+                      {column.id === 'thumb' ? (
+                        <Skeleton className="size-12 rounded" />
+                      ) : column.id === 'actions' ? (
+                        <div className="flex justify-end gap-2">
+                          <Skeleton className="size-8 rounded-lg" />
+                          <Skeleton className="size-8 rounded-lg" />
+                        </div>
+                      ) : (
+                        <Skeleton
+                          className={cn(
+                            'h-4 rounded-sm',
+                            SKELETON_CELL_WIDTHS[
+                              (rowIndex * 2 + columnIndex) % SKELETON_CELL_WIDTHS.length
+                            ],
+                          )}
+                        />
+                      )}
+                    </TableCell>
+                  );
+                })}
               </TableRow>
             ))
           ) : visibleRows.length === 0 ? (
@@ -281,53 +308,69 @@ export function DataTable<T>({
 
       {pagination && (
         <div className="flex flex-col gap-2 border-t px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground text-sm">
-              {t('common.table.total', { count: pagination.total })}
-            </span>
-            <Select
-              value={String(pagination.pageSize)}
-              onValueChange={(value) => pagination.onPageSizeChange(Number.parseInt(value, 10))}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-[130px]"
-                aria-label={t('common.table.pageSize', { count: pagination.pageSize })}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {pageSizeOptions.map((option) => (
-                  <SelectItem key={option} value={String(option)}>
-                    {t('common.table.pageSize', { count: option })}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={t('common.table.prev')}
-              disabled={page <= 0}
-              onClick={() => pagination.onPageChange(page - 1)}
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <span className="text-muted-foreground text-sm">
-              {t('common.table.pageOf', { page: page + 1, pages })}
-            </span>
-            <Button
-              variant="outline"
-              size="icon-sm"
-              aria-label={t('common.table.next')}
-              disabled={page >= pages - 1}
-              onClick={() => pagination.onPageChange(page + 1)}
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
+          {initialLoading ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <Skeleton className="h-4 w-16 rounded-sm" />
+                <Skeleton className="h-8 w-[130px] rounded-lg" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Skeleton className="size-8 rounded-lg" />
+                <Skeleton className="h-4 w-16 rounded-sm" />
+                <Skeleton className="size-8 rounded-lg" />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-muted-foreground text-sm">
+                  {t('common.table.total', { count: pagination.total })}
+                </span>
+                <Select
+                  value={String(pagination.pageSize)}
+                  onValueChange={(value) => pagination.onPageSizeChange(Number.parseInt(value, 10))}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="w-[130px]"
+                    aria-label={t('common.table.pageSize', { count: pagination.pageSize })}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pageSizeOptions.map((option) => (
+                      <SelectItem key={option} value={String(option)}>
+                        {t('common.table.pageSize', { count: option })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={t('common.table.prev')}
+                  disabled={page <= 0}
+                  onClick={() => pagination.onPageChange(page - 1)}
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
+                <span className="text-muted-foreground text-sm">
+                  {t('common.table.pageOf', { page: page + 1, pages })}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={t('common.table.next')}
+                  disabled={page >= pages - 1}
+                  onClick={() => pagination.onPageChange(page + 1)}
+                >
+                  <ChevronRight className="size-4" />
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
