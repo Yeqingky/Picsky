@@ -17,7 +17,7 @@
 
 services:
   picsky:
-    image: ghcr.io/yeqingky/Picsky:latest
+    image: ghcr.io/yeqingky/picsky:latest
     container_name: picsky
     restart: unless-stopped
     depends_on:

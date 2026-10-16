@@ -63,6 +63,7 @@ Picsky/
 ## 开发约定
 
 - Git 提交身份: 用户名 `YeqingKy`, 邮箱 `me@yeqing.im`.
+- GitHub Actions 容器工作流在所有分支 push 与 PR 上构建; 分支 push 发布 `ghcr.io/yeqingky/picsky:<短 hash>`, `vX.Y.Z` tag 发布版本 tag 与 `latest`; PR 仅构建不推送; GHCR 认证使用 `GITHUB_TOKEN`.
 - 不把 `README` 用作变更日志; 发布说明写入仓库根目录的 `.release-notes.md`, 并通过 `.git/info/exclude` 保持在本地忽略.
 - 存储适配器必须声明能力 (`delete`, `overwrite`, `stat`, `presign`, `multipart`); 新增驱动不得假设后端支持删除或覆盖, 上层按能力降级.
 - 魔法路径模板必须包含内容哈希变量或单个 `{seq}`; `rename` 从已入库匹配路径的最大序号之后分配, 扫描补录路径也占用序号; 未使用 `{seq}` 时冲突重命名追加 `-N`, 其他生成变量在重试中固定.
@@ -135,7 +136,7 @@ PICSKY_VERSION=0.1.0 ./scripts/build.sh picsky
 ```sh
 cp .env.example .env                 # 至少填写 PICSKY_SECRET_KEY (openssl rand -base64 32) 与 POSTGRES_PASSWORD
 mkdir -p data                        # 应用容器以 uid 1000 运行, 需要可写 ./data
-docker compose up -d                 # 生产: 使用 ghcr.io/yeqingky/Picsky:latest + 编排内 PostgreSQL
+docker compose up -d                 # 生产: 使用 ghcr.io/yeqingky/picsky:latest + 编排内 PostgreSQL
 docker compose -f docker-compose-dev.yml up -d --build   # 开发: 本地构建
 ```
 

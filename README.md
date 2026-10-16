@@ -10,7 +10,7 @@
 ```sh
 cp .env.example .env                 # 至少填写 PICSKY_SECRET_KEY 与 POSTGRES_PASSWORD
 mkdir -p data                        # 应用容器以 uid 1000 运行, 需要可写 ./data
-docker compose up -d                 # 使用 ghcr.io/yeqingky/Picsky:latest + 编排内 PostgreSQL
+docker compose up -d                 # 使用 ghcr.io/yeqingky/picsky:latest + 编排内 PostgreSQL
 # 或本地构建
 docker compose -f docker-compose-dev.yml up -d --build
 ```
