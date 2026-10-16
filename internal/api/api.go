@@ -42,6 +42,7 @@ func New(svc *service.Services, cfg *config.Config, log *slog.Logger) *Server {
 // Register 注册全部路由.
 func (s *Server) Register(router *gin.Engine) {
 	router.Use(func(c *gin.Context) {
+		c.Header("Referrer-Policy", "no-referrer")
 		clientip.SetContext(c, s.svc.Settings.String(clientip.SettingKey))
 		c.Next()
 	}, s.recoverer(), s.limitBody())

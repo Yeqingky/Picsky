@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link as RouterLink, useSearchParams } from 'react-router';
+import { Link as RouterLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ApiError, authApi } from '../api';
 import { Alert, AlertDescription } from '../components/ui/alert';
@@ -13,13 +13,23 @@ const MIN_PASSWORD_LENGTH = 8;
 /** 通过邮件令牌设置新密码; 后端在同一事务中关闭 TOTP (/reset-password). */
 export default function ResetPasswordPage() {
   const { t } = useTranslation();
-  const [searchParams] = useSearchParams();
-  const token = (searchParams.get('token') ?? '').trim();
+  const location = useLocation();
+  const [token] = useState(
+    () => new URLSearchParams(location.hash.slice(1)).get('token')?.trim() ?? '',
+  );
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  useLayoutEffect(() => {
+    if (token === '' || window.location.hash === '') return;
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}${window.location.search}`,
+    );
+  }, [token]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

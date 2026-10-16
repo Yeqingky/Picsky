@@ -974,7 +974,7 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("SMTP 测试服务未收到找回邮件")
 	}
-	const linkPrefix = "https://picsky.example/reset-password?token="
+	const linkPrefix = "https://picsky.example/reset-password#token="
 	linkStart := strings.Index(message, linkPrefix)
 	if linkStart < 0 {
 		t.Fatalf("邮件缺少密码重置链接: %s", message)
@@ -1260,6 +1260,52 @@ func TestUploadImagesAndKeys(t *testing.T) {
 	overview := s.decode(stats)
 	if overview["image_count"].(float64) < 1 {
 		t.Errorf("概览图片数不正确: %v", overview)
+	}
+}
+
+func TestUploadCheckDoesNotExposeOtherUsersRecord(t *testing.T) {
+	s := newServer(t)
+	ownerCookie, policyID := s.bootstrap()
+
+	uploaded := s.upload("/api/v1/upload", "private.png", pngContent(t, 19), map[string]string{
+		"policy_id": fmt.Sprint(policyID),
+	}, map[string]string{}, []*http.Cookie{ownerCookie})
+	if uploaded.Status != http.StatusCreated {
+		t.Fatalf("上传测试图片失败: %d %s", uploaded.Status, string(uploaded.Body))
+	}
+	record := s.decode(uploaded)
+	hashes, ok := record["hashes"].(map[string]any)
+	if !ok {
+		t.Fatalf("上传响应缺少哈希: %v", record["hashes"])
+	}
+	sha256, ok := hashes["sha256"].(string)
+	if !ok || sha256 == "" {
+		t.Fatalf("上传响应缺少 SHA-256: %v", hashes["sha256"])
+	}
+
+	var owner model.User
+	if err := s.db.Where("email = ?", "admin@example.com").First(&owner).Error; err != nil {
+		t.Fatalf("读取记录所有者失败: %v", err)
+	}
+	userLogin, userCookie := s.registerAndLogin("other", "other@example.com", "password123")
+	userID := int64(s.decode(userLogin)["id"].(float64))
+	if err := s.db.Model(&model.User{}).Where("id = ?", userID).Update("group_id", owner.GroupID).Error; err != nil {
+		t.Fatalf("授权测试用户使用同一策略失败: %v", err)
+	}
+
+	check := s.json(http.MethodPost, "/api/v1/upload/check", map[string]any{
+		"sha256":    sha256,
+		"policy_id": policyID,
+	}, []*http.Cookie{userCookie})
+	if check.Status != http.StatusOK {
+		t.Fatalf("跨用户秒传检查失败: %d %s", check.Status, string(check.Body))
+	}
+	result := s.decode(check)
+	if result["exists"] != false {
+		t.Errorf("跨用户记录应视为当前用户不存在: %s", string(check.Body))
+	}
+	if _, exists := result["record"]; exists {
+		t.Errorf("响应不得包含其他用户的记录 ID、URL 或大小: %s", string(check.Body))
 	}
 }
 
@@ -2043,6 +2089,16 @@ func TestFrontendFallback(t *testing.T) {
 	}
 	if len(result.Body) == 0 {
 		t.Error("SPA 回落应返回 HTML 内容")
+	}
+}
+
+func TestReferrerPolicyHeader(t *testing.T) {
+	s := newServer(t)
+	for _, path := range []string{"/api/v1/health", "/api/v1/not-found", "/reset-password", "/lsky/not-found"} {
+		result := s.raw(http.MethodGet, path, nil, nil, nil)
+		if got := result.Header.Get("Referrer-Policy"); got != "no-referrer" {
+			t.Errorf("%s Referrer-Policy = %q, want no-referrer", path, got)
+		}
 	}
 }
 

@@ -578,14 +578,14 @@ type CheckResult struct {
 	Record *CheckRecord `json:"record,omitempty"`
 }
 
-// CheckRecord 是秒传检查返回的既有记录摘要.
+// CheckRecord 是秒传检查返回的当前用户记录摘要.
 type CheckRecord struct {
 	ID   int64  `json:"id"`
 	URL  string `json:"url"`
 	Size int64  `json:"size"`
 }
 
-// Check 秒传检查: 同策略下是否存在相同 sha256 的记录.
+// Check 秒传检查: 仅返回当前用户在同策略下相同 sha256 的记录.
 func (u *Upload) Check(principal *Principal, sha256 string, policyID *int64) (*CheckResult, error) {
 	sum := strings.ToLower(strings.TrimSpace(sha256))
 	if len(sum) != 64 || !isHex(sum) {
@@ -599,7 +599,7 @@ func (u *Upload) Check(principal *Principal, sha256 string, policyID *int64) (*C
 		return nil, err
 	}
 	var existing model.Image
-	err = u.db.Where("policy_id = ? AND sha256 = ? AND kind = ?", policy.ID, sum, model.KindImage).
+	err = u.db.Where("policy_id = ? AND sha256 = ? AND user_id = ? AND kind = ?", policy.ID, sum, principal.User.ID, model.KindImage).
 		Order("id ASC").First(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return &CheckResult{Exists: false}, nil

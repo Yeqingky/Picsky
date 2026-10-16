@@ -775,7 +775,7 @@ func (a *Auth) RequestPasswordReset(ctx context.Context, email, captchaToken, ip
 
 	token := a.signPasswordResetToken(user.ID, user.PasswordHash, time.Now().Add(PasswordResetTTL))
 	siteName := a.settings.String("site_name")
-	link := siteURL + "/reset-password?token=" + token
+	link := siteURL + "/reset-password#token=" + token
 	body := fmt.Sprintf(
 		"你好 %s:\n\n请访问以下链接重置 %s 密码 (30 分钟内有效):\n%s\n\n完成重置后, 两步验证 (TOTP) 将被关闭. 如果这不是你的操作, 请忽略本邮件.\n",
 		user.Username, siteName, link,
