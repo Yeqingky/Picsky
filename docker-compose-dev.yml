@@ -1,7 +1,7 @@
 # Picsky 本地开发编排: 从当前源码构建镜像 + 随编排提供的 PostgreSQL (数据目录挂载到宿主机).
 #
 # 用法:
-#   cp .env.example .env      # 至少填写 PICSKY_SECRET_KEY 与 POSTGRES_PASSWORD
+#   cp .env.example .env      # 至少填写 PICSKY_SECRET_KEY; 生产部署前请更换默认 PostgreSQL 密码
 #   mkdir -p data             # 应用容器以 uid 1000 运行, 需要可写 ./data
 #   docker compose -f docker-compose-dev.yml up -d --build
 #

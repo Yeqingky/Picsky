@@ -1,15 +1,15 @@
 # Picsky 生产部署编排: 预构建镜像 + 随编排提供的 PostgreSQL, 数据目录全部落在宿主机磁盘.
 #
 # 用法:
-#   cp .env.example .env      # 至少填写 PICSKY_SECRET_KEY 与 POSTGRES_PASSWORD
-#   mkdir -p data             # 应用容器以 uid 1000 运行, 需要可写 ./data (存放上传临时文件)
+#   cp .env.example .env      # 至少填写 PICSKY_SECRET_KEY; 生产部署前请更换默认 PostgreSQL 密码
+#   mkdir -p data postgres_data
 #   docker compose pull && docker compose up -d
 #
 # 目录与权限:
 #   ./data            -> picsky 容器的 /data (上传临时文件); 非 1000 用户请 chown 1000:1000 data
-#   ./data/postgres  -> postgres 容器的 /var/lib/postgresql (镜像默认 PGDATA 位于其下);
-#                        目录名带 _ 前缀: Go 工具链忽略 `_` 开头的目录, 保证仓库内 go build/go test 不受容器数据影响
-#                        官方镜像以 root 启动时会自动创建并 chown 该目录, 无需手工处理
+#   ./postgres_data -> postgres 容器的 /var/lib/postgresql (镜像默认 PGDATA 位于其下);
+#                      PostgreSQL 用户默认 UID 为 70; 初始化属主见下方 volumes 注释
+#                      使用非默认镜像时, 先确认 postgres 用户 UID
 #
 # 数据库:
 #   默认使用本编排内的 PostgreSQL (PICSKY_DB_DRIVER=postgres);
@@ -24,22 +24,23 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      # 只绑定回环: 对外入口由反向代理 (Caddy / Nginx) 终止 TLS 后转发, 与服务自身的监听约定一致.
       - "127.0.0.1:5214:5214"
     environment:
-      # 凭据加密主密钥, 必填: openssl rand -base64 32
       PICSKY_SECRET_KEY: ${PICSKY_SECRET_KEY:?请在 .env 中设置 PICSKY_SECRET_KEY (32 字节 base64)}
       PICSKY_DB_DRIVER: ${PICSKY_DB_DRIVER:-postgres}
       PICSKY_DB_DSN: ${PICSKY_DB_DSN:-host=postgres port=5432 user=${POSTGRES_USER:-picsky} password=${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD} dbname=${POSTGRES_DB:-picsky} sslmode=disable}
-      PICSKY_LISTEN: 0.0.0.0:5214
+      PICSKY_LISTEN: ${PICSKY_LISTEN:-0.0.0.0:5214}
       PICSKY_API_PREFIX: ${PICSKY_API_PREFIX:-/api/v1}
       PICSKY_LSKY_COMPAT_ENABLED: ${PICSKY_LSKY_COMPAT_ENABLED:-true}
       PICSKY_LSKY_COMPAT_PREFIX: ${PICSKY_LSKY_COMPAT_PREFIX:-/lsky}
-      PICSKY_TEMP_DIR: /data/tmp
+      PICSKY_TEMP_DIR: ${PICSKY_TEMP_DIR:-/data/tmp}
       PICSKY_UPLOAD_MEMORY_LIMIT: ${PICSKY_UPLOAD_MEMORY_LIMIT:-8388608}
       PICSKY_LOG_LEVEL: ${PICSKY_LOG_LEVEL:-info}
     volumes:
       - ./data:/data
+      # docker run --rm postgres:18-alpine id postgres
+      # mkdir -p ./data
+      # chown 1000:1000 ./data && chmod 750 ./data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5214/api/v1/health"]
       interval: 30s
@@ -53,12 +54,19 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-picsky}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-picsky}
       POSTGRES_DB: ${POSTGRES_DB:-picsky}
     volumes:
-      - ./data/postgres:/var/lib/postgresql
+      - ./postgres_data:/var/lib/postgresql
+      # docker run --rm postgres:18-alpine id postgres
+      # mkdir -p ./postgres_data
+      # chown 70:70 ./postgres_data && chmod 750 ./postgres_data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-picsky} -d $${POSTGRES_DB:-picsky}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER:-picsky} -d $${POSTGRES_DB:-picsky}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 6

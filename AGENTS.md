@@ -134,12 +134,12 @@ PICSKY_VERSION=0.1.0 ./scripts/build.sh picsky
 容器:
 
 ```sh
-cp .env.example .env                 # 至少填写 PICSKY_SECRET_KEY (openssl rand -base64 32) 与 POSTGRES_PASSWORD
-mkdir -p data                        # 应用容器以 uid 1000 运行, 需要可写 ./data
+cp .env.example .env                 # 至少填写 PICSKY_SECRET_KEY (openssl rand -base64 32); 生产部署前请更换默认 PostgreSQL 密码
+mkdir -p data postgres_data          # 应用数据目录需 uid 1000; PostgreSQL 数据目录按镜像中 postgres 用户 UID 设置
 docker compose up -d                 # 生产: 使用 ghcr.io/yeqingky/picsky:latest + 编排内 PostgreSQL
 docker compose -f docker-compose-dev.yml up -d --build   # 开发: 本地构建
 ```
 
-编排细节: 两个编排都包含 `postgres` 服务 (`postgres:18-alpine`), 数据目录挂载在 `./data/_postgres`, 应用通过 `depends_on` 等待其健康; 应用自身的 `./data` 用于上传临时文件 (`/data/tmp`). 默认使用 PostgreSQL, 设置 `PICSKY_DB_DRIVER=sqlite` 与 `PICSKY_DB_DSN=/data/picsky.db` 可切回单文件 SQLite.
+生产编排使用 `ghcr.io/yeqingky/picsky:latest` 与 `postgres:18-alpine`, 宿主端口绑定 `127.0.0.1:5214:5214`, PostgreSQL 数据目录为 `./postgres_data`; 开发编排使用本地应用镜像与 `postgres:18-alpine`, 端口为 `5214:5214`, PostgreSQL 数据目录为 `./data/postgres`. 两者将应用数据挂载到 `./data`; `.env.example` 中 PostgreSQL 默认密码为 `picsky`, 实际部署前必须更换. 默认使用 PostgreSQL, 设置 `PICSKY_DB_DRIVER=sqlite` 与 `PICSKY_DB_DSN=/data/picsky.db` 可切回单文件 SQLite.
 
 运行要求: `PICSKY_SECRET_KEY` 必填 (32 字节 base64); 其余环境变量见 `docs/tech-stack.md` 第 7 节与 `.env.example`.

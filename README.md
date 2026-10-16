@@ -8,8 +8,8 @@
 ## 快速开始
 
 ```sh
-cp .env.example .env                 # 至少填写 PICSKY_SECRET_KEY 与 POSTGRES_PASSWORD
-mkdir -p data                        # 应用容器以 uid 1000 运行, 需要可写 ./data
+cp .env.example .env                 # 至少填写 PICSKY_SECRET_KEY; 生产部署前请更换默认 PostgreSQL 密码
+mkdir -p data postgres_data          # picsky 容器以 uid 1000 运行, PostgreSQL 数据目录需单独设置属主
 docker compose up -d                 # 使用 ghcr.io/yeqingky/picsky:latest + 编排内 PostgreSQL
 # 或本地构建
 docker compose -f docker-compose-dev.yml up -d --build
@@ -20,11 +20,11 @@ docker compose -f docker-compose-dev.yml up -d --build
 | 宿主目录 | 容器内 | 用途 |
 | --- | --- | --- |
 | `./data` | `/data` | 上传处理期临时文件 (`/data/tmp`); 非 1000 用户请 `sudo chown 1000:1000 data` |
-| `./data/_postgres` | `/var/lib/postgresql` | PostgreSQL 数据 (镜像默认 PGDATA 位于其下); 官方镜像以 root 启动时会自动创建并修正属主; `_` 前缀让 Go 工具链忽略该目录 |
+| `./postgres_data` | `/var/lib/postgresql` | PostgreSQL 数据; 镜像中的 `postgres` 用户默认 uid 70, 启动前按实际镜像确认并设置目录属主 (`sudo chown 70:70 postgres_data && sudo chmod 750 postgres_data`) |
 
 容器编排默认使用 PostgreSQL (`PICSKY_DB_DRIVER=postgres`); 切回单文件 SQLite 时同时设置 `PICSKY_DB_DRIVER=sqlite` 与 `PICSKY_DB_DSN=/data/picsky.db`.
 
-启动后访问 `http://127.0.0.1:5214`, 首个注册账号自动成为管理员.
+容器生产编排访问 `http://127.0.0.1:5214`; 开发编排与本机运行默认也使用 `http://127.0.0.1:5214`. 首个注册账号自动成为管理员.
 
 本地开发 (不经容器, 默认 SQLite):
 

@@ -2,6 +2,7 @@
 .gitignore
 .github
 data
+/postgres_data
 dist
 picsky
 *.db
