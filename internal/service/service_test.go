@@ -1245,6 +1245,41 @@ func TestRegisterEmailAllowlist(t *testing.T) {
 	}
 }
 
+func TestResendVerificationRateLimitsByUserAndIP(t *testing.T) {
+	f := newFixture(t)
+	if err := f.svc.Settings.Update(map[string]string{
+		"smtp_host": "smtp.example.com",
+		"smtp_from": "noreply@example.com",
+	}); err != nil {
+		t.Fatalf("配置 SMTP 失败: %v", err)
+	}
+
+	user := &model.User{ID: 1001, Username: "resend", Email: "resend@example.com"}
+	for attempt := range 3 {
+		if err := f.svc.Auth.ResendVerification(user, "192.0.2.10"); err != nil {
+			t.Fatalf("第 %d 次验证邮件请求失败: %v", attempt+1, err)
+		}
+	}
+	if err := f.svc.Auth.ResendVerification(user, "192.0.2.10"); !errors.Is(err, apperr.ErrRateLimited) {
+		t.Fatalf("同一账号第 4 次请求应被限流, 实际错误: %v", err)
+	}
+
+	for attempt := range 10 {
+		ipUser := &model.User{
+			ID:       int64(2000 + attempt),
+			Username: fmt.Sprintf("resend%d", attempt),
+			Email:    fmt.Sprintf("resend%d@example.com", attempt),
+		}
+		if err := f.svc.Auth.ResendVerification(ipUser, "198.51.100.20"); err != nil {
+			t.Fatalf("同一 IP 第 %d 个账号的请求失败: %v", attempt+1, err)
+		}
+	}
+	ipLimitedUser := &model.User{ID: 3000, Username: "last", Email: "last@example.com"}
+	if err := f.svc.Auth.ResendVerification(ipLimitedUser, "198.51.100.20"); !errors.Is(err, apperr.ErrRateLimited) {
+		t.Fatalf("同一 IP 第 11 次请求应被限流, 实际错误: %v", err)
+	}
+}
+
 func TestAuthRegisterLoginAndTotp(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -1312,7 +1347,15 @@ func TestAuthRegisterLoginAndTotp(t *testing.T) {
 	if secret == "" || !strings.HasPrefix(otpauthURL, "otpauth://") {
 		t.Fatalf("TOTP 生成结果不正确: %q %q", secret, otpauthURL)
 	}
-	if err := f.svc.Auth.TOTPEnable(user.ID, secret, "000000", "127.0.0.1", "test"); err == nil {
+	validCode, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		t.Fatalf("生成 TOTP 验证码失败: %v", err)
+	}
+	invalidCode := "000000"
+	if invalidCode == validCode {
+		invalidCode = "000001"
+	}
+	if err := f.svc.Auth.TOTPEnable(user.ID, secret, invalidCode, "password123", "127.0.0.1", "test"); err == nil {
 		t.Error("错误的 TOTP 验证码应被拒绝")
 	}
 }
@@ -1500,8 +1543,18 @@ func TestAuthLoginTwoStepTotpChallenge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("生成 TOTP 验证码失败: %v", err)
 	}
-	if err := f.svc.Auth.TOTPEnable(f.admin.User.ID, secret, code, ip, userAgent); err != nil {
+	if err := f.svc.Auth.TOTPEnable(f.admin.User.ID, secret, code, "wrong-password", ip, userAgent); !errors.Is(err, apperr.ErrUnauthorized) {
+		t.Fatalf("启用 TOTP 必须验证当前密码, 实际错误: %v", err)
+	}
+	if err := f.svc.Auth.TOTPEnable(f.admin.User.ID, secret, code, "password123", ip, userAgent); err != nil {
 		t.Fatalf("启用 TOTP 失败: %v", err)
+	}
+	var enabledUser model.User
+	if err := f.database.First(&enabledUser, f.admin.User.ID).Error; err != nil {
+		t.Fatalf("读取启用后的用户失败: %v", err)
+	}
+	if enabledUser.TOTPLastCounter <= 0 {
+		t.Fatalf("启用验证码计数器未记录: %d", enabledUser.TOTPLastCounter)
 	}
 
 	_, err = f.svc.Auth.Login(ctx, service.LoginInput{
@@ -1516,6 +1569,10 @@ func TestAuthLoginTwoStepTotpChallenge(t *testing.T) {
 	if !ok || challenge == "" {
 		t.Fatalf("首次登录未返回验证挑战: %+v", apiErr.Details)
 	}
+	loginCode, err := totp.GenerateCode(secret, time.Now().UTC().Add(30*time.Second))
+	if err != nil {
+		t.Fatalf("生成下一周期 TOTP 验证码失败: %v", err)
+	}
 
 	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{
 		LoginChallenge: challenge,
@@ -1525,7 +1582,7 @@ func TestAuthLoginTwoStepTotpChallenge(t *testing.T) {
 	}
 
 	wrongCode := "000000"
-	if wrongCode == code {
+	if wrongCode == loginCode {
 		wrongCode = "000001"
 	}
 	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{
@@ -1535,10 +1592,7 @@ func TestAuthLoginTwoStepTotpChallenge(t *testing.T) {
 		t.Fatal("错误的动态口令应被拒绝")
 	}
 
-	code, err = totp.GenerateCode(secret, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("重新生成 TOTP 验证码失败: %v", err)
-	}
+	code = loginCode
 	user, err := f.svc.Auth.Login(ctx, service.LoginInput{
 		LoginChallenge: challenge,
 		TOTPCode:       code,
@@ -1554,6 +1608,24 @@ func TestAuthLoginTwoStepTotpChallenge(t *testing.T) {
 		TOTPCode:       code,
 	}, ip, userAgent); err == nil {
 		t.Fatal("成功使用过的登录挑战不应重放")
+	}
+
+	_, err = f.svc.Auth.Login(ctx, service.LoginInput{
+		Email:    "admin@example.com",
+		Password: "password123",
+	}, ip, userAgent)
+	if !errors.As(err, &apiErr) || apiErr.Details["totp_required"] != true {
+		t.Fatalf("重放检查登录未返回新的验证挑战: %v", err)
+	}
+	replayChallenge, ok := apiErr.Details["login_challenge"].(string)
+	if !ok || replayChallenge == "" {
+		t.Fatalf("重放检查缺少登录挑战: %+v", apiErr.Details)
+	}
+	if _, err := f.svc.Auth.Login(ctx, service.LoginInput{
+		LoginChallenge: replayChallenge,
+		TOTPCode:       code,
+	}, ip, userAgent); !errors.Is(err, apperr.ErrUnauthorized) {
+		t.Fatalf("已消费的动态口令必须拒绝重放, 实际错误: %v", err)
 	}
 }
 

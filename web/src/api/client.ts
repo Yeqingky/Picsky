@@ -67,6 +67,7 @@ const SILENT_401_PATHS = [
   '/auth/register',
   '/auth/password',
   '/auth/totp/disable',
+  '/auth/totp/enable',
 ];
 
 export const api: AxiosInstance = axios.create({

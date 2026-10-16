@@ -595,6 +595,44 @@ func TestUnverifiedRegistrationUsesReadOnlyGroupUntilEmailVerification(t *testin
 		t.Fatalf("邮箱验证后应恢复正常状态与原用户组: %+v", activeUser)
 	}
 }
+
+func TestResendVerificationRateLimitAPI(t *testing.T) {
+	s := newServer(t)
+	if err := s.svc.Settings.Update(map[string]string{
+		"email_verification_enabled": "true",
+		"smtp_host":                  "smtp.example.com",
+		"smtp_from":                  "noreply@example.com",
+	}); err != nil {
+		t.Fatalf("配置邮箱验证与 SMTP 失败: %v", err)
+	}
+	registration := s.json(http.MethodPost, "/api/v1/auth/register", map[string]string{
+		"username": "resendUser",
+		"email":    "resend@example.com",
+		"password": "password123",
+	}, nil)
+	if registration.Status != http.StatusAccepted {
+		t.Fatalf("注册未验证账号失败: %d %s", registration.Status, string(registration.Body))
+	}
+	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"identifier": "resend@example.com",
+		"password":   "password123",
+	}, nil)
+	if login.Status != http.StatusOK {
+		t.Fatalf("未验证账号登录失败: %d %s", login.Status, string(login.Body))
+	}
+	cookie := s.sessionCookie(login)
+	for attempt := range 3 {
+		resend := s.json(http.MethodPost, "/api/v1/auth/resend-verification", nil, []*http.Cookie{cookie})
+		if resend.Status != http.StatusAccepted {
+			t.Fatalf("第 %d 次重发失败: %d %s", attempt+1, resend.Status, string(resend.Body))
+		}
+	}
+	limited := s.json(http.MethodPost, "/api/v1/auth/resend-verification", nil, []*http.Cookie{cookie})
+	if limited.Status != http.StatusTooManyRequests {
+		t.Fatalf("第 4 次重发应返回 429, 实际 %d %s", limited.Status, string(limited.Body))
+	}
+}
+
 func TestClientIPSourceDiscoveryAndLoginRateLimit(t *testing.T) {
 	s := newServer(t)
 
@@ -695,6 +733,55 @@ func TestClientIPSourceDiscoveryAndLoginRateLimit(t *testing.T) {
 	}
 	if latestFailure.IP != "198.51.100.20" {
 		t.Fatalf("审计 IP 应使用设置的 X-Real-IP, 得到 %q", latestFailure.IP)
+	}
+}
+
+func TestSessionCookieSecureUsesForwardedProto(t *testing.T) {
+	s := newServer(t)
+	if siteURL := s.svc.Settings.String("site_url"); siteURL != "" {
+		t.Fatalf("测试要求 site_url 默认为空, 得到 %q", siteURL)
+	}
+	register := s.json(http.MethodPost, "/api/v1/auth/register", map[string]string{
+		"username": "proxycookie",
+		"email":    "proxycookie@example.com",
+		"password": "password123",
+	}, nil)
+	if register.Status != http.StatusAccepted {
+		t.Fatalf("注册测试用户失败: %d %s", register.Status, string(register.Body))
+	}
+
+	loginRequest := func(headers map[string]string) *response {
+		return s.raw(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"identifier":"proxycookie@example.com","password":"password123"}`), headers, nil)
+	}
+	setCookieHasSecure := func(result *response) bool {
+		for _, value := range result.Header.Values("Set-Cookie") {
+			if strings.HasPrefix(value, "picsky_session=") && strings.Contains(strings.ToLower(value), "; secure") {
+				return true
+			}
+		}
+		return false
+	}
+
+	httpProxy := loginRequest(map[string]string{
+		"Content-Type":      "application/json",
+		"X-Forwarded-Proto": "http",
+	})
+	if httpProxy.Status != http.StatusOK {
+		t.Fatalf("HTTP 登录失败: %d %s", httpProxy.Status, string(httpProxy.Body))
+	}
+	if setCookieHasSecure(httpProxy) {
+		t.Fatal("HTTP 代理请求不应设置 Secure")
+	}
+
+	httpsProxy := loginRequest(map[string]string{
+		"Content-Type":      "application/json",
+		"X-Forwarded-Proto": "https",
+	})
+	if httpsProxy.Status != http.StatusOK {
+		t.Fatalf("HTTPS 代理登录失败: %d %s", httpsProxy.Status, string(httpsProxy.Body))
+	}
+	if !setCookieHasSecure(httpsProxy) {
+		t.Fatalf("site_url 为空时 HTTPS 代理下会话 cookie 必须带 Secure: %v", httpsProxy.Header.Values("Set-Cookie"))
 	}
 }
 
@@ -853,7 +940,7 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("生成 TOTP 验证码失败: %v", err)
 	}
-	if err := s.svc.Auth.TOTPEnable(userID, secret, code, "127.0.0.1", "test"); err != nil {
+	if err := s.svc.Auth.TOTPEnable(userID, secret, code, "old-password123", "127.0.0.1", "test"); err != nil {
 		t.Fatalf("启用 TOTP 失败: %v", err)
 	}
 	beforeResetLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
@@ -904,6 +991,13 @@ func TestPasswordResetDisablesTotp(t *testing.T) {
 	if reset.Status != http.StatusNoContent {
 		t.Fatalf("重置密码失败: %d %s", reset.Status, string(reset.Body))
 	}
+	var resetUser model.User
+	if err := s.db.Where("email = ?", "reset@example.com").First(&resetUser).Error; err != nil {
+		t.Fatalf("读取密码重置后的用户失败: %v", err)
+	}
+	if resetUser.TOTPSecret != "" || resetUser.TOTPLastCounter != 0 {
+		t.Fatalf("密码重置应清除 TOTP 秘钥和已消费计数器: %+v", resetUser)
+	}
 	if stale := s.raw(http.MethodGet, "/api/v1/auth/me", nil, nil, []*http.Cookie{registeredCookie}); stale.Status != http.StatusUnauthorized {
 		t.Errorf("密码重置后旧会话应失效, 实际 %d %s", stale.Status, string(stale.Body))
 	}
@@ -943,9 +1037,18 @@ func TestLoginTwoStepTotpAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("生成 TOTP 验证码失败: %v", err)
 	}
+	wrongPassword := s.json(http.MethodPost, "/api/v1/auth/totp/enable", map[string]any{
+		"secret":   secret,
+		"code":     code,
+		"password": "wrong-password",
+	}, []*http.Cookie{cookie})
+	if wrongPassword.Status != http.StatusUnauthorized {
+		t.Fatalf("错误的当前密码应拒绝启用 TOTP, 实际 %d %s", wrongPassword.Status, string(wrongPassword.Body))
+	}
 	enabled := s.json(http.MethodPost, "/api/v1/auth/totp/enable", map[string]any{
-		"secret": secret,
-		"code":   code,
+		"secret":   secret,
+		"code":     code,
+		"password": "password123",
 	}, []*http.Cookie{cookie})
 	if enabled.Status != http.StatusNoContent {
 		t.Fatalf("启用 TOTP 失败: %d %s", enabled.Status, string(enabled.Body))
@@ -967,7 +1070,7 @@ func TestLoginTwoStepTotpAPI(t *testing.T) {
 		t.Fatalf("首次响应缺少登录挑战: %s", string(first.Body))
 	}
 
-	code, err = totp.GenerateCode(secret, time.Now().UTC())
+	code, err = totp.GenerateCode(secret, time.Now().UTC().Add(30*time.Second))
 	if err != nil {
 		t.Fatalf("重新生成 TOTP 验证码失败: %v", err)
 	}
@@ -979,6 +1082,26 @@ func TestLoginTwoStepTotpAPI(t *testing.T) {
 		t.Fatalf("第二步登录失败: %d %s", second.Status, string(second.Body))
 	}
 	s.sessionCookie(second)
+
+	replayLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "two-step@example.com",
+		"password":   "password123",
+	}, nil)
+	replayDetails, ok := s.decode(replayLogin)["details"].(map[string]any)
+	if replayLogin.Status != http.StatusUnauthorized || !ok || replayDetails["totp_required"] != true {
+		t.Fatalf("重放检查登录未创建新的 TOTP 挑战: %d %s", replayLogin.Status, string(replayLogin.Body))
+	}
+	replayChallenge, ok := replayDetails["login_challenge"].(string)
+	if !ok || replayChallenge == "" {
+		t.Fatalf("重放检查缺少登录挑战: %s", string(replayLogin.Body))
+	}
+	replay := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"login_challenge": replayChallenge,
+		"totp":            code,
+	}, nil)
+	if replay.Status != http.StatusUnauthorized {
+		t.Fatalf("已消费的动态口令必须拒绝重放, 实际 %d %s", replay.Status, string(replay.Body))
+	}
 }
 
 func TestUploadImagesAndKeys(t *testing.T) {

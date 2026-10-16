@@ -118,6 +118,7 @@ type User struct {
 	Status          int16      `gorm:"not null;default:0" json:"status"`
 	SessionVersion  int64      `gorm:"not null;default:1" json:"-"`
 	TOTPSecret      string     `gorm:"size:255" json:"-"`
+	TOTPLastCounter int64      `gorm:"not null;default:0" json:"-"`
 	LastLoginAt     *time.Time `json:"last_login_at"`
 	LastLoginIP     string     `gorm:"size:45" json:"last_login_ip"`
 	CreatedAt       time.Time  `gorm:"not null" json:"created_at"`

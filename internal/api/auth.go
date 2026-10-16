@@ -226,14 +226,15 @@ func (s *Server) totpSetup(c *gin.Context) {
 func (s *Server) totpEnable(c *gin.Context) {
 	principal := middleware.Principal(c)
 	var payload struct {
-		Secret string `json:"secret"`
-		Code   string `json:"code"`
+		Secret   string `json:"secret"`
+		Code     string `json:"code"`
+		Password string `json:"password"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
 		return
 	}
-	if err := s.svc.Auth.TOTPEnable(principal.User.ID, payload.Secret, payload.Code, clientIP(c), userAgent(c)); err != nil {
+	if err := s.svc.Auth.TOTPEnable(principal.User.ID, payload.Secret, payload.Code, payload.Password, clientIP(c), userAgent(c)); err != nil {
 		s.fail(c, err)
 		return
 	}
@@ -315,8 +316,13 @@ func (s *Server) resetPassword(c *gin.Context) {
 // resendVerification 将邮箱验证邮件放入异步发送队列.
 func (s *Server) resendVerification(c *gin.Context) {
 	principal := middleware.Principal(c)
-	if err := s.svc.Auth.QueueVerification(principal.User); err != nil {
-		s.fail(c, apperr.ErrBackend.WithMessage("排队验证邮件失败: "+err.Error()))
+	if err := s.svc.Auth.ResendVerification(principal.User, clientIP(c)); err != nil {
+		var apiErr *apperr.Error
+		if errors.As(err, &apiErr) {
+			s.fail(c, err)
+		} else {
+			s.fail(c, apperr.ErrBackend.WithMessage("排队验证邮件失败: "+err.Error()))
+		}
 		return
 	}
 	c.Status(http.StatusAccepted)
@@ -324,7 +330,11 @@ func (s *Server) resendVerification(c *gin.Context) {
 
 // setSessionCookie 写入或清除会话 cookie.
 func (s *Server) setSessionCookie(c *gin.Context, token string, maxAge int) {
-	secure := c.Request.TLS != nil || strings.HasPrefix(strings.ToLower(s.svc.Settings.String("site_url")), "https://")
+	siteURL := strings.TrimSpace(s.svc.Settings.String("site_url"))
+	secureSiteURL := len(siteURL) >= len("https://") && strings.EqualFold(siteURL[:len("https://")], "https://")
+	// The reverse proxy must overwrite X-Forwarded-Proto and keep the application port private.
+	secureProxy := strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")), "https")
+	secure := c.Request.TLS != nil || secureSiteURL || secureProxy
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(middleware.SessionCookieName, token, maxAge, "/", "", secure, true)
 }

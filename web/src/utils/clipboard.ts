@@ -32,6 +32,25 @@ export interface CopyFormatInput {
   filename?: string;
 }
 
+function escapeHtmlAttribute(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case '&':
+        return '&amp;';
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '"':
+        return '&quot;';
+      case "'":
+        return '&#39;';
+      default:
+        return character;
+    }
+  });
+}
+
 /** 按目标格式渲染复制文本 (docs/webui.md 第 6 节复制格式菜单) */
 export function renderCopyText(format: CopyFormat, input: CopyFormatInput): string {
   const { url, filename } = input;
@@ -42,7 +61,7 @@ export function renderCopyText(format: CopyFormat, input: CopyFormatInput): stri
     case 'markdown':
       return `![${name}](${url})`;
     case 'html':
-      return `<img src="${url}" alt="${name}" />`;
+      return `<img src="${escapeHtmlAttribute(url)}" alt="${escapeHtmlAttribute(name)}" />`;
     case 'bbcode':
       return `[img]${url}[/img]`;
     case 'json':

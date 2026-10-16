@@ -39,9 +39,11 @@ export const authApi = {
       .post<TotpSetupResponse>('/auth/totp/setup', undefined, { silent: true })
       .then((r) => r.data),
 
-  /** secret 来自 totpSetup (后端要求回传, 才会落库启用) */
-  totpEnable: (secret: string, code: string) =>
-    api.post<void>('/auth/totp/enable', { secret, code }, { silent: true }).then(() => undefined),
+  /** secret 来自 totpSetup; 启用时必须提交当前密码与未使用的动态口令. */
+  totpEnable: (secret: string, code: string, password: string) =>
+    api
+      .post<void>('/auth/totp/enable', { secret, code, password }, { silent: true })
+      .then(() => undefined),
 
   totpDisable: (password: string) =>
     api.post<void>('/auth/totp/disable', { password }, { silent: true }).then(() => undefined),

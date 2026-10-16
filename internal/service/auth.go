@@ -36,12 +36,15 @@ const (
 	// bcryptCost 是密码散列强度.
 	bcryptCost = 12
 	// LoginFailureLimit 与 LoginFailureWindow 定义登录失败限流: 窗口内失败次数达到上限后拒绝登录.
-	LoginFailureLimit          = 20
-	LoginFailureWindow         = 10 * time.Minute
-	passwordResetRequestLimit  = 5
-	passwordResetRequestWindow = time.Hour
-	loginChallengeTTL          = 5 * time.Minute
-	maxPendingLoginChallenges  = 10000
+	LoginFailureLimit           = 20
+	LoginFailureWindow          = 10 * time.Minute
+	passwordResetRequestLimit   = 5
+	passwordResetRequestWindow  = time.Hour
+	verificationResendUserLimit = 3
+	verificationResendIPLimit   = 10
+	verificationResendWindow    = time.Hour
+	loginChallengeTTL           = 5 * time.Minute
+	maxPendingLoginChallenges   = 10000
 	// 令牌用途.
 	purposeSession        = "session"
 	purposeEmailVerify    = "email_verify"
@@ -75,36 +78,38 @@ func (p *Principal) IsAdmin() bool {
 
 // Auth 负责注册, 登录, 会话, 密码, TOTP, 邮箱验证与密码找回.
 type Auth struct {
-	db                   *gorm.DB
-	settings             *Settings
-	cipher               *crypto.Cipher
-	audit                *Audit
-	captcha              *Captcha
-	mailer               *Mailer
-	secretKey            []byte
-	log                  *slog.Logger
-	loginLimiter         *RateLimiter
-	passwordResetLimiter *RateLimiter
-	dummyPasswordHash    []byte
-	loginChallengesMu    sync.Mutex
-	loginChallenges      map[string]loginChallenge
+	db                        *gorm.DB
+	settings                  *Settings
+	cipher                    *crypto.Cipher
+	audit                     *Audit
+	captcha                   *Captcha
+	mailer                    *Mailer
+	secretKey                 []byte
+	log                       *slog.Logger
+	loginLimiter              *RateLimiter
+	passwordResetLimiter      *RateLimiter
+	verificationResendLimiter *RateLimiter
+	dummyPasswordHash         []byte
+	loginChallengesMu         sync.Mutex
+	loginChallenges           map[string]loginChallenge
 }
 
 // NewAuth 创建认证服务.
 func NewAuth(database *gorm.DB, settings *Settings, cipher *crypto.Cipher, audit *Audit, captcha *Captcha, mailer *Mailer, secretKey []byte, log *slog.Logger) *Auth {
 	return &Auth{
-		db:                   database,
-		settings:             settings,
-		cipher:               cipher,
-		audit:                audit,
-		captcha:              captcha,
-		mailer:               mailer,
-		secretKey:            secretKey,
-		log:                  log,
-		loginLimiter:         NewRateLimiter(LoginFailureWindow),
-		dummyPasswordHash:    loginDummyPasswordHash(),
-		passwordResetLimiter: NewRateLimiter(passwordResetRequestWindow),
-		loginChallenges:      make(map[string]loginChallenge),
+		db:                        database,
+		settings:                  settings,
+		cipher:                    cipher,
+		audit:                     audit,
+		captcha:                   captcha,
+		mailer:                    mailer,
+		secretKey:                 secretKey,
+		log:                       log,
+		loginLimiter:              NewRateLimiter(LoginFailureWindow),
+		dummyPasswordHash:         loginDummyPasswordHash(),
+		passwordResetLimiter:      NewRateLimiter(passwordResetRequestWindow),
+		verificationResendLimiter: NewRateLimiter(verificationResendWindow),
+		loginChallenges:           make(map[string]loginChallenge),
 	}
 }
 
@@ -441,10 +446,22 @@ func (a *Auth) loginWithChallenge(token, code, ip, userAgent string) (*model.Use
 	if err != nil {
 		return nil, apperr.ErrInternal.WithMessage("TOTP 秘钥解密失败")
 	}
-	if !totp.Validate(code, secret) {
+	counter, valid := totpCodeCounter(code, secret, time.Now())
+	if !valid {
 		a.recordLoginFailure(challenge.ipKey, challenge.identifierKey)
 		a.audit.Recordf(Entry{UserID: &user.ID, Action: "login_failed", Detail: map[string]any{"reason": "bad_totp"}, IP: ip, UserAgent: userAgent})
 		return nil, apperr.ErrUnauthorized.WithMessage("两步验证码错误")
+	}
+	consumedCounter := a.db.Model(&model.User{}).
+		Where("id = ? AND totp_secret = ? AND totp_last_counter < ?", user.ID, user.TOTPSecret, counter).
+		Updates(map[string]any{"totp_last_counter": counter, "updated_at": nowUTC()})
+	if consumedCounter.Error != nil {
+		return nil, apperr.ErrInternal.WithMessage(consumedCounter.Error.Error())
+	}
+	if consumedCounter.RowsAffected != 1 {
+		a.recordLoginFailure(challenge.ipKey, challenge.identifierKey)
+		a.audit.Recordf(Entry{UserID: &user.ID, Action: "login_failed", Detail: map[string]any{"reason": "totp_replay"}, IP: ip, UserAgent: userAgent})
+		return nil, apperr.ErrUnauthorized.WithMessage("两步验证码错误或已使用")
 	}
 	if err := a.finishLogin(&user, ip, userAgent, challenge.ipKey, challenge.identifierKey); err != nil {
 		return nil, err
@@ -470,6 +487,22 @@ func (a *Auth) finishLogin(user *model.User, ip, userAgent, ipKey, identifierKey
 
 	a.audit.Recordf(Entry{UserID: &user.ID, Action: "login", TargetType: "user", TargetID: &user.ID, IP: ip, UserAgent: userAgent})
 	return nil
+}
+
+func totpCodeCounter(code, secret string, now time.Time) (int64, bool) {
+	const periodSeconds = int64(30)
+	currentCounter := now.Unix() / periodSeconds
+	for offset := int64(1); offset >= -1; offset-- {
+		counter := currentCounter + offset
+		if counter < 0 {
+			continue
+		}
+		candidate, err := totp.GenerateCode(secret, time.Unix(counter*periodSeconds, 0))
+		if err == nil && hmac.Equal([]byte(code), []byte(candidate)) {
+			return counter, true
+		}
+	}
+	return 0, false
 }
 
 // recordLoginFailure 记录一次登录失败 (IP 与账号双键).
@@ -610,6 +643,31 @@ func (a *Auth) ParseSession(token string) (int64, error) {
 		return 0, errors.New("会话已吊销")
 	}
 	return userID, nil
+}
+
+// ResendVerification queues a verification email under per-user and per-IP limits.
+func (a *Auth) ResendVerification(user *model.User, ip string) error {
+	if user == nil {
+		return apperr.ErrUnauthorized
+	}
+	if user.EmailVerifiedAt != nil {
+		return nil
+	}
+	userAllowed, userRetry := a.verificationResendLimiter.Allow(fmt.Sprintf("user:%d", user.ID), verificationResendUserLimit)
+	ipAllowed, ipRetry := a.verificationResendLimiter.Allow("ip:"+ip, verificationResendIPLimit)
+	if !userAllowed || !ipAllowed {
+		retryAfter := userRetry
+		if ipRetry > retryAfter {
+			retryAfter = ipRetry
+		}
+		retrySeconds := int(retryAfter / time.Second)
+		if retrySeconds < 1 {
+			retrySeconds = 1
+		}
+		return apperr.ErrRateLimited.WithMessage("验证邮件请求过于频繁, 请稍后再试").
+			WithDetails(map[string]any{"retry_after_seconds": retrySeconds})
+	}
+	return a.QueueVerification(user)
 }
 
 // QueueVerification 将邮箱验证邮件放入异步发送队列.
@@ -756,10 +814,11 @@ func (a *Auth) ResetPassword(token, newPassword, ip, userAgent string) error {
 			return apperr.ErrInvalidRequest.WithMessage("密码找回链接无效或已过期")
 		}
 		result := tx.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
-			"password_hash":   string(hashed),
-			"totp_secret":     "",
-			"session_version": gorm.Expr("session_version + 1"),
-			"updated_at":      now,
+			"password_hash":     string(hashed),
+			"totp_secret":       "",
+			"totp_last_counter": int64(0),
+			"session_version":   gorm.Expr("session_version + 1"),
+			"updated_at":        now,
 		})
 		if result.Error != nil {
 			return apperr.ErrInternal.WithMessage(result.Error.Error())
@@ -792,25 +851,47 @@ func (a *Auth) TOTPSetup(userID int64) (secret string, otpauthURL string, err er
 	return key.Secret(), key.URL(), nil
 }
 
-// TOTPEnable 校验一次性验证码后启用两步验证.
-func (a *Auth) TOTPEnable(userID int64, secret, code, ip, userAgent string) error {
+// TOTPEnable 验证当前密码与未使用的验证码后启用两步验证.
+func (a *Auth) TOTPEnable(userID int64, secret, code, password, ip, userAgent string) error {
 	secret = strings.TrimSpace(secret)
 	code = strings.TrimSpace(code)
 	if secret == "" || code == "" {
 		return apperr.ErrInvalidRequest.WithMessage("缺少 TOTP 秘钥或验证码")
 	}
-	if !totp.Validate(code, secret) {
-		return apperr.ErrInvalidRequest.WithMessage("两步验证码错误")
+	var user model.User
+	if err := a.db.First(&user, userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.ErrNotFound.WithMessage("用户不存在")
+		}
+		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if password == "" || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+		return apperr.ErrUnauthorized.WithMessage("当前密码错误")
+	}
+	counter, valid := totpCodeCounter(code, secret, time.Now())
+	if !valid {
+		return apperr.ErrInvalidRequest.WithMessage("两步验证码错误或已使用")
 	}
 	encrypted, err := a.cipher.Encrypt(secret)
 	if err != nil {
 		return apperr.ErrInternal.WithMessage("加密 TOTP 秘钥失败: " + err.Error())
 	}
-	if err := a.db.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
-		"totp_secret": encrypted,
-		"updated_at":  nowUTC(),
-	}).Error; err != nil {
-		return apperr.ErrInternal.WithMessage(err.Error())
+	query := a.db.Model(&model.User{}).Where("id = ? AND password_hash = ?", userID, user.PasswordHash)
+	if user.TOTPSecret == "" {
+		query = query.Where("(totp_secret = ? OR totp_secret IS NULL)", "")
+	} else {
+		query = query.Where("totp_secret = ?", user.TOTPSecret)
+	}
+	result := query.Updates(map[string]any{
+		"totp_secret":       encrypted,
+		"totp_last_counter": counter,
+		"updated_at":        nowUTC(),
+	})
+	if result.Error != nil {
+		return apperr.ErrInternal.WithMessage(result.Error.Error())
+	}
+	if result.RowsAffected != 1 {
+		return apperr.ErrUnauthorized.WithMessage("账号凭据已更新, 请重新验证")
 	}
 	a.audit.Recordf(Entry{UserID: &userID, Action: "totp_enable", TargetType: "user", TargetID: &userID, IP: ip, UserAgent: userAgent})
 	return nil
@@ -826,8 +907,9 @@ func (a *Auth) TOTPDisable(userID int64, password, ip, userAgent string) error {
 		return apperr.ErrUnauthorized.WithMessage("密码错误")
 	}
 	if err := a.db.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
-		"totp_secret": "",
-		"updated_at":  nowUTC(),
+		"totp_secret":       "",
+		"totp_last_counter": int64(0),
+		"updated_at":        nowUTC(),
 	}).Error; err != nil {
 		return apperr.ErrInternal.WithMessage(err.Error())
 	}

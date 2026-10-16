@@ -83,8 +83,8 @@ func TestConflictPolicyMigrationMapsLegacyValuesToSkip(t *testing.T) {
 	if err := database.Order("version DESC").First(&latest).Error; err != nil {
 		t.Fatalf("读取迁移版本失败: %v", err)
 	}
-	if latest.Version != 8 {
-		t.Errorf("迁移版本应为 8, 实际 %d", latest.Version)
+	if latest.Version != 9 {
+		t.Errorf("迁移版本应为 9, 实际 %d", latest.Version)
 	}
 }
 

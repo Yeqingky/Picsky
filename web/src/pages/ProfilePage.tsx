@@ -75,6 +75,7 @@ export default function ProfilePage() {
 
   const [totpSetupData, setTotpSetupData] = useState<TotpSetupResponse | null>(null);
   const [totpCode, setTotpCode] = useState('');
+  const [totpPassword, setTotpPassword] = useState('');
   const [totpError, setTotpError] = useState<string | null>(null);
   const [disableOpen, setDisableOpen] = useState(false);
   const [disablePassword, setDisablePassword] = useState('');
@@ -114,17 +115,19 @@ export default function ProfilePage() {
     onSuccess: (data) => {
       setTotpSetupData(data);
       setTotpCode('');
+      setTotpPassword('');
       setTotpError(null);
     },
     onError: (error) => setTotpError(errorMessage(error, t('common.error.unknown'))),
   });
 
   const enableMutation = useMutation({
-    mutationFn: (payload: { secret: string; code: string }) =>
-      authApi.totpEnable(payload.secret, payload.code),
+    mutationFn: (payload: { secret: string; code: string; password: string }) =>
+      authApi.totpEnable(payload.secret, payload.code, payload.password),
     onSuccess: async () => {
       setTotpSetupData(null);
       setTotpCode('');
+      setTotpPassword('');
       setTotpError(null);
       await refresh();
       toast.success(t('account.profile.totpEnabledSuccess'));
@@ -161,13 +164,22 @@ export default function ProfilePage() {
   };
 
   const handleTotpEnable = () => {
+    if (totpPassword === '') {
+      setTotpError(t('account.profile.totpPasswordRequired'));
+      return;
+    }
     if (totpCode.trim().length !== 6) {
       setTotpError(t('account.profile.totpCodeRequired'));
       return;
     }
     setTotpError(null);
-    if (totpSetupData)
-      enableMutation.mutate({ secret: totpSetupData.secret, code: totpCode.trim() });
+    if (totpSetupData) {
+      enableMutation.mutate({
+        secret: totpSetupData.secret,
+        code: totpCode.trim(),
+        password: totpPassword,
+      });
+    }
   };
 
   return (
@@ -357,6 +369,16 @@ export default function ProfilePage() {
               )}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                 <div className="flex flex-col gap-2 sm:w-[220px]">
+                  <Label htmlFor="profile-totp-password">{t('account.profile.totpPassword')}</Label>
+                  <Input
+                    id="profile-totp-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={totpPassword}
+                    onChange={(event) => setTotpPassword(event.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-2 sm:w-[220px]">
                   <Label htmlFor="profile-totp-code">{t('account.profile.totpCode')}</Label>
                   <Input
                     id="profile-totp-code"
@@ -376,6 +398,7 @@ export default function ProfilePage() {
                   onClick={() => {
                     setTotpSetupData(null);
                     setTotpCode('');
+                    setTotpPassword('');
                     setTotpError(null);
                   }}
                 >
