@@ -1,5 +1,5 @@
 // Package spool 提供可重读的上传缓冲: 小文件驻留内存, 超过阈值落到临时文件.
-// 临时文件一律带 picsky- 前缀, 上传结束立即删除, 进程启动时清理残留.
+// 临时文件一律带 picsky- 前缀, 上传结束立即删除; 仅显式配置的临时目录会在启动时扫描残留.
 package spool
 
 import (
@@ -161,10 +161,10 @@ type nopReadSeekCloser struct{ io.ReadSeeker }
 
 func (nopReadSeekCloser) Close() error { return nil }
 
-// CleanupStale 删除临时目录中残留的 picsky- 前缀文件, 返回删除数量.
+// CleanupStale 清理显式配置的应用临时目录中的 picsky- 残留文件.
 func CleanupStale(tempDir string) (int, error) {
 	if strings.TrimSpace(tempDir) == "" {
-		tempDir = os.TempDir()
+		return 0, nil
 	}
 	entries, err := os.ReadDir(tempDir)
 	if err != nil {

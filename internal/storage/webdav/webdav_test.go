@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -180,5 +181,31 @@ func TestWebDAVRejectsTraversalKeys(t *testing.T) {
 	}
 	if err := adapter.Delete(ctx, "a/./b.txt"); err == nil {
 		t.Error("Delete 遇到 . 段时应拒绝")
+	}
+}
+
+func TestWebDAVErrorDoesNotExposeResponseBody(t *testing.T) {
+	const responseBody = "private-webdav-diagnostic"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, responseBody)
+	}))
+	defer server.Close()
+
+	adapter, err := storage.New("webdav", storage.Options{
+		Config: map[string]string{"endpoint": server.URL + "/dav"},
+	})
+	if err != nil {
+		t.Fatalf("实例化 WebDAV 驱动失败: %v", err)
+	}
+	err = adapter.Put(context.Background(), "image.png", strings.NewReader("image"), 5, "image/png")
+	if err == nil {
+		t.Fatal("后端 502 应返回错误")
+	}
+	if strings.Contains(err.Error(), responseBody) {
+		t.Errorf("WebDAV 错误不应包含后端响应体: %v", err)
+	}
+	if !strings.Contains(err.Error(), "HTTP 502") {
+		t.Errorf("WebDAV 错误应保留状态码: %v", err)
 	}
 }

@@ -1309,6 +1309,44 @@ func TestUploadCheckDoesNotExposeOtherUsersRecord(t *testing.T) {
 	}
 }
 
+func TestUploadWebDAVFailureDoesNotExposeResponseBody(t *testing.T) {
+	s := newServer(t)
+	adminCookie, _ := s.bootstrap()
+	const responseBody = "private-webdav-diagnostic"
+	webdavServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = io.WriteString(w, responseBody)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer webdavServer.Close()
+
+	policy := s.json(http.MethodPost, "/api/v1/admin/policies", map[string]any{
+		"name":            "错误后端",
+		"type":            "webdav",
+		"enabled":         true,
+		"path_template":   "{md5}.{ext}",
+		"conflict_policy": "rename",
+		"config":          map[string]string{"endpoint": webdavServer.URL + "/dav"},
+		"urls":            []map[string]any{{"alias": "CDN", "url": "https://cdn.example.com/", "is_default": true}},
+	}, []*http.Cookie{adminCookie})
+	if policy.Status != http.StatusCreated {
+		t.Fatalf("创建测试策略失败: %d %s", policy.Status, string(policy.Body))
+	}
+	policyID := int64(s.decode(policy)["id"].(float64))
+	upload := s.upload("/api/v1/upload", "private.png", pngContent(t, 31), map[string]string{
+		"policy_id": fmt.Sprint(policyID),
+	}, map[string]string{}, []*http.Cookie{adminCookie})
+	if upload.Status != http.StatusBadGateway {
+		t.Fatalf("WebDAV 上传失败应返回 502: %d %s", upload.Status, string(upload.Body))
+	}
+	if strings.Contains(string(upload.Body), responseBody) {
+		t.Errorf("上传响应泄露了 WebDAV 错误响应体: %s", string(upload.Body))
+	}
+}
+
 func TestAdminEndpointsAndPermissions(t *testing.T) {
 	s := newServer(t)
 	cookie, policyID := s.bootstrap()

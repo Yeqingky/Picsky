@@ -103,3 +103,23 @@ func TestCleanupStale(t *testing.T) {
 		t.Error("非 picsky- 前缀的文件不应被删除")
 	}
 }
+
+func TestCleanupStaleWithoutDirectoryPreservesSharedTempFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("TMPDIR", tempDir)
+	otherFile := filepath.Join(tempDir, TempFilePrefix+"other-process")
+	if err := os.WriteFile(otherFile, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("准备共享临时文件失败: %v", err)
+	}
+
+	removed, err := CleanupStale("")
+	if err != nil {
+		t.Fatalf("未配置临时目录时清理不应失败: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("未配置临时目录时应跳过清理, 删除数 = %d", removed)
+	}
+	if _, err := os.Stat(otherFile); err != nil {
+		t.Errorf("共享系统临时目录中的文件不应被清理: %v", err)
+	}
+}

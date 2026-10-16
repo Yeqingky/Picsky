@@ -422,12 +422,7 @@ func parentOf(key string) string {
 }
 
 func statusError(action string, resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-	detail := strings.TrimSpace(string(body))
-	if detail == "" {
-		return fmt.Errorf("%s失败: %s", action, resp.Status)
-	}
-	return fmt.Errorf("%s失败: %s (%s)", action, resp.Status, detail)
+	return fmt.Errorf("%s失败: HTTP %d", action, resp.StatusCode)
 }
 
 func randomSuffix() (string, error) {
