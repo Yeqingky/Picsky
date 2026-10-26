@@ -114,8 +114,6 @@ export const common = {
     direct: '直链',
     markdown: 'Markdown',
     html: 'HTML',
-    bbcode: 'BBCode',
-    json: 'JSON',
   },
 
   form: {

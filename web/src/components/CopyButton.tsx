@@ -68,7 +68,7 @@ export function CopyButton({
   );
 }
 
-const COPY_FORMATS: CopyFormat[] = ['direct', 'markdown', 'html', 'bbcode', 'json'];
+const COPY_FORMATS: CopyFormat[] = ['direct', 'markdown', 'html'];
 
 interface CopyFormatMenuProps extends Omit<ButtonProps, 'onClick' | 'children'> {
   url: string;
@@ -76,7 +76,7 @@ interface CopyFormatMenuProps extends Omit<ButtonProps, 'onClick' | 'children'> 
   label?: string;
 }
 
-/** 复制格式菜单: 直链 / Markdown / HTML / BBCode / JSON (docs/webui.md 第 6 节) */
+/** 复制格式菜单: 直链 / Markdown / HTML (docs/webui.md 第 6 节) */
 export function CopyFormatMenu({
   url,
   filename,

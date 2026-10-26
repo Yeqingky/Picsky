@@ -25,7 +25,7 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export type CopyFormat = 'direct' | 'markdown' | 'html' | 'bbcode' | 'json';
+export type CopyFormat = 'direct' | 'markdown' | 'html';
 
 export interface CopyFormatInput {
   url: string;
@@ -62,9 +62,5 @@ export function renderCopyText(format: CopyFormat, input: CopyFormatInput): stri
       return `![${name}](${url})`;
     case 'html':
       return `<img src="${escapeHtmlAttribute(url)}" alt="${escapeHtmlAttribute(name)}" />`;
-    case 'bbcode':
-      return `[img]${url}[/img]`;
-    case 'json':
-      return JSON.stringify(filename ? { url, filename } : { url });
   }
 }
