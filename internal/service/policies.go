@@ -664,8 +664,8 @@ type ScanFailure struct {
 	Error string `json:"error"`
 }
 
-// Scan 扫描补录: 递归列举后端文件, 读取内容计算哈希, 以原路径入库; ownerID 为记录归属 (0 表示系统).
-func (p *Policies) Scan(ctx context.Context, policyID int64, ownerID int64, subPath *string, dryRun bool) (*ScanResult, error) {
+// ListScanObjects 列举扫描补录的对象键, 不读取对象内容.
+func (p *Policies) ListScanObjects(ctx context.Context, policyID int64, subPath *string) ([]string, error) {
 	policy, err := p.Get(policyID)
 	if err != nil {
 		return nil, err
@@ -690,20 +690,64 @@ func (p *Policies) Scan(ctx context.Context, policyID int64, ownerID int64, subP
 	if err != nil {
 		return nil, apperr.ErrBackend.WithMessage(err.Error())
 	}
+	if _, err := p.DefaultURL(policy.ID); err != nil {
+		return nil, err
+	}
 
+	keys := make([]string, 0, len(objects))
+	for _, object := range objects {
+		if !object.IsDir {
+			keys = append(keys, strings.Trim(object.Key, "/"))
+		}
+	}
+	return keys, nil
+}
+
+// EnqueueScan 先列举对象键, 再将扫描任务和清单持久化入队.
+func (p *Policies) EnqueueScan(ctx context.Context, policyID, ownerID int64, subPath *string, dryRun bool) (*model.MaintenanceTask, int, error) {
+	if p.tasks == nil {
+		return nil, 0, apperr.ErrInternal.WithMessage("维护任务队列未初始化")
+	}
+	keys, err := p.ListScanObjects(ctx, policyID, subPath)
+	if err != nil {
+		return nil, 0, err
+	}
+	task, err := p.tasks.EnqueuePolicyScan(policyID, ownerID, subPath, dryRun, keys)
+	if err != nil {
+		return nil, 0, err
+	}
+	return task, len(keys), nil
+}
+
+// Scan 同步扫描补录, 供自动扫描和测试使用.
+func (p *Policies) Scan(ctx context.Context, policyID int64, ownerID int64, subPath *string, dryRun bool) (*ScanResult, error) {
+	keys, err := p.ListScanObjects(ctx, policyID, subPath)
+	if err != nil {
+		return nil, err
+	}
+	return p.ScanListed(ctx, policyID, ownerID, keys, dryRun)
+}
+
+// ScanListed 读取并补录已列举的对象键.
+func (p *Policies) ScanListed(ctx context.Context, policyID, ownerID int64, keys []string, dryRun bool) (*ScanResult, error) {
+	policy, err := p.Get(policyID)
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := p.Adapter(policy)
+	if err != nil {
+		return nil, err
+	}
+	if !adapter.Capabilities().Has(storage.CapRead) {
+		return nil, apperr.ErrInvalidRequest.WithMessage("该存储后端不支持读取能力, 无法扫描补录")
+	}
 	defaultURL, err := p.DefaultURL(policy.ID)
 	if err != nil {
 		return nil, err
 	}
 
 	result := &ScanResult{Failed: []ScanFailure{}}
-	owner := ownerID
-	for _, object := range objects {
-		if object.IsDir {
-			continue
-		}
-		key := strings.Trim(object.Key, "/")
-
+	for _, key := range keys {
 		var existing int64
 		if err := p.db.Model(&model.Image{}).Where("policy_id = ? AND object_key = ?", policy.ID, key).Count(&existing).Error; err != nil {
 			return nil, apperr.ErrInternal.WithMessage(err.Error())
@@ -717,7 +761,7 @@ func (p *Policies) Scan(ctx context.Context, policyID int64, ownerID int64, subP
 			continue
 		}
 
-		info, err := p.scanObject(ctx, adapter, policy, key, defaultURL, owner)
+		info, err := p.scanObject(ctx, adapter, policy, key, defaultURL, ownerID)
 		if err != nil {
 			result.Failed = append(result.Failed, ScanFailure{Path: key, Error: err.Error()})
 			continue
@@ -731,8 +775,8 @@ func (p *Policies) Scan(ctx context.Context, policyID int64, ownerID int64, subP
 
 	if !dryRun {
 		var actor *int64
-		if owner > 0 {
-			actor = &owner
+		if ownerID > 0 {
+			actor = &ownerID
 		}
 		p.audit.Recordf(Entry{
 			UserID:     actor,

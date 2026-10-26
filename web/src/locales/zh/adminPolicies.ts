@@ -173,7 +173,12 @@ export const adminPolicies = {
 
     scan: {
       button: '开始扫描',
-      running: '扫描中…',
+      running: '列举中…',
+      backgroundRunningButton: '后台扫描中…',
+      queued: '已列举 {{objects}} 个对象, 扫描任务 #{{id}} 已排队。',
+      processing: '扫描任务 #{{id}} 正在后台处理 {{objects}} 个对象。',
+      completed: '后台扫描任务已完成。',
+      taskFailed: '后台扫描任务失败: {{error}}',
       failed: '扫描失败',
       result: '图片 {{images}} 个, 其他文件 {{files}} 个, 跳过 {{skipped}} 个',
       failedTitle: '失败明细 ({{count}})',

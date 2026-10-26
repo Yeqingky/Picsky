@@ -110,6 +110,7 @@ func (s *Server) Register(router *gin.Engine) {
 	policies.DELETE("/:id", s.adminDeletePolicy)
 	policies.POST("/:id/test", s.adminTestPolicy)
 	policies.POST("/:id/scan", s.adminScanPolicy)
+	policies.GET("/:id/scan/:task_id", s.adminGetPolicyScanTask)
 
 	settings := admin.Group("/settings", middleware.Require(model.PermManageSettings))
 	settings.GET("", s.adminGetSettings)

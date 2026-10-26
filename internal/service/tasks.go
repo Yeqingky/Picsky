@@ -32,6 +32,7 @@ type Tasks struct {
 	log      *slog.Logger
 
 	daily map[string]time.Time
+	wake  chan struct{}
 }
 
 // NewTasks 创建任务服务.
@@ -43,7 +44,8 @@ func NewTasks(database *gorm.DB, settings *Settings, audit *Audit, policies *Pol
 		policies: policies,
 		images:   images,
 		log:      log,
-		daily:    map[string]time.Time{},
+		daily:    make(map[string]time.Time),
+		wake:     make(chan struct{}, 1),
 	}
 	// 启动时回收上次进程中断留在 running 的任务.
 	recovered := tasks.db.Model(&model.MaintenanceTask{}).
@@ -76,7 +78,49 @@ func (t *Tasks) Enqueue(taskType string, payload any) (*model.MaintenanceTask, e
 	if err := t.db.Create(&task).Error; err != nil {
 		return nil, apperr.ErrInternal.WithMessage("入队维护任务失败: " + err.Error())
 	}
+	t.notifyWorker()
 	return &task, nil
+}
+
+// EnqueuePolicyScan 原子地创建策略扫描任务及其列举清单.
+func (t *Tasks) EnqueuePolicyScan(policyID, userID int64, path *string, dryRun bool, objectKeys []string) (*model.MaintenanceTask, error) {
+	payload, err := json.Marshal(struct {
+		PolicyID int64   `json:"policy_id"`
+		UserID   int64   `json:"user_id"`
+		Path     *string `json:"path,omitempty"`
+		DryRun   bool    `json:"dry_run,omitempty"`
+	}{PolicyID: policyID, UserID: userID, Path: path, DryRun: dryRun})
+	if err != nil {
+		return nil, apperr.ErrInternal.WithMessage("扫描任务参数序列化失败: " + err.Error())
+	}
+	keys, err := json.Marshal(objectKeys)
+	if err != nil {
+		return nil, apperr.ErrInternal.WithMessage("扫描对象清单序列化失败: " + err.Error())
+	}
+	task := model.MaintenanceTask{
+		Type:      model.TaskPolicyScan,
+		Payload:   string(payload),
+		Status:    model.TaskPending,
+		CreatedAt: nowUTC(),
+	}
+	err = t.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&task).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.PolicyScanManifest{TaskID: task.ID, ObjectKeys: string(keys)}).Error
+	})
+	if err != nil {
+		return nil, apperr.ErrInternal.WithMessage("入队策略扫描任务失败: " + err.Error())
+	}
+	t.notifyWorker()
+	return &task, nil
+}
+
+func (t *Tasks) notifyWorker() {
+	select {
+	case t.wake <- struct{}{}:
+	default:
+	}
 }
 
 // TaskFilter 是任务列表过滤条件.
@@ -126,7 +170,22 @@ func (t *Tasks) List(filter TaskFilter) (*TaskListResult, error) {
 	if items == nil {
 		items = []model.MaintenanceTask{}
 	}
+	for idx := range items {
+		items[idx].Result = ""
+	}
 	return &TaskListResult{Total: total, Page: page, PageSize: pageSize, Items: items}, nil
+}
+
+// Get 返回单个维护任务, 含任务结果.
+func (t *Tasks) Get(id int64) (*model.MaintenanceTask, error) {
+	var task model.MaintenanceTask
+	if err := t.db.First(&task, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperr.ErrNotFound.WithMessage("任务不存在")
+		}
+		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	return &task, nil
 }
 
 // RunNow 手动执行指定任务.
@@ -137,6 +196,32 @@ func (t *Tasks) RunNow(id int64, actor *Principal) error {
 			return apperr.ErrNotFound.WithMessage("任务不存在")
 		}
 		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if task.Type == model.TaskPolicyScan {
+		requeue := t.db.Model(&model.MaintenanceTask{}).
+			Where("id = ? AND status IN ?", task.ID, []string{model.TaskPending, model.TaskFailed, model.TaskDone}).
+			Updates(map[string]any{"status": model.TaskPending, "finished_at": nil, "last_error": "", "result": ""})
+		if requeue.Error != nil {
+			return apperr.ErrInternal.WithMessage(requeue.Error.Error())
+		}
+		if requeue.RowsAffected == 0 {
+			var status string
+			if err := t.db.Model(&model.MaintenanceTask{}).Select("status").Where("id = ?", task.ID).Scan(&status).Error; err != nil {
+				return apperr.ErrInternal.WithMessage(err.Error())
+			}
+			if status != model.TaskPending {
+				return apperr.ErrInvalidRequest.WithMessage("任务正在执行中")
+			}
+		}
+		t.audit.Recordf(Entry{
+			UserID:     actorID(actor),
+			Action:     "task_run",
+			TargetType: "task",
+			TargetID:   &task.ID,
+			Detail:     map[string]any{"type": task.Type},
+		})
+		t.notifyWorker()
+		return nil
 	}
 	ctx, cancel := contextWithTimeout(30 * time.Minute)
 	defer cancel()
@@ -170,9 +255,10 @@ func (t *Tasks) Start(ctx context.Context) {
 			if err := t.scheduleDaily(); err != nil {
 				t.log.Warn("安排每日维护任务失败", "error", err)
 			}
-			if err := t.runPending(ctx); err != nil {
-				t.log.Warn("执行维护任务失败", "error", err)
-			}
+		case <-t.wake:
+		}
+		if err := t.runPending(ctx); err != nil {
+			t.log.Warn("执行维护任务失败", "error", err)
 		}
 	}
 }
@@ -230,6 +316,7 @@ func (t *Tasks) execute(ctx context.Context, task *model.MaintenanceTask, allowC
 			"attempts":    gorm.Expr("attempts + 1"),
 			"finished_at": nil,
 			"last_error":  "",
+			"result":      "",
 		})
 	if claim.Error != nil {
 		return claim.Error
@@ -240,20 +327,7 @@ func (t *Tasks) execute(ctx context.Context, task *model.MaintenanceTask, allowC
 
 	switch task.Type {
 	case model.TaskPolicyScan:
-		var payload struct {
-			PolicyID int64 `json:"policy_id"`
-			UserID   int64 `json:"user_id"`
-		}
-		if err := json.Unmarshal([]byte(task.Payload), &payload); err != nil {
-			return fmt.Errorf("任务参数非法: %w", err)
-		}
-		result, err := t.policies.Scan(ctx, payload.PolicyID, payload.UserID, nil, false)
-		if err != nil {
-			return err
-		}
-		t.log.Info("策略扫描完成", "policy_id", payload.PolicyID, "images", result.Images, "files", result.Files, "skipped", result.Skipped)
-		return nil
-
+		return t.executePolicyScan(ctx, task)
 	case model.TaskLogPurge:
 		return t.purgeExpiredLogs()
 
@@ -291,6 +365,44 @@ func (t *Tasks) execute(ctx context.Context, task *model.MaintenanceTask, allowC
 	}
 }
 
+func (t *Tasks) executePolicyScan(ctx context.Context, task *model.MaintenanceTask) error {
+	var payload struct {
+		PolicyID int64   `json:"policy_id"`
+		UserID   int64   `json:"user_id"`
+		Path     *string `json:"path"`
+		DryRun   bool    `json:"dry_run"`
+	}
+	if err := json.Unmarshal([]byte(task.Payload), &payload); err != nil {
+		return fmt.Errorf("任务参数非法: %w", err)
+	}
+
+	var result *ScanResult
+	var manifest model.PolicyScanManifest
+	err := t.db.Where("task_id = ?", task.ID).First(&manifest).Error
+	switch {
+	case err == nil:
+		var keys []string
+		if err := json.Unmarshal([]byte(manifest.ObjectKeys), &keys); err != nil {
+			return fmt.Errorf("扫描对象清单非法: %w", err)
+		}
+		result, err = t.policies.ScanListed(ctx, payload.PolicyID, payload.UserID, keys, payload.DryRun)
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		result, err = t.policies.Scan(ctx, payload.PolicyID, payload.UserID, payload.Path, payload.DryRun)
+	}
+	if err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("扫描结果序列化失败: %w", err)
+	}
+	if err := t.db.Model(&model.MaintenanceTask{}).Where("id = ?", task.ID).Update("result", string(encoded)).Error; err != nil {
+		return fmt.Errorf("保存扫描结果失败: %w", err)
+	}
+	t.log.Info("策略扫描完成", "policy_id", payload.PolicyID, "images", result.Images, "files", result.Files, "skipped", result.Skipped)
+	return nil
+}
+
 // purgeExpiredLogs 清除过期审计日志与已结束的维护任务.
 func (t *Tasks) purgeExpiredLogs() error {
 	logRetention := t.settings.Int64("log_retention_days", 90)
@@ -302,8 +414,13 @@ func (t *Tasks) purgeExpiredLogs() error {
 	}
 
 	taskCutoff := nowUTC().Add(-taskPurgeAfter)
-	if err := t.db.Where("status IN ? AND created_at < ?", []string{model.TaskDone, model.TaskFailed}, taskCutoff).
-		Delete(&model.MaintenanceTask{}).Error; err != nil {
+	expiredTasks := t.db.Model(&model.MaintenanceTask{}).
+		Select("id").
+		Where("status IN ? AND created_at < ?", []string{model.TaskDone, model.TaskFailed}, taskCutoff)
+	if err := t.db.Where("task_id IN (?)", expiredTasks).Delete(&model.PolicyScanManifest{}).Error; err != nil {
+		return err
+	}
+	if err := t.db.Where("id IN (?)", expiredTasks).Delete(&model.MaintenanceTask{}).Error; err != nil {
 		return err
 	}
 

@@ -185,11 +185,18 @@ type Setting struct {
 	UpdatedAt time.Time `gorm:"not null" json:"updated_at"`
 }
 
+// PolicyScanManifest 保存策略扫描在列举阶段生成的对象键清单.
+type PolicyScanManifest struct {
+	TaskID     int64  `gorm:"primaryKey" json:"task_id"`
+	ObjectKeys string `gorm:"type:text;not null" json:"-"`
+}
+
 // MaintenanceTask 是维护任务队列项.
 type MaintenanceTask struct {
 	ID         int64      `gorm:"primaryKey;autoIncrement" json:"id"`
 	Type       string     `gorm:"size:32;not null" json:"type"`
 	Payload    string     `gorm:"type:text" json:"payload"`
+	Result     string     `gorm:"type:text;not null;default:''" json:"result,omitempty"`
 	Status     string     `gorm:"size:16;not null;default:'pending';index:idx_maintenance_tasks_status_created,priority:1" json:"status"`
 	Attempts   int        `gorm:"not null;default:0" json:"attempts"`
 	LastError  string     `gorm:"type:text" json:"last_error"`
@@ -210,5 +217,6 @@ func AllModels() []any {
 		&AuditLog{},
 		&Setting{},
 		&MaintenanceTask{},
+		&PolicyScanManifest{},
 	}
 }

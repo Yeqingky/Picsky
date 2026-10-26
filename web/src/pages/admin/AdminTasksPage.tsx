@@ -98,6 +98,10 @@ export default function AdminTasksPage() {
     queryKey: ['admin', 'tasks', params],
     queryFn: () => adminTasksApi.list(params),
     placeholderData: keepPreviousData,
+    refetchInterval: (query) =>
+      query.state.data?.items.some((task) => task.status === 'pending' || task.status === 'running')
+        ? 3000
+        : false,
   });
 
   const delayedLoading = useDelayedLoading(tasksQuery.isFetching);

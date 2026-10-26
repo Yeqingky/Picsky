@@ -1497,8 +1497,17 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 	scanned := s.json(http.MethodPost, fmt.Sprintf("/api/v1/admin/policies/%d/scan", policyID), map[string]any{
 		"dry_run": true,
 	}, []*http.Cookie{cookie})
-	if scanned.Status != http.StatusOK {
-		t.Errorf("扫描接口失败: %d %s", scanned.Status, string(scanned.Body))
+	if scanned.Status != http.StatusAccepted {
+		t.Fatalf("扫描任务未入队: %d %s", scanned.Status, string(scanned.Body))
+	}
+	scanTask := s.decode(scanned)
+	taskID, ok := scanTask["task_id"].(float64)
+	if !ok || taskID <= 0 || scanTask["status"] != model.TaskPending {
+		t.Fatalf("扫描接口未返回待处理任务信息: %s", string(scanned.Body))
+	}
+	scanStatus := s.raw(http.MethodGet, fmt.Sprintf("/api/v1/admin/policies/%d/scan/%d", policyID, int64(taskID)), nil, nil, []*http.Cookie{cookie})
+	if scanStatus.Status != http.StatusOK || s.decode(scanStatus)["status"] != model.TaskPending {
+		t.Errorf("扫描任务状态查询失败: %d %s", scanStatus.Status, string(scanStatus.Body))
 	}
 
 	drivers := s.raw(http.MethodGet, "/api/v1/admin/policies/drivers", nil, nil, []*http.Cookie{cookie})

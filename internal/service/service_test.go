@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -1137,27 +1138,83 @@ func TestTaskQueueScanAndLogPurge(t *testing.T) {
 		t.Fatalf("准备文件失败: %v", err)
 	}
 
-	task, err := f.svc.Tasks.Enqueue(model.TaskPolicyScan, map[string]any{"policy_id": policy.ID, "user_id": f.admin.User.ID})
+	if err := f.database.Model(&model.MaintenanceTask{}).
+		Where("type = ? AND status = ?", model.TaskPolicyScan, model.TaskPending).
+		Update("status", model.TaskDone).Error; err != nil {
+		t.Fatalf("清理自动扫描任务失败: %v", err)
+	}
+	task, objects, err := f.svc.Policies.EnqueueScan(context.Background(), policy.ID, f.admin.User.ID, nil, false)
 	if err != nil {
-		t.Fatalf("入队失败: %v", err)
+		t.Fatalf("列举并入队扫描失败: %v", err)
+	}
+	if objects != 1 {
+		t.Fatalf("扫描清单应包含一个对象, 实际 %d", objects)
+	}
+	var scanned int64
+	if err := f.database.Model(&model.Image{}).Where("policy_id = ? AND object_key = ?", policy.ID, "queued.png").Count(&scanned).Error; err != nil {
+		t.Fatalf("统计扫描前记录失败: %v", err)
+	}
+	if scanned != 0 {
+		t.Fatalf("任务入队时不应同步补录文件, 实际 %d", scanned)
 	}
 	if err := f.svc.Tasks.RunNow(task.ID, f.admin); err != nil {
-		t.Fatalf("执行任务失败: %v", err)
+		t.Fatalf("重新排入扫描任务失败: %v", err)
 	}
 	var stored model.MaintenanceTask
 	if err := f.database.First(&stored, task.ID).Error; err != nil {
-		t.Fatalf("读取任务失败: %v", err)
+		t.Fatalf("读取待处理任务失败: %v", err)
+	}
+	if stored.Status != model.TaskPending {
+		t.Fatalf("重新排入后任务应为 pending: %+v", stored)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		f.svc.Tasks.Start(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-workerDone
+	}()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := f.database.First(&stored, task.ID).Error; err != nil {
+			t.Fatalf("读取后台扫描任务失败: %v", err)
+		}
+		if stored.Status == model.TaskDone {
+			break
+		}
+		if stored.Status == model.TaskFailed {
+			t.Fatalf("后台扫描任务失败: %s", stored.LastError)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("等待后台扫描任务超时: %+v", stored)
+		case <-ticker.C:
+		}
+	}
+	cancel()
+	<-workerDone
+	if err := f.database.First(&stored, task.ID).Error; err != nil {
+		t.Fatalf("读取完成任务失败: %v", err)
 	}
 	if stored.Status != model.TaskDone {
-		t.Errorf("任务状态应为 done: %+v", stored)
+		t.Fatalf("后台处理后任务应为 done: %+v", stored)
 	}
-
-	var scanned int64
+	var scanResult service.ScanResult
+	if err := json.Unmarshal([]byte(stored.Result), &scanResult); err != nil {
+		t.Fatalf("解析后台扫描结果失败: %v", err)
+	}
+	if scanResult.Images != 1 || scanResult.Files != 0 {
+		t.Fatalf("后台扫描结果统计错误: %+v", scanResult)
+	}
 	if err := f.database.Model(&model.Image{}).Where("policy_id = ? AND object_key = ?", policy.ID, "queued.png").Count(&scanned).Error; err != nil {
-		t.Fatalf("统计失败: %v", err)
+		t.Fatalf("统计扫描后记录失败: %v", err)
 	}
 	if scanned != 1 {
-		t.Fatalf("任务执行后应补录该文件, 实际 %d", scanned)
+		t.Fatalf("后台任务应补录该文件, 实际 %d", scanned)
 	}
 
 	if _, err := f.svc.Tasks.Enqueue(model.TaskLogPurge, nil); err != nil {

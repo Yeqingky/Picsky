@@ -16,8 +16,8 @@ import type {
   Paginated,
   PolicyPreviewRequest,
   PolicyPreviewResult,
+  PolicyScanEnqueued,
   PolicyScanRequest,
-  PolicyScanResult,
   PolicyTestResult,
   SettingsPayload,
   TaskListParams,
@@ -79,8 +79,11 @@ export const adminPoliciesApi = {
 
   scan: (id: number, body: PolicyScanRequest = {}) =>
     api
-      .post<PolicyScanResult>(`/admin/policies/${id}/scan`, body, { timeout: 600_000 })
+      .post<PolicyScanEnqueued>(`/admin/policies/${id}/scan`, body, { timeout: 600_000 })
       .then((r) => r.data),
+
+  scanStatus: (id: number, taskId: number) =>
+    api.get<MaintenanceTask>(`/admin/policies/${id}/scan/${taskId}`).then((r) => r.data),
 
   preview: (body: PolicyPreviewRequest) =>
     api.post<PolicyPreviewResult>('/admin/policies/preview', body).then((r) => r.data),

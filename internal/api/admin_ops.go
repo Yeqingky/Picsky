@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/yeqingky/Picsky/internal/apperr"
 	"github.com/yeqingky/Picsky/internal/middleware"
+	"github.com/yeqingky/Picsky/internal/model"
 	"github.com/yeqingky/Picsky/internal/service"
 	"github.com/yeqingky/Picsky/internal/storage"
 )
@@ -142,12 +144,39 @@ func (s *Server) adminScanPolicy(c *gin.Context) {
 		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
 		return
 	}
-	result, err := s.svc.Policies.Scan(c.Request.Context(), id, principal.User.ID, payload.Path, payload.DryRun)
+	task, objectCount, err := s.svc.Policies.EnqueueScan(c.Request.Context(), id, principal.User.ID, payload.Path, payload.DryRun)
 	if err != nil {
 		s.fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusAccepted, gin.H{"task_id": task.ID, "status": task.Status, "objects": objectCount})
+}
+
+// adminGetPolicyScanTask 查询当前策略的扫描任务状态与结果.
+func (s *Server) adminGetPolicyScanTask(c *gin.Context) {
+	policyID, err := idParam(c, "id")
+	if err != nil {
+		s.fail(c, err)
+		return
+	}
+	taskID, err := idParam(c, "task_id")
+	if err != nil {
+		s.fail(c, err)
+		return
+	}
+	task, err := s.svc.Tasks.Get(taskID)
+	if err != nil {
+		s.fail(c, err)
+		return
+	}
+	var payload struct {
+		PolicyID int64 `json:"policy_id"`
+	}
+	if task.Type != model.TaskPolicyScan || json.Unmarshal([]byte(task.Payload), &payload) != nil || payload.PolicyID != policyID {
+		s.fail(c, apperr.ErrNotFound.WithMessage("任务不存在"))
+		return
+	}
+	c.JSON(http.StatusOK, task)
 }
 
 // adminGetSettings 读取系统设置.

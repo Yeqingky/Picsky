@@ -404,6 +404,12 @@ export interface PolicyScanRequest {
   dry_run?: boolean;
 }
 
+export interface PolicyScanEnqueued {
+  task_id: number;
+  status: MaintenanceTaskStatus;
+  objects: number;
+}
+
 export interface PolicyScanResult {
   images: number;
   files: number;
@@ -444,6 +450,7 @@ export interface MaintenanceTask {
   id: number;
   type: MaintenanceTaskType | string;
   payload: string | null;
+  result?: string;
   status: MaintenanceTaskStatus | string;
   attempts: number;
   last_error: string | null;

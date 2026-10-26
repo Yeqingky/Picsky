@@ -26,6 +26,7 @@ import type {
   AdminPolicyWriteRequest,
   ConflictPolicy,
   PolicyScanRequest,
+  PolicyScanResult,
 } from '../../api/types';
 import { CopyButton } from '../../components/CopyButton';
 import { PageHeader } from '../../components/PageHeader';
@@ -186,6 +187,26 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
 function errorText(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message !== '') return error.message;
   return fallback;
+}
+
+function scanResultFromTask(raw: string | undefined): PolicyScanResult | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const result = parsed as Partial<PolicyScanResult>;
+    if (
+      typeof result.images !== 'number' ||
+      typeof result.files !== 'number' ||
+      typeof result.skipped !== 'number' ||
+      !Array.isArray(result.failed)
+    ) {
+      return null;
+    }
+    return result as PolicyScanResult;
+  } catch {
+    return null;
+  }
 }
 
 /** 面板内分组: 说明与右侧操作 + 表单内容 (无卡片边框, 与设置页的标签面板一致) */
@@ -530,7 +551,28 @@ export default function AdminPolicyEditPage() {
   const scanMutation = useMutation({
     mutationFn: (vars: { targetId: number; body: PolicyScanRequest }) =>
       adminPoliciesApi.scan(vars.targetId, vars.body),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'tasks'] });
+    },
   });
+  const scanTaskId = scanMutation.data?.task_id;
+  const scanTaskQuery = useQuery({
+    queryKey: ['admin', 'policy-scan-task', numericId, scanTaskId],
+    queryFn: () => adminPoliciesApi.scanStatus(numericId, scanTaskId!),
+    enabled: isEdit && scanTaskId !== undefined,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'pending' || status === 'running' ? 2000 : false;
+    },
+  });
+  const scanTask = scanTaskQuery.data;
+  const scanTaskStatus = scanTask?.status;
+  const scanTaskActive =
+    scanMutation.data !== undefined &&
+    (scanTaskStatus === 'pending' ||
+      scanTaskStatus === 'running' ||
+      (scanTaskStatus === undefined && !scanTaskQuery.isError));
+  const scanResult = scanResultFromTask(scanTask?.result);
 
   /* ------------------------------------------------------------ 派生数据 */
 
@@ -1208,7 +1250,7 @@ export default function AdminPolicyEditPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={scanMutation.isPending}
+                  disabled={scanMutation.isPending || scanTaskActive}
                   onClick={() => {
                     if (!isEdit) return;
                     const trimmed = scanPath.trim();
@@ -1224,7 +1266,9 @@ export default function AdminPolicyEditPage() {
                   <Play className="size-4" />
                   {scanMutation.isPending
                     ? t('adminPolicies.edit.scan.running')
-                    : t('adminPolicies.edit.scan.button')}
+                    : scanTaskActive
+                      ? t('adminPolicies.edit.scan.backgroundRunningButton')
+                      : t('adminPolicies.edit.scan.button')}
                 </Button>
               }
             >
@@ -1259,34 +1303,79 @@ export default function AdminPolicyEditPage() {
                   </Alert>
                 )}
                 {scanMutation.data !== undefined && (
-                  <Alert className="border-transparent bg-info/10 text-info">
+                  <Alert
+                    variant={scanTaskStatus === 'failed' ? 'destructive' : 'default'}
+                    className={
+                      scanTaskStatus === 'failed'
+                        ? undefined
+                        : 'border-transparent bg-info/10 text-info'
+                    }
+                  >
                     <AlertDescription>
-                      <p className="text-sm">
-                        {scanMutation.variables?.body.dry_run === true
-                          ? t('adminPolicies.edit.scan.dryRunPrefix')
-                          : ''}
-                        {t('adminPolicies.edit.scan.result', {
-                          images: scanMutation.data.images,
-                          files: scanMutation.data.files,
-                          skipped: scanMutation.data.skipped,
-                        })}
-                      </p>
-                      {scanMutation.data.failed.length > 0 && (
-                        <div className="mt-2 flex flex-col gap-1">
-                          <p className="text-sm font-semibold">
-                            {t('adminPolicies.edit.scan.failedTitle', {
-                              count: scanMutation.data.failed.length,
+                      {scanTask === undefined ? (
+                        <p className="text-sm">
+                          {t('adminPolicies.edit.scan.queued', {
+                            id: scanMutation.data.task_id,
+                            objects: scanMutation.data.objects,
+                          })}
+                        </p>
+                      ) : scanTaskStatus === 'running' ? (
+                        <p className="text-sm">
+                          {t('adminPolicies.edit.scan.processing', {
+                            id: scanTask.id,
+                            objects: scanMutation.data.objects,
+                          })}
+                        </p>
+                      ) : scanTaskStatus === 'pending' ? (
+                        <p className="text-sm">
+                          {t('adminPolicies.edit.scan.queued', {
+                            id: scanTask.id,
+                            objects: scanMutation.data.objects,
+                          })}
+                        </p>
+                      ) : scanTaskStatus === 'failed' ? (
+                        <p className="text-sm">
+                          {t('adminPolicies.edit.scan.taskFailed', {
+                            error: scanTask.last_error || t('adminPolicies.edit.scan.failed'),
+                          })}
+                        </p>
+                      ) : scanTaskStatus === 'done' && scanResult !== null ? (
+                        <>
+                          <p className="text-sm">
+                            {scanMutation.variables?.body.dry_run === true
+                              ? t('adminPolicies.edit.scan.dryRunPrefix')
+                              : ''}
+                            {t('adminPolicies.edit.scan.result', {
+                              images: scanResult.images,
+                              files: scanResult.files,
+                              skipped: scanResult.skipped,
                             })}
                           </p>
-                          {scanMutation.data.failed.map((item) => (
-                            <p
-                              key={`${item.path}-${item.error}`}
-                              className="font-mono text-xs break-all"
-                            >
-                              {item.path} — {item.error}
-                            </p>
-                          ))}
-                        </div>
+                          {scanResult.failed.length > 0 && (
+                            <div className="mt-2 flex flex-col gap-1">
+                              <p className="text-sm font-semibold">
+                                {t('adminPolicies.edit.scan.failedTitle', {
+                                  count: scanResult.failed.length,
+                                })}
+                              </p>
+                              {scanResult.failed.map((item) => (
+                                <p
+                                  key={`${item.path}-${item.error}`}
+                                  className="font-mono text-xs break-all"
+                                >
+                                  {item.path} — {item.error}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-sm">{t('adminPolicies.edit.scan.completed')}</p>
+                      )}
+                      {scanTaskQuery.isError && (
+                        <p className="mt-2 text-sm">
+                          {errorText(scanTaskQuery.error, t('adminPolicies.edit.scan.failed'))}
+                        </p>
                       )}
                     </AlertDescription>
                   </Alert>

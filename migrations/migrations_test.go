@@ -83,8 +83,14 @@ func TestConflictPolicyMigrationMapsLegacyValuesToSkip(t *testing.T) {
 	if err := database.Order("version DESC").First(&latest).Error; err != nil {
 		t.Fatalf("读取迁移版本失败: %v", err)
 	}
-	if latest.Version != 9 {
-		t.Errorf("迁移版本应为 9, 实际 %d", latest.Version)
+	if latest.Version != 10 {
+		t.Errorf("迁移版本应为 10, 实际 %d", latest.Version)
+	}
+	if !database.Migrator().HasTable(&model.PolicyScanManifest{}) {
+		t.Fatal("迁移未创建 policy_scan_manifests 表")
+	}
+	if !database.Migrator().HasColumn(&model.MaintenanceTask{}, "result") {
+		t.Fatal("迁移未创建 maintenance_tasks.result 列")
 	}
 }
 
