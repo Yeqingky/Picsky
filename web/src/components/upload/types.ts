@@ -27,3 +27,18 @@ export function createUploadItem(file: File): UploadItem {
     progress: 0,
   };
 }
+
+/** 上传项的直链: 完成或秒传命中时可用, 取默认别名 */
+export function uploadItemUrl(item: UploadItem): string | null {
+  if (item.result) {
+    const urls = item.result.urls;
+    const preferred = urls.find((entry) => entry.is_default) ?? urls[0];
+    return preferred?.url ?? item.result.url;
+  }
+  return item.dedupRecord?.url ?? null;
+}
+
+/** 上传项用于复制格式的原始文件名 */
+export function uploadItemFilename(item: UploadItem): string {
+  return item.result?.original_filename ?? item.name;
+}

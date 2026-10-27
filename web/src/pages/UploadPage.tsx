@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CloudUpload } from 'lucide-react';
+import { CloudUpload, Copy } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -9,14 +9,11 @@ import { uploadApi } from '../api/upload';
 import type { PolicySummary } from '../api/types';
 import { useAuth } from '../hooks/useAuth';
 import { PageHeader } from '../components/PageHeader';
-import { UploadQueueRow } from '../components/upload/UploadQueueRow';
-import { UploadResultCard } from '../components/upload/UploadResultCard';
-import { createUploadItem } from '../components/upload/types';
+import { UploadFileRow } from '../components/upload/UploadFileRow';
+import { createUploadItem, uploadItemFilename, uploadItemUrl } from '../components/upload/types';
 import type { UploadItem } from '../components/upload/types';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
-import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
-import { Card, CardContent } from '../components/ui/card';
 import {
   Select,
   SelectContent,
@@ -24,10 +21,37 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../components/ui/select';
-import { Separator } from '../components/ui/separator';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/tooltip';
+import { copyText, renderCopyText } from '../utils/clipboard';
+import type { CopyFormat } from '../utils/clipboard';
 import { sha256Hex } from '../utils/hash';
 import { STORAGE_KEYS } from '../utils/constants';
 import { cn } from '../lib/utils';
+
+type UploadFilter = 'all' | 'done' | 'uploading' | 'queued' | 'failed';
+
+const FILTERS: UploadFilter[] = ['all', 'done', 'uploading', 'queued', 'failed'];
+
+const COPY_FORMATS: { value: CopyFormat; labelKey: string }[] = [
+  { value: 'direct', labelKey: 'upload.format.url' },
+  { value: 'markdown', labelKey: 'upload.format.md' },
+  { value: 'html', labelKey: 'upload.format.html' },
+];
+
+function matchesFilter(item: UploadItem, filter: UploadFilter): boolean {
+  switch (filter) {
+    case 'done':
+      return item.status === 'done' || item.status === 'duplicate';
+    case 'uploading':
+      return item.status === 'uploading' || item.status === 'hashing';
+    case 'queued':
+      return item.status === 'pending';
+    case 'failed':
+      return item.status === 'failed';
+    default:
+      return true;
+  }
+}
 
 export default function UploadPage() {
   const { t } = useTranslation();
@@ -37,6 +61,8 @@ export default function UploadPage() {
   const [queue, setQueue] = useState<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [policyId, setPolicyId] = useState<number | null>(null);
+  const [filter, setFilter] = useState<UploadFilter>('all');
+  const [copyFormat, setCopyFormat] = useState<CopyFormat>('direct');
   const inputRef = useRef<HTMLInputElement | null>(null);
   const runningRef = useRef(false);
   const dragDepthRef = useRef(0);
@@ -178,19 +204,75 @@ export default function UploadPage() {
   }, [queue, canUpload, policyId, updateItem, t]);
 
   const stats = useMemo(() => {
-    const done = queue.filter(
-      (item) => item.status === 'done' || item.status === 'duplicate',
-    ).length;
-    const failed = queue.filter((item) => item.status === 'failed').length;
-    return { done, failed, total: queue.length };
+    let bytes = 0;
+    let uploaded = 0;
+    let done = 0;
+    let uploading = 0;
+    let queued = 0;
+    let failed = 0;
+    for (const item of queue) {
+      bytes += item.size;
+      if (item.status === 'done' || item.status === 'duplicate') {
+        done += 1;
+        uploaded += item.size;
+      } else if (item.status === 'uploading') {
+        uploading += 1;
+        uploaded += (item.size * item.progress) / 100;
+      } else if (item.status === 'hashing') {
+        uploading += 1;
+      } else if (item.status === 'failed') {
+        failed += 1;
+      } else {
+        queued += 1;
+      }
+    }
+    return {
+      total: queue.length,
+      done,
+      uploading,
+      queued,
+      failed,
+      progress: bytes === 0 ? 0 : Math.round((uploaded / bytes) * 100),
+    };
   }, [queue]);
 
-  const results = queue.filter((item) => item.status === 'done' || item.status === 'duplicate');
+  const completed = useMemo(() => queue.filter((item) => uploadItemUrl(item) !== null), [queue]);
+
+  const visible = useMemo(
+    () => queue.filter((item) => matchesFilter(item, filter)),
+    [queue, filter],
+  );
 
   const retryItem = (id: string) =>
     updateItem(id, { status: 'pending', progress: 0, error: undefined });
-  const removeItem = (id: string) =>
-    setQueue((current) => current.filter((item) => item.id !== id));
+
+  const copyItem = useCallback(
+    async (item: UploadItem) => {
+      const url = uploadItemUrl(item);
+      if (url === null) return;
+      const ok = await copyText(
+        renderCopyText(copyFormat, { url, filename: uploadItemFilename(item) }),
+      );
+      if (ok) toast.success(t('common.action.copied'));
+      else toast.error(t('common.action.copyFailed'));
+    },
+    [copyFormat, t],
+  );
+
+  const copyAll = useCallback(async () => {
+    const text = completed
+      .map((item) => {
+        const url = uploadItemUrl(item);
+        if (url === null) return '';
+        return renderCopyText(copyFormat, { url, filename: uploadItemFilename(item) });
+      })
+      .filter((line) => line !== '')
+      .join('\n');
+    if (text === '') return;
+    const ok = await copyText(text);
+    if (ok) toast.success(t('common.action.copied'));
+    else toast.error(t('common.action.copyFailed'));
+  }, [completed, copyFormat, t]);
 
   if (!canUpload) {
     return (
@@ -207,126 +289,175 @@ export default function UploadPage() {
   const policyUnavailable = !policiesPending && (policies?.length ?? 0) === 0;
 
   return (
-    <div className="flex min-h-[calc(100svh-9rem)] flex-1 flex-col">
-      <div className="flex flex-1 flex-col gap-4">
-        <div className="flex items-center justify-end gap-2">
-          {policyUnavailable && (
-            <p className="text-muted-foreground text-xs">{t('upload.policy.none')}</p>
-          )}
-          <Select
-            value={policyId === null ? undefined : String(policyId)}
-            onValueChange={(value) => {
-              selectPolicy(policies?.find((policy) => policy.id === Number(value)));
-            }}
-            disabled={policiesPending || policyUnavailable}
-          >
-            <SelectTrigger aria-label={t('upload.policy.label')} className="w-[115px]">
-              <SelectValue placeholder={t('upload.policy.label')} />
-            </SelectTrigger>
-            <SelectContent>
-              {(policies ?? []).map((policy) => (
-                <SelectItem key={policy.id} value={String(policy.id)}>
-                  {policy.name}
-                  {policy.is_default ? ` · ${t('upload.policy.defaultHint')}` : ''}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+    <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4">
+      <div className="flex items-center justify-end gap-2">
+        {policyUnavailable && (
+          <p className="text-muted-foreground text-xs">{t('upload.policy.none')}</p>
+        )}
+        <Select
+          value={policyId === null ? undefined : String(policyId)}
+          onValueChange={(value) => {
+            selectPolicy(policies?.find((policy) => policy.id === Number(value)));
+          }}
+          disabled={policiesPending || policyUnavailable}
+        >
+          <SelectTrigger aria-label={t('upload.policy.label')} className="w-[184px]">
+            <SelectValue placeholder={t('upload.policy.label')} />
+          </SelectTrigger>
+          <SelectContent>
+            {(policies ?? []).map((policy) => (
+              <SelectItem key={policy.id} value={String(policy.id)}>
+                {policy.name}
+                {policy.is_default ? ` · ${t('upload.policy.defaultHint')}` : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
-        <div className="flex justify-center">
-          <div
-            onClick={() => inputRef.current?.click()}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click();
-            }}
-            role="button"
-            tabIndex={0}
-            className={cn(
-              'border-border flex w-full max-w-xl cursor-pointer flex-col items-center rounded-xl border-2 border-dashed p-5 text-center transition-colors md:p-6',
-              dragging ? 'border-primary bg-accent' : 'bg-card',
-            )}
-          >
-            <CloudUpload className="text-muted-foreground size-11" />
-            <h2 className="mt-2 text-lg font-medium">
-              {dragging ? t('upload.dropzone.hintActive') : t('upload.dropzone.hint')}
-            </h2>
-            <p className="text-muted-foreground mt-1 text-sm">{t('upload.dropzone.pasteHint')}</p>
-            <Button className="mt-4">
-              <CloudUpload className="size-4" />
-              {t('upload.dropzone.selectFiles')}
-            </Button>
-            <p className="text-muted-foreground mt-3 text-xs">
-              {t('upload.dropzone.objectRetainHint')}
-            </p>
-            <input
-              ref={inputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              onChange={(event) => {
-                const files = event.target.files;
-                if (files) addFiles([...files]);
-                event.target.value = '';
-              }}
-            />
-          </div>
+      <div
+        onClick={() => inputRef.current?.click()}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') inputRef.current?.click();
+        }}
+        role="button"
+        tabIndex={0}
+        className={cn(
+          'flex w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors',
+          dragging ? 'border-primary bg-accent' : 'border-border bg-card hover:border-primary/60',
+        )}
+      >
+        <div className="flex items-center gap-2">
+          <CloudUpload className="text-muted-foreground size-5" />
+          <span className="text-sm font-medium">
+            {dragging ? t('upload.dropzone.hintActive') : t('upload.dropzone.hint')}
+          </span>
         </div>
+        <p className="text-muted-foreground text-xs">{t('upload.dropzone.pasteHint')}</p>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(event) => {
+            const files = event.target.files;
+            if (files) addFiles([...files]);
+            event.target.value = '';
+          }}
+        />
+      </div>
 
-        {queue.length > 0 && (
-          <Card>
-            <CardContent>
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="font-heading text-base font-medium">{t('upload.queue.title')}</h2>
-                  <p className="text-muted-foreground text-xs">
-                    {t('upload.queue.summary', stats)}
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setQueue((current) =>
-                      current.filter(
-                        (item) => item.status !== 'done' && item.status !== 'duplicate',
-                      ),
-                    )
-                  }
-                >
-                  {t('upload.queue.clearFinished')}
-                </Button>
+      {queue.length > 0 && (
+        <>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-end justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                <span className="font-medium">
+                  {t('upload.summary.total', { count: stats.total })}
+                </span>
+                <span className="text-success text-xs">
+                  {t('upload.summary.done', { count: stats.done })}
+                </span>
+                <span className="text-info text-xs">
+                  {t('upload.summary.uploading', { count: stats.uploading })}
+                </span>
+                <span className="text-muted-foreground text-xs">
+                  {t('upload.summary.queued', { count: stats.queued })}
+                </span>
+                <span className="text-destructive text-xs">
+                  {t('upload.summary.failed', { count: stats.failed })}
+                </span>
               </div>
-              <div className="flex flex-col gap-2">
-                {queue.map((item) => (
-                  <UploadQueueRow
-                    key={item.id}
-                    item={item}
-                    onRetry={retryItem}
-                    onRemove={removeItem}
-                  />
+              <span className="text-sm font-medium tabular-nums">{stats.progress}%</span>
+            </div>
+            <div className="bg-muted h-1 overflow-hidden rounded-full">
+              <div
+                className="bg-primary h-full rounded-full transition-[width]"
+                style={{ width: `${stats.progress}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <Select value={filter} onValueChange={(value) => setFilter(value as UploadFilter)}>
+              <SelectTrigger aria-label={t('upload.filter.label')} className="w-[132px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FILTERS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {t(`upload.filter.${option}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center gap-2">
+              <div
+                role="radiogroup"
+                aria-label={t('upload.format.label')}
+                className="bg-muted flex items-center gap-1 rounded-full p-1"
+              >
+                {COPY_FORMATS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={copyFormat === option.value}
+                    onClick={() => setCopyFormat(option.value)}
+                    className={cn(
+                      'h-6 rounded-full px-2.5 text-xs font-medium transition-colors',
+                      copyFormat === option.value
+                        ? 'bg-card text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {t(option.labelKey)}
+                  </button>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {results.length > 0 && (
-          <div className="flex flex-col gap-4">
-            <Separator />
-            <div className="flex items-center gap-2">
-              <h2 className="font-heading text-base font-medium">{t('upload.result.title')}</h2>
-              <Badge variant="outline">{results.length}</Badge>
-            </div>
-            <div className="flex flex-col gap-4">
-              {results.map((item) => (
-                <UploadResultCard key={item.id} item={item} />
-              ))}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="rounded-full"
+                    aria-label={t('upload.copyAll', { count: completed.length })}
+                    disabled={completed.length === 0}
+                    onClick={() => {
+                      void copyAll();
+                    }}
+                  >
+                    <Copy className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('upload.copyAll', { count: completed.length })}</TooltipContent>
+              </Tooltip>
             </div>
           </div>
-        )}
-      </div>
+
+          <div className="bg-card overflow-hidden rounded-xl border border-border">
+            {visible.length === 0 ? (
+              <p className="text-muted-foreground px-4 py-6 text-center text-sm">
+                {t('upload.filter.empty')}
+              </p>
+            ) : (
+              visible.map((item, index) => (
+                <UploadFileRow
+                  key={item.id}
+                  item={item}
+                  onCopy={(target) => {
+                    void copyItem(target);
+                  }}
+                  onRetry={retryItem}
+                  className={index > 0 ? 'border-t border-border' : undefined}
+                />
+              ))
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
