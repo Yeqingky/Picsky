@@ -64,7 +64,7 @@ Picsky/
 
 - Git 提交身份: 用户名 `YeqingKy`, 邮箱 `me@yeqing.im`.
 - GitHub Actions 容器工作流在所有分支 push 与 PR 上构建; 分支 push 发布 `ghcr.io/yeqingky/picsky:<短 hash>`, `vX.Y.Z` tag 发布版本 tag 与 `latest`; PR 仅构建不推送; GHCR 认证使用 `GITHUB_TOKEN`.
-- 不把 `README` 用作变更日志; 发布说明写入仓库根目录的 `.release-notes.md` 并随版本提交, 每次发布在文件顶部追加当前版本段落, 版本按倒序排列.
+- 不把 `README` 用作变更日志; 变更日志写入仓库根目录的 `CHANGELOG.md` 并随版本提交, 每次发布在文件顶部追加版本段落, 版本倒序排列; 版本数量较多或单文件过长时改用 `CHANGELOG/` 目录, 每个版本一个文件.
 - 存储适配器必须声明能力 (`delete`, `overwrite`, `stat`, `presign`, `multipart`); 新增驱动不得假设后端支持删除或覆盖, 上层按能力降级.
 - 魔法路径模板必须包含内容哈希变量或单个 `{seq}`; `rename` 从已入库匹配路径的最大序号之后分配, 扫描补录路径也占用序号; 未使用 `{seq}` 时冲突重命名追加 `-N`, 其他生成变量在重试中固定.
 - 冲突策略只使用 `rename` / `skip`; `overwrite` 是后端能力声明, 不作为冲突策略.
