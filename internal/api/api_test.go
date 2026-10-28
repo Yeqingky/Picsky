@@ -1161,6 +1161,19 @@ func TestUploadImagesAndKeys(t *testing.T) {
 	if item["original_filename"] != "photo.png" || item["policy_name"] != "主存储" {
 		t.Errorf("列表项字段不正确: %v", item)
 	}
+	caps, ok := item["policy_capabilities"].([]any)
+	if !ok {
+		t.Fatalf("列表项应返回策略驱动能力: %v", item["policy_capabilities"])
+	}
+	hasDelete := false
+	for _, capability := range caps {
+		if capability == "delete" {
+			hasDelete = true
+		}
+	}
+	if !hasDelete {
+		t.Errorf("WebDAV 策略应声明 delete 能力: %v", caps)
+	}
 	if item["user_email"] != "admin@example.com" {
 		t.Errorf("列表项应返回上传用户邮箱: %v", item["user_email"])
 	}

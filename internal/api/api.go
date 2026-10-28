@@ -273,39 +273,41 @@ type urlDTO struct {
 	IsDefault bool   `json:"is_default"`
 }
 
-// policyMeta 缓存策略的名称与分发域名.
+// policyMeta 缓存策略的名称, 驱动能力与分发域名.
 type policyMeta struct {
-	Name string
-	URLs []model.PolicyURL
+	Name         string
+	Capabilities []string
+	URLs         []model.PolicyURL
 }
 
 // imageDTO 是图片记录的下发结构.
 type imageDTO struct {
-	ID               int64     `json:"id"`
-	UserID           int64     `json:"user_id"`
-	PolicyID         int64     `json:"policy_id"`
-	PolicyName       string    `json:"policy_name"`
-	Kind             string    `json:"kind"`
-	RelPath          string    `json:"rel_path"`
-	ObjectKey        string    `json:"object_key"`
-	URL              string    `json:"url"`
-	URLs             []urlDTO  `json:"urls"`
-	MD5              string    `json:"md5"`
-	SHA1             string    `json:"sha1"`
-	SHA256           string    `json:"sha256"`
-	SHA512           string    `json:"sha512"`
-	Size             int64     `json:"size"`
-	Format           string    `json:"format"`
-	Ext              string    `json:"ext"`
-	MIME             string    `json:"mime"`
-	Width            *int      `json:"width"`
-	Height           *int      `json:"height"`
-	OriginalFilename string    `json:"original_filename"`
-	UserEmail        string    `json:"user_email"`
-	QuotaCharged     bool      `json:"quota_charged"`
-	Source           string    `json:"source"`
-	ClientIP         string    `json:"client_ip"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID                 int64     `json:"id"`
+	UserID             int64     `json:"user_id"`
+	PolicyID           int64     `json:"policy_id"`
+	PolicyName         string    `json:"policy_name"`
+	PolicyCapabilities []string  `json:"policy_capabilities"`
+	Kind               string    `json:"kind"`
+	RelPath            string    `json:"rel_path"`
+	ObjectKey          string    `json:"object_key"`
+	URL                string    `json:"url"`
+	URLs               []urlDTO  `json:"urls"`
+	MD5                string    `json:"md5"`
+	SHA1               string    `json:"sha1"`
+	SHA256             string    `json:"sha256"`
+	SHA512             string    `json:"sha512"`
+	Size               int64     `json:"size"`
+	Format             string    `json:"format"`
+	Ext                string    `json:"ext"`
+	MIME               string    `json:"mime"`
+	Width              *int      `json:"width"`
+	Height             *int      `json:"height"`
+	OriginalFilename   string    `json:"original_filename"`
+	UserEmail          string    `json:"user_email"`
+	QuotaCharged       bool      `json:"quota_charged"`
+	Source             string    `json:"source"`
+	ClientIP           string    `json:"client_ip"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // hashDTO 是上传响应中的哈希集合.
@@ -360,7 +362,11 @@ func (s *Server) metaFor(policyIDs []int64) (map[int64]*policyMeta, error) {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
 	for _, policy := range policies {
-		metas[policy.ID] = &policyMeta{Name: policy.Name, URLs: []model.PolicyURL{}}
+		meta := &policyMeta{Name: policy.Name, Capabilities: []string{}, URLs: []model.PolicyURL{}}
+		if spec, ok := storage.SpecOf(policy.Type); ok {
+			meta.Capabilities = spec.Capabilities
+		}
+		metas[policy.ID] = meta
 	}
 	for _, url := range urls {
 		if meta, ok := metas[url.PolicyID]; ok {
@@ -386,33 +392,35 @@ func (s *Server) urlsFor(meta *policyMeta, relPath string) []urlDTO {
 // toImageDTO 组装单条记录.
 func (s *Server) toImageDTO(record *model.Image, meta *policyMeta, userEmail string) imageDTO {
 	dto := imageDTO{
-		ID:               record.ID,
-		UserID:           record.UserID,
-		PolicyID:         record.PolicyID,
-		Kind:             record.Kind,
-		RelPath:          record.RelPath,
-		ObjectKey:        record.ObjectKey,
-		URL:              record.URL,
-		URLs:             []urlDTO{},
-		MD5:              record.MD5,
-		SHA1:             record.SHA1,
-		SHA256:           record.SHA256,
-		SHA512:           record.SHA512,
-		Size:             record.Size,
-		Format:           record.Format,
-		Ext:              record.Ext,
-		MIME:             record.MIME,
-		Width:            record.Width,
-		Height:           record.Height,
-		OriginalFilename: record.OriginalFilename,
-		UserEmail:        userEmail,
-		QuotaCharged:     record.QuotaCharged,
-		Source:           record.Source,
-		ClientIP:         record.ClientIP,
-		CreatedAt:        record.CreatedAt,
+		ID:                 record.ID,
+		UserID:             record.UserID,
+		PolicyID:           record.PolicyID,
+		PolicyCapabilities: []string{},
+		Kind:               record.Kind,
+		RelPath:            record.RelPath,
+		ObjectKey:          record.ObjectKey,
+		URL:                record.URL,
+		URLs:               []urlDTO{},
+		MD5:                record.MD5,
+		SHA1:               record.SHA1,
+		SHA256:             record.SHA256,
+		SHA512:             record.SHA512,
+		Size:               record.Size,
+		Format:             record.Format,
+		Ext:                record.Ext,
+		MIME:               record.MIME,
+		Width:              record.Width,
+		Height:             record.Height,
+		OriginalFilename:   record.OriginalFilename,
+		UserEmail:          userEmail,
+		QuotaCharged:       record.QuotaCharged,
+		Source:             record.Source,
+		ClientIP:           record.ClientIP,
+		CreatedAt:          record.CreatedAt,
 	}
 	if meta != nil {
 		dto.PolicyName = meta.Name
+		dto.PolicyCapabilities = meta.Capabilities
 		dto.URLs = s.urlsFor(meta, record.RelPath)
 	}
 	return dto

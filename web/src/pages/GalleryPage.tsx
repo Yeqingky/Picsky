@@ -244,10 +244,20 @@ export default function GalleryPage() {
   }, []);
 
   const handleBatchDelete = async () => {
+    const capabilitiesKnown = selectedRecords.length === selectedIds.length;
+    const supportsDelete =
+      capabilitiesKnown &&
+      selectedRecords.every((record) => record.policy_capabilities.includes('delete'));
     const ok = await confirm({
       title: t('gallery.selection.delete'),
-      description: t('common.confirm.batchDelete', { count: selectedIds.length }),
+      description: supportsDelete
+        ? t('common.confirm.batchDeleteImages', { count: selectedIds.length })
+        : t('common.confirm.batchDelete', { count: selectedIds.length }),
       danger: true,
+      hint:
+        capabilitiesKnown && !supportsDelete
+          ? t('common.confirm.batchObjectDeleteUnsupported')
+          : undefined,
     });
     if (ok) batchDelete.mutate(selectedIds);
   };

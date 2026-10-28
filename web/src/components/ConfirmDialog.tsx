@@ -19,6 +19,8 @@ export interface ConfirmOptions {
   cancelText?: string;
   /** 危险操作使用 error 配色 */
   danger?: boolean;
+  /** 危险操作的补充说明 */
+  hint?: ReactNode;
 }
 
 type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>;
@@ -66,10 +68,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             <AlertDialogDescription asChild>
               <div>
                 <div>{options.description ?? t('common.confirm.irreversible')}</div>
-                {options.danger && (
-                  <div className="text-muted-foreground mt-1 text-[13px]">
-                    {t('common.confirm.objectRetainHint')}
-                  </div>
+                {options.hint && (
+                  <div className="text-muted-foreground mt-1 text-[13px]">{options.hint}</div>
                 )}
               </div>
             </AlertDialogDescription>

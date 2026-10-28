@@ -182,6 +182,8 @@ export interface ImageRecord {
   id: number;
   policy_id: number;
   policy_name: string;
+  /** 策略驱动的能力位 (如 delete / overwrite / stat) */
+  policy_capabilities: string[];
   rel_path: string;
   object_key: string;
   url: string;

@@ -75,12 +75,16 @@ export const common = {
     dangerTitle: '危险操作确认',
     irreversible: '此操作不可撤销, 请确认后继续。',
     deleteImage: '确定删除该图片记录?',
+    deleteImageObject: '确定删除该图片?',
     batchDelete: '确定删除选中的 {{count}} 条记录?',
+    batchDeleteImages: '确定删除选中的 {{count}} 张图片?',
     deleteKey: '吊销后使用该密钥的客户端将立即失效, 确定继续?',
     deletePolicy: '删除策略后无法恢复, 引用该策略的记录不会被删除。确定继续?',
     deleteGroup: '删除用户组后无法恢复, 组内用户需重新分配。确定继续?',
     deleteUser: '删除用户会级联删除其图片记录, 确定继续?',
-    objectRetainHint: '外部存储不支持删除或已关闭删除时, 仅从 Picsky 删除记录, 外部文件保留。',
+    objectDeleteUnsupported: '当前存储策略未声明删除能力, 删除后仅移除 Picsky 记录, 外部文件保留。',
+    batchObjectDeleteUnsupported:
+      '所选记录含未声明删除能力的策略, 这些记录仅从 Picsky 删除, 外部文件保留。',
   },
 
   quota: {

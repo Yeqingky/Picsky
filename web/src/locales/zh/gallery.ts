@@ -60,6 +60,7 @@ export const gallery = {
     charged: '首次存储',
     free: '复用或扫描记录, 不计配额',
     delete: '删除记录',
+    deleteImage: '删除图片',
     deleteOpened: '删除结果',
   },
   delete: {
