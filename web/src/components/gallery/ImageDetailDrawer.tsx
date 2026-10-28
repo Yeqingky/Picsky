@@ -77,12 +77,17 @@ export function ImageDetailDrawer({
   });
 
   const invalidateGallery = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['images'] });
+    // 详情查询对应的记录已被删除, 刷新会触发服务端 404; 只刷新列表类查询
+    await queryClient.invalidateQueries({
+      queryKey: ['images'],
+      predicate: (query) => query.queryKey[1] !== 'detail',
+    });
   };
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => imagesApi.remove(id),
     onSuccess: async (result) => {
+      onClose();
       await invalidateGallery();
       onDeleted?.(result);
       if (result.object_deleted) {
@@ -94,7 +99,6 @@ export function ImageDetailDrawer({
           }),
         );
       }
-      onClose();
     },
   });
 
