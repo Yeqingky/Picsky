@@ -76,23 +76,27 @@ type GroupPolicy struct {
 
 // StoragePolicy 是一条完整的存储策略: 后端, 前缀, 魔法路径, 冲突策略.
 type StoragePolicy struct {
-	ID             int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	Name           string    `gorm:"size:64;not null;uniqueIndex" json:"name"`
-	Type           string    `gorm:"size:32;not null" json:"type"`
-	Enabled        bool      `gorm:"not null" json:"enabled"`
-	PathTemplate   string    `gorm:"size:255;not null" json:"path_template"`
-	ConflictPolicy string    `gorm:"size:16;not null;default:'rename'" json:"conflict_policy"`
-	Config         string    `gorm:"type:text;not null;default:'{}'" json:"config"`
-	Secrets        string    `gorm:"type:text" json:"-"`
-	Sort           int       `gorm:"not null;default:0" json:"sort"`
-	CreatedAt      time.Time `gorm:"not null" json:"created_at"`
-	UpdatedAt      time.Time `gorm:"not null" json:"updated_at"`
+	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name             string    `gorm:"size:64;not null;uniqueIndex" json:"name"`
+	Type             string    `gorm:"size:32;not null" json:"type"`
+	Enabled          bool      `gorm:"not null" json:"enabled"`
+	PathTemplate     string    `gorm:"size:255;not null" json:"path_template"`
+	ConflictPolicy   string    `gorm:"size:16;not null;default:'rename'" json:"conflict_policy"`
+	ReuseReleasedSeq bool      `gorm:"not null;default:false" json:"reuse_released_seq"`
+	Config           string    `gorm:"type:text;not null;default:'{}'" json:"config"`
+	Secrets          string    `gorm:"type:text" json:"-"`
+	Sort             int       `gorm:"not null;default:0" json:"sort"`
+	CreatedAt        time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt        time.Time `gorm:"not null" json:"updated_at"`
 }
 
-// PolicySequence 是策略的递增序号分配器; 每个策略一条, 序号跨输出格式共享.
+// PolicySequence 是策略当前魔法路径模板的序号分配器.
+// allocated 是已分配到的最大序号; released 是图片删除后释放的可复用序号 (JSON 数组, 先进先出).
 type PolicySequence struct {
-	PolicyID  int64 `gorm:"primaryKey" json:"policy_id"`
-	NextValue int64 `gorm:"not null" json:"next_value"`
+	PolicyID     int64  `gorm:"primaryKey;autoIncrement:false" json:"policy_id"`
+	PathTemplate string `gorm:"size:255;not null" json:"path_template"`
+	Allocated    int64  `gorm:"not null" json:"allocated"`
+	Released     string `gorm:"type:text;not null;default:'[]'" json:"released"`
 }
 
 // PolicyURL 是策略的分发域名别名.

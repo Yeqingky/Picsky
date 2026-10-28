@@ -15,7 +15,7 @@ import (
 )
 
 // schemaVersion 是当前迁移版本, 每次结构变更递增并追加一个迁移函数.
-const schemaVersion = 11
+const schemaVersion = 12
 
 // SchemaMigration 记录已应用的迁移版本.
 type SchemaMigration struct {
@@ -152,8 +152,11 @@ var steps = map[int]func(*gorm.DB) error{
 	},
 	11: func(db *gorm.DB) error {
 		// 策略序号分配器: 每个含 {seq} 的策略一条原子递增计数器.
-		if err := db.AutoMigrate(&model.PolicySequence{}); err != nil {
-			return err
+		// 旧库可能已有两列计数器, 保留原表由版本 12 转换, 避免向非空表追加 NOT NULL 列.
+		if !db.Migrator().HasTable(&model.PolicySequence{}) {
+			if err := db.AutoMigrate(&model.PolicySequence{}); err != nil {
+				return err
+			}
 		}
 		// {seq} 只支持 rename; 旧数据中的 skip 组合统一改为 rename.
 		if !db.Migrator().HasTable(&model.StoragePolicy{}) {
@@ -162,6 +165,53 @@ var steps = map[int]func(*gorm.DB) error{
 		return db.Model(&model.StoragePolicy{}).
 			Where("path_template LIKE ? AND conflict_policy <> ?", "%{seq}%", model.ConflictRename).
 			Update("conflict_policy", model.ConflictRename).Error
+	},
+	12: func(db *gorm.DB) error {
+		// 旧计数器只有 policy_id 与 next_value; 转为模板快照 + 已分配最大序号 + 释放队列.
+		if db.Migrator().HasTable(&model.PolicySequence{}) && db.Migrator().HasColumn(&model.PolicySequence{}, "next_value") {
+			type legacySequence struct {
+				PolicyID  int64
+				NextValue int64
+			}
+			var rows []legacySequence
+			if err := db.Table("policy_sequences").Select("policy_id, next_value").Scan(&rows).Error; err != nil {
+				return err
+			}
+			if err := db.Exec("DROP TABLE policy_sequences").Error; err != nil {
+				return err
+			}
+			if err := db.AutoMigrate(&model.PolicySequence{}); err != nil {
+				return err
+			}
+			for _, row := range rows {
+				var policy model.StoragePolicy
+				if err := db.First(&policy, row.PolicyID).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						continue
+					}
+					return err
+				}
+				if !strings.Contains(policy.PathTemplate, "{seq}") {
+					continue
+				}
+				allocated := row.NextValue - 1
+				if allocated < 0 {
+					allocated = 0
+				}
+				sequence := model.PolicySequence{
+					PolicyID:     policy.ID,
+					PathTemplate: policy.PathTemplate,
+					Allocated:    allocated,
+					Released:     "[]",
+				}
+				if err := db.Create(&sequence).Error; err != nil {
+					return err
+				}
+			}
+		} else if err := db.AutoMigrate(&model.PolicySequence{}); err != nil {
+			return err
+		}
+		return db.AutoMigrate(&model.StoragePolicy{})
 	},
 }
 

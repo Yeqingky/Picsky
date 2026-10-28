@@ -176,7 +176,7 @@ export interface Base64UploadRequest {
 /* ------------------------------------------------------------------ 图片 */
 
 export type DeleteReason =
-  'last_reference' | 'no_capability' | 'setting_disabled' | 'shared' | 'backend_error';
+  'last_reference' | 'no_capability' | 'setting_disabled' | 'shared' | 'queued' | 'backend_error';
 
 export interface ImageRecord {
   id: number;
@@ -359,6 +359,8 @@ export interface AdminPolicy {
   enabled: boolean;
   path_template: string;
   conflict_policy: ConflictPolicy;
+  /** 是否复用已删除图片释放的 {seq}; 默认 false */
+  reuse_released_seq: boolean;
   config: {
     endpoint?: string;
     region?: string;
@@ -385,6 +387,7 @@ export interface AdminPolicyWriteRequest {
   enabled: boolean;
   path_template: string;
   conflict_policy: ConflictPolicy;
+  reuse_released_seq?: boolean;
   config: Record<string, unknown>;
   /** 仅写: {"username","password"} */
   secrets?: {

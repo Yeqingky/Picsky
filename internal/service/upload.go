@@ -253,11 +253,14 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	}
 
 	sequence := uint64(0)
+	fromReleased := false
+	excludedSequences := map[uint64]struct{}{}
 	if renderer.HasSequence() {
-		sequence, err = allocatePolicySequence(u.db, policy.ID)
+		allocation, err := allocatePolicySequence(u.db, policy, excludedSequences)
 		if err != nil {
 			return nil, err
 		}
+		sequence, fromReleased = allocation.Value, allocation.FromReleased
 	}
 	relPath, err := renderer.Render(sequence)
 	if err != nil {
@@ -304,10 +307,17 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 			})
 		case model.ConflictRename:
 			if renderer.HasSequence() {
-				sequence, err = allocatePolicySequence(u.db, policy.ID)
+				if fromReleased {
+					if err := releasePolicySequence(u.db, policy, sequence); err != nil {
+						u.log.Warn("归还未使用的释放序号失败", "policy_id", policy.ID, "sequence", sequence, "error", err)
+					}
+					excludedSequences[sequence] = struct{}{}
+				}
+				allocation, err := allocatePolicySequence(u.db, policy, excludedSequences)
 				if err != nil {
 					return nil, err
 				}
+				sequence, fromReleased = allocation.Value, allocation.FromReleased
 			} else if sequence == 0 {
 				prefix, suffix := renderer.SequencePattern()
 				maxSequence, err := u.maxPathSequence(policy.ID, prefix, suffix)

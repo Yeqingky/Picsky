@@ -158,6 +158,7 @@ interface FormState {
   password: string;
   pathTemplate: string;
   conflictPolicy: ConflictPolicy;
+  reuseReleasedSeq: boolean;
   urls: UrlRow[];
 }
 
@@ -198,6 +199,7 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     password: policy.secrets?.password ?? '',
     pathTemplate: policy.path_template,
     conflictPolicy: policy.conflict_policy,
+    reuseReleasedSeq: policy.reuse_released_seq,
     urls,
   };
 }
@@ -438,6 +440,7 @@ export default function AdminPolicyEditPage() {
           : DEFAULT_PATH_TEMPLATE,
       conflictPolicy:
         CONFLICT_OPTIONS.find((option) => option === rawConflict) ?? DEFAULT_CONFLICT_POLICY,
+      reuseReleasedSeq: false,
       urls: [{ key: nextUrlKey(), alias: '', url: '' }],
     });
   }, [isNew, settingsQuery.data, settingsQuery.isPending]);
@@ -556,6 +559,7 @@ export default function AdminPolicyEditPage() {
       enabled: form.enabled,
       path_template: form.pathTemplate.trim(),
       conflict_policy: form.conflictPolicy,
+      reuse_released_seq: form.reuseReleasedSeq,
       config: { endpoint: form.endpoint.trim() },
       urls: form.urls.map((row, index) => ({
         alias: row.alias.trim(),
@@ -634,6 +638,7 @@ export default function AdminPolicyEditPage() {
               password: form.password,
               pathTemplate: form.pathTemplate,
               conflictPolicy: form.conflictPolicy,
+              reuseReleasedSeq: form.reuseReleasedSeq,
               urls: form.urls,
             }),
             null,
@@ -678,6 +683,7 @@ export default function AdminPolicyEditPage() {
       if (patch.password !== undefined) next.password = patch.password;
       if (patch.pathTemplate !== undefined) next.pathTemplate = patch.pathTemplate;
       if (patch.conflictPolicy !== undefined) next.conflictPolicy = patch.conflictPolicy;
+      if (patch.reuseReleasedSeq !== undefined) next.reuseReleasedSeq = patch.reuseReleasedSeq;
       if (urls !== undefined) next.urls = urls;
       return next;
     });
@@ -1087,6 +1093,22 @@ export default function AdminPolicyEditPage() {
               <p className="text-muted-foreground text-xs">
                 {t('adminPolicies.edit.variable.note')}
               </p>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="policy-reuse-released-seq"
+                    checked={form.reuseReleasedSeq}
+                    onCheckedChange={(checked) => updateForm({ reuseReleasedSeq: checked })}
+                  />
+                  <Label htmlFor="policy-reuse-released-seq" className="font-normal">
+                    {t('adminPolicies.edit.field.reuseReleasedSeq')}
+                  </Label>
+                </div>
+                <p className="text-muted-foreground pl-10 text-xs">
+                  {t('adminPolicies.edit.field.reuseReleasedSeqHint')}
+                </p>
+              </div>
 
               <Separator />
               <div className="flex items-center justify-between gap-2">

@@ -243,6 +243,47 @@ func (t *Tasks) RunNow(id int64, actor *Principal) error {
 	return nil
 }
 
+// Delete 删除已完成或失败的任务; 运行中或待处理任务不可删除.
+func (t *Tasks) Delete(id int64, actor *Principal) error {
+	var task model.MaintenanceTask
+	if err := t.db.First(&task, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.ErrNotFound.WithMessage("任务不存在")
+		}
+		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	err := t.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("task_id = ?", id).Delete(&model.PolicyScanManifest{}).Error; err != nil {
+			return err
+		}
+		result := tx.Where("id = ? AND status IN ?", id, []string{model.TaskDone, model.TaskFailed}).
+			Delete(&model.MaintenanceTask{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errTaskNotDeletable
+		}
+		return nil
+	})
+	switch {
+	case errors.Is(err, errTaskNotDeletable):
+		return apperr.ErrInvalidRequest.WithMessage("仅可删除已完成或失败的任务")
+	case err != nil:
+		return apperr.ErrInternal.WithMessage("删除任务失败: " + err.Error())
+	}
+	t.audit.Recordf(Entry{
+		UserID:     actorID(actor),
+		Action:     "task_delete",
+		TargetType: "task",
+		TargetID:   &task.ID,
+		Detail:     map[string]any{"type": task.Type},
+	})
+	return nil
+}
+
+var errTaskNotDeletable = errors.New("task not deletable")
+
 // Start 启动后台调度循环, 直到 ctx 结束.
 func (t *Tasks) Start(ctx context.Context) {
 	ticker := time.NewTicker(taskWorkerInterval)
@@ -351,18 +392,104 @@ func (t *Tasks) execute(ctx context.Context, task *model.MaintenanceTask, allowC
 		if err != nil {
 			return err
 		}
-		adapter, err := t.policies.Adapter(policy)
-		if err != nil {
-			return err
-		}
-		if !adapter.Capabilities().Has(storage.CapDelete) {
-			return errors.New("后端未声明 delete 能力")
-		}
-		return adapter.Delete(ctx, payload.ObjectKey)
+		return t.performObjectDelete(ctx, policy, payload.ObjectKey)
 
 	default:
 		return fmt.Errorf("未知任务类型: %s", task.Type)
 	}
+}
+
+// performObjectDelete 调用后端删除对象, 校验响应, 并在对象确认删除后释放序号.
+// 删除前路径仍被记录引用时跳过, 避免重跑旧任务删除已被重新占用的对象.
+func (t *Tasks) performObjectDelete(ctx context.Context, policy *model.StoragePolicy, objectKey string) error {
+	adapter, err := t.policies.Adapter(policy)
+	if err != nil {
+		return err
+	}
+	if !adapter.Capabilities().Has(storage.CapDelete) {
+		return errors.New("后端未声明 delete 能力")
+	}
+	var references int64
+	if err := t.db.Model(&model.Image{}).
+		Where("policy_id = ? AND object_key = ?", policy.ID, objectKey).
+		Count(&references).Error; err != nil {
+		return err
+	}
+	if references > 0 {
+		return nil
+	}
+	if err := adapter.Delete(ctx, objectKey); err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return err
+	}
+	// 删除期间路径可能被新记录重新占用, 此时不释放序号.
+	if err := t.db.Model(&model.Image{}).
+		Where("policy_id = ? AND object_key = ?", policy.ID, objectKey).
+		Count(&references).Error; err != nil {
+		return err
+	}
+	if references > 0 {
+		return nil
+	}
+	if value, ok := storage.ExtractSequence(policy.PathTemplate, objectKey); ok {
+		return releasePolicySequence(t.db, policy, value)
+	}
+	return nil
+}
+
+// DeleteObject 立即尝试删除对象并写入维护队列.
+// 失败时任务保持 failed, 等待人工重试或删除; queued 为 true 表示后台执行器已接手.
+func (t *Tasks) DeleteObject(ctx context.Context, policyID int64, objectKey string) (bool, error) {
+	payload, err := json.Marshal(map[string]any{"policy_id": policyID, "object_key": objectKey})
+	if err != nil {
+		return false, apperr.ErrInternal.WithMessage("任务参数序列化失败: " + err.Error())
+	}
+	task := model.MaintenanceTask{
+		Type:      model.TaskObjectDelete,
+		Payload:   string(payload),
+		Status:    model.TaskPending,
+		CreatedAt: nowUTC(),
+	}
+	if err := t.db.Create(&task).Error; err != nil {
+		return false, apperr.ErrInternal.WithMessage("入队对象清理任务失败: " + err.Error())
+	}
+	claim := t.db.Model(&model.MaintenanceTask{}).
+		Where("id = ? AND status = ?", task.ID, model.TaskPending).
+		Updates(map[string]any{
+			"status":     model.TaskRunning,
+			"attempts":   gorm.Expr("attempts + 1"),
+			"last_error": "",
+			"result":     "",
+		})
+	if claim.Error != nil {
+		return false, apperr.ErrInternal.WithMessage(claim.Error.Error())
+	}
+	if claim.RowsAffected == 0 {
+		return true, nil
+	}
+	policy, err := t.policies.Get(policyID)
+	if err != nil {
+		t.markObjectDeleteFailed(&task, err)
+		return false, err
+	}
+	if err := t.performObjectDelete(ctx, policy, objectKey); err != nil {
+		t.markObjectDeleteFailed(&task, err)
+		return false, err
+	}
+	t.markDone(&task)
+	return false, nil
+}
+
+// markObjectDeleteFailed 把对象删除任务标记为失败并保留在队列中, 等待人工处理.
+func (t *Tasks) markObjectDeleteFailed(task *model.MaintenanceTask, cause error) {
+	now := nowUTC()
+	if err := t.db.Model(&model.MaintenanceTask{}).Where("id = ?", task.ID).Updates(map[string]any{
+		"status":      model.TaskFailed,
+		"last_error":  cause.Error(),
+		"finished_at": now,
+	}).Error; err != nil {
+		t.log.Warn("更新任务状态失败", "task_id", task.ID, "error", err)
+	}
+	t.log.Warn("对象删除失败, 等待人工重试", "task_id", task.ID, "error", cause)
 }
 
 func (t *Tasks) executePolicyScan(ctx context.Context, task *model.MaintenanceTask) error {
@@ -416,7 +543,7 @@ func (t *Tasks) purgeExpiredLogs() error {
 	taskCutoff := nowUTC().Add(-taskPurgeAfter)
 	expiredTasks := t.db.Model(&model.MaintenanceTask{}).
 		Select("id").
-		Where("status IN ? AND created_at < ?", []string{model.TaskDone, model.TaskFailed}, taskCutoff)
+		Where("status = ? AND created_at < ?", model.TaskDone, taskCutoff)
 	if err := t.db.Where("task_id IN (?)", expiredTasks).Delete(&model.PolicyScanManifest{}).Error; err != nil {
 		return err
 	}
@@ -424,7 +551,7 @@ func (t *Tasks) purgeExpiredLogs() error {
 		return err
 	}
 
-	t.log.Info("清理过期日志与已结束任务完成")
+	t.log.Info("清理过期日志与已完成任务完成")
 	return nil
 }
 
@@ -440,7 +567,7 @@ func (t *Tasks) markDone(task *model.MaintenanceTask) {
 	}
 }
 
-// markFailed 标记任务失败: 未超过重试上限时回到待处理.
+// markFailed 标记任务失败: 对象删除失败保留 failed 等待人工处理, 其他任务未超过重试上限时回到待处理.
 func (t *Tasks) markFailed(task *model.MaintenanceTask, cause error) {
 	if errors.Is(cause, errTaskClaimed) {
 		return
@@ -448,7 +575,8 @@ func (t *Tasks) markFailed(task *model.MaintenanceTask, cause error) {
 	attempts := task.Attempts + 1
 	status := model.TaskFailed
 	var finishedAt *time.Time
-	if attempts < taskMaxAttempts {
+	manual := task.Type == model.TaskObjectDelete
+	if !manual && attempts < taskMaxAttempts {
 		status = model.TaskPending
 	} else {
 		now := nowUTC()

@@ -19,6 +19,7 @@ export interface PolicyTransferSource {
   password: string;
   pathTemplate: string;
   conflictPolicy: ConflictPolicy;
+  reuseReleasedSeq: boolean;
   urls: PolicyTransferUrl[];
 }
 
@@ -29,6 +30,7 @@ export interface PolicyTransferPayload {
   sort: number;
   path_template: string;
   conflict_policy: ConflictPolicy;
+  reuse_released_seq: boolean;
   config: { endpoint: string };
   secrets?: { username?: string; password?: string };
   urls: { alias: string; url: string; is_default: boolean; sort: number }[];
@@ -45,6 +47,7 @@ export interface PolicyTransferResult {
   password?: string;
   pathTemplate?: string;
   conflictPolicy?: ConflictPolicy;
+  reuseReleasedSeq?: boolean;
   urls?: PolicyTransferUrl[];
 }
 
@@ -109,6 +112,7 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
     sort: normalizeSort(source.sort),
     path_template: source.pathTemplate,
     conflict_policy: source.conflictPolicy,
+    reuse_released_seq: source.reuseReleasedSeq,
     config: { endpoint: source.endpoint },
     urls: source.urls.map((row, index) => ({
       alias: row.alias,
@@ -184,6 +188,14 @@ export function parsePolicyTransfer(
     const matched = CONFLICT_VALUES.find((value) => value === conflictPolicy);
     if (matched === undefined) throw new PolicyTransferError('field', 'conflict_policy');
     result.conflictPolicy = matched;
+    recognized += 1;
+  }
+
+  if (root.reuse_released_seq !== undefined) {
+    if (typeof root.reuse_released_seq !== 'boolean') {
+      throw new PolicyTransferError('field', 'reuse_released_seq');
+    }
+    result.reuseReleasedSeq = root.reuse_released_seq;
     recognized += 1;
   }
 

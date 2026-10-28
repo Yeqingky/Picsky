@@ -20,6 +20,7 @@ const (
 	DeleteReasonNoCapability  = "no_capability"
 	DeleteReasonSettingOff    = "setting_disabled"
 	DeleteReasonShared        = "shared"
+	DeleteReasonQueued        = "queued"
 	DeleteReasonBackendError  = "backend_error"
 )
 
@@ -319,22 +320,29 @@ func (i *Images) deleteRecord(principal *Principal, record *model.Image, ip, use
 		}
 		ctx, cancel := contextWithTimeout(30 * time.Second)
 		defer cancel()
-		if err := adapter.Delete(ctx, record.ObjectKey); err != nil {
-			result.Reason = DeleteReasonBackendError
-			i.log.Warn("删除外部对象失败, 保留记录并入队重试", "object_key", record.ObjectKey, "error", err)
-			// 外部删除失败可能只是瞬时问题: 入队对象清理任务, 由维护队列重试.
-			if i.tasks != nil {
-				if _, enqueueErr := i.tasks.Enqueue(model.TaskObjectDelete, map[string]any{
-					"policy_id":  record.PolicyID,
-					"object_key": record.ObjectKey,
-				}); enqueueErr != nil {
-					i.log.Warn("入队对象清理任务失败", "object_key", record.ObjectKey, "error", enqueueErr)
-				}
+		if i.tasks != nil {
+			queued, err := i.tasks.DeleteObject(ctx, policy.ID, record.ObjectKey)
+			if err != nil {
+				result.Reason = DeleteReasonBackendError
+				i.log.Warn("删除外部对象失败, 已记录到维护队列等待人工处理", "object_key", record.ObjectKey, "error", err)
+				break
 			}
+			if queued {
+				result.Reason = DeleteReasonQueued
+				break
+			}
+			result.ObjectDeleted = true
+			result.Reason = DeleteReasonLastReference
+			break
+		}
+		if err := adapter.Delete(ctx, record.ObjectKey); err != nil && !errors.Is(err, storage.ErrNotFound) {
+			result.Reason = DeleteReasonBackendError
+			i.log.Warn("删除外部对象失败, 保留外部对象", "object_key", record.ObjectKey, "error", err)
 			break
 		}
 		result.ObjectDeleted = true
 		result.Reason = DeleteReasonLastReference
+		i.releaseSequence(policy, record)
 	}
 
 	i.audit.Recordf(Entry{
@@ -354,6 +362,17 @@ func (i *Images) deleteRecord(principal *Principal, record *model.Image, ip, use
 		UserAgent: userAgent,
 	})
 	return result, nil
+}
+
+// releaseSequence 在外部对象确认删除后, 把记录使用的 {seq} 加入策略释放队列.
+func (i *Images) releaseSequence(policy *model.StoragePolicy, record *model.Image) {
+	value, ok := storage.ExtractSequence(policy.PathTemplate, record.RelPath)
+	if !ok {
+		return
+	}
+	if err := releasePolicySequence(i.db, policy, value); err != nil {
+		i.log.Warn("释放序号失败", "image_id", record.ID, "sequence", value, "error", err)
+	}
 }
 
 // ReconcileUsed 按记录聚合重算用户的 used_images 与 used_bytes.

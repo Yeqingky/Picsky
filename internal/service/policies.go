@@ -58,15 +58,16 @@ type URLInput struct {
 
 // PolicyInput 是策略创建/更新入参.
 type PolicyInput struct {
-	Name           string            `json:"name"`
-	Type           string            `json:"type"`
-	Enabled        *bool             `json:"enabled"`
-	PathTemplate   string            `json:"path_template"`
-	ConflictPolicy string            `json:"conflict_policy"`
-	Config         map[string]string `json:"config"`
-	Secrets        map[string]string `json:"secrets"`
-	URLs           []URLInput        `json:"urls"`
-	Sort           int               `json:"sort"`
+	Name             string            `json:"name"`
+	Type             string            `json:"type"`
+	Enabled          *bool             `json:"enabled"`
+	PathTemplate     string            `json:"path_template"`
+	ConflictPolicy   string            `json:"conflict_policy"`
+	ReuseReleasedSeq *bool             `json:"reuse_released_seq"`
+	Config           map[string]string `json:"config"`
+	Secrets          map[string]string `json:"secrets"`
+	URLs             []URLInput        `json:"urls"`
+	Sort             int               `json:"sort"`
 }
 
 // PolicyView 是策略的管理视图.
@@ -367,17 +368,22 @@ func (p *Policies) Create(in PolicyInput, actor *Principal, ip, userAgent string
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
+	reuseReleased := false
+	if in.ReuseReleasedSeq != nil {
+		reuseReleased = *in.ReuseReleasedSeq
+	}
 	policy := model.StoragePolicy{
-		Name:           in.Name,
-		Type:           in.Type,
-		Enabled:        enabled,
-		PathTemplate:   in.PathTemplate,
-		ConflictPolicy: in.ConflictPolicy,
-		Config:         string(configJSON),
-		Secrets:        secrets,
-		Sort:           in.Sort,
-		CreatedAt:      nowUTC(),
-		UpdatedAt:      nowUTC(),
+		Name:             in.Name,
+		Type:             in.Type,
+		Enabled:          enabled,
+		PathTemplate:     in.PathTemplate,
+		ConflictPolicy:   in.ConflictPolicy,
+		ReuseReleasedSeq: reuseReleased,
+		Config:           string(configJSON),
+		Secrets:          secrets,
+		Sort:             in.Sort,
+		CreatedAt:        nowUTC(),
+		UpdatedAt:        nowUTC(),
 	}
 	if err := p.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&policy).Error; err != nil {
@@ -480,22 +486,44 @@ func (p *Policies) Update(id int64, in PolicyInput, actor *Principal, ip, userAg
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
+	reuseReleased := policy.ReuseReleasedSeq
+	if in.ReuseReleasedSeq != nil {
+		reuseReleased = *in.ReuseReleasedSeq
+	}
 	updates := map[string]any{
-		"name":            in.Name,
-		"type":            in.Type,
-		"enabled":         enabled,
-		"path_template":   in.PathTemplate,
-		"conflict_policy": in.ConflictPolicy,
-		"config":          string(configJSON),
-		"secrets":         secrets,
-		"sort":            in.Sort,
-		"updated_at":      nowUTC(),
+		"name":               in.Name,
+		"type":               in.Type,
+		"enabled":            enabled,
+		"path_template":      in.PathTemplate,
+		"conflict_policy":    in.ConflictPolicy,
+		"reuse_released_seq": reuseReleased,
+		"config":             string(configJSON),
+		"secrets":            secrets,
+		"sort":               in.Sort,
+		"updated_at":         nowUTC(),
 	}
 	if err := p.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.StoragePolicy{}).Where("id = ?", policy.ID).Updates(updates).Error; err != nil {
 			return err
 		}
-		return p.replaceURLs(tx, policy.ID, in.URLs)
+		if err := p.replaceURLs(tx, policy.ID, in.URLs); err != nil {
+			return err
+		}
+		// 模板变化后立即重置计数器: 旧模板的计数与释放队列不再适用.
+		if policy.PathTemplate != in.PathTemplate {
+			updated := *policy
+			updated.PathTemplate = in.PathTemplate
+			updated.ConflictPolicy = in.ConflictPolicy
+			updated.ReuseReleasedSeq = reuseReleased
+			if strings.Contains(updated.PathTemplate, "{seq}") {
+				if _, err := ensurePolicySequence(tx, &updated); err != nil {
+					return err
+				}
+			} else if err := tx.Where("policy_id = ?", policy.ID).Delete(&model.PolicySequence{}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		return nil, apperr.ErrInternal.WithMessage("更新策略失败: " + err.Error())
 	}
@@ -534,6 +562,9 @@ func (p *Policies) Delete(id int64, actor *Principal, ip, userAgent string) erro
 			return err
 		}
 		if err := tx.Where("policy_id = ?", policy.ID).Delete(&model.GroupPolicy{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("policy_id = ?", policy.ID).Delete(&model.PolicySequence{}).Error; err != nil {
 			return err
 		}
 		return tx.Delete(&model.StoragePolicy{}, policy.ID).Error
@@ -778,7 +809,7 @@ func (p *Policies) ScanListed(ctx context.Context, policyID, ownerID int64, keys
 
 	if !dryRun {
 		if strings.Contains(policy.PathTemplate, "{seq}") {
-			if err := reconcilePolicySequence(p.db, policy.ID); err != nil {
+			if err := reconcilePolicySequence(p.db, policy); err != nil {
 				return nil, err
 			}
 		}

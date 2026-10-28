@@ -74,6 +74,7 @@ export const gallery = {
       no_capability: '后端不支持删除',
       setting_disabled: '系统设置关闭了对象删除',
       shared: '仍有其他用户的记录引用',
+      queued: '对象删除已进入维护队列',
       backend_error: '外部存储出错, 未能删除外部对象',
     },
   },

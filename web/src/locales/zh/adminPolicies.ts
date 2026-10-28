@@ -101,6 +101,9 @@ export const adminPolicies = {
       pathTemplate: '路径模板',
       pathTemplatePlaceholder: '{md5:2}/{md5}.{ext}',
       conflictPolicy: '冲突策略',
+      reuseReleasedSeq: '复用已释放的 {seq}',
+      reuseReleasedSeqHint:
+        '删除图片后序号会写入释放队列; 开启后按释放顺序优先复用, 关闭时仍记录但不复用。',
       scanPath: '扫描路径',
       scanPathOptional: '可选; 留空表示从存储根目录开始扫描。',
       dryRun: '仅试运行 (dry run)',
@@ -145,7 +148,7 @@ export const adminPolicies = {
       sha256Short: 'SHA-256 前 {{length}} 位',
       sha512: '完整 SHA-512 (128 位十六进制)',
       ext: '扩展名, 由真实格式推导出的小写后缀',
-      seq: '从 1 开始的递增序号; rename 会从已占用最大序号之后继续, 扫描补录也会参与计算',
+      seq: '从 1 开始的递增序号; rename 会从已分配最大序号之后继续, 扫描补录参与计算, 删除图片的序号可复用',
       uuid: '随机 UUIDv4; 本次路径生成后固定, 序号递增时不变',
       rand: '随机 8 位小写字母数字; 本次路径生成后固定, 序号递增时不变',
       randShort: '随机 {{length}} 位小写字母数字',
@@ -161,7 +164,7 @@ export const adminPolicies = {
     },
 
     conflictSeqHint:
-      '包含 {seq} 的模板按策略原子分配递增序号, 序号跨输出格式共享, 扫描补录与已有纯数字文件名参与对账。',
+      '包含 {seq} 的模板按策略原子分配递增序号, 序号跨输出格式共享, 扫描补录参与对账; 删除图片释放的序号可选择性复用。',
 
     test: {
       button: '连接测试',

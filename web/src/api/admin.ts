@@ -105,6 +105,8 @@ export const adminTasksApi = {
     api.get<Paginated<MaintenanceTask>>('/admin/tasks', { params }).then((r) => r.data),
 
   run: (id: number) => api.post<void>(`/admin/tasks/${id}/run`).then(() => undefined),
+
+  delete: (id: number) => api.delete<void>(`/admin/tasks/${id}`).then(() => undefined),
 };
 
 export const adminLogsApi = {

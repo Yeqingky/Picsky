@@ -85,8 +85,12 @@ export const adminSystem = {
 
   tasks: {
     title: '维护队列',
-    description: '对象删除、日志清理等异步任务; 支持手动执行',
+    description: '对象删除、日志清理等异步任务; 失败任务保留在队列中, 可手动重试或删除',
     runSuccess: '任务 #{{id}} 已提交执行',
+    deleteSuccess: '任务 #{{id}} 已删除',
+    deleteTitle: '删除任务',
+    deleteDescription:
+      '确定删除任务 #{{id}}? 删除后该任务不再保留, 未完成的对象清理也不会再自动执行。',
     emptyTitle: '暂无维护任务',
     emptyDescription: '对象删除、策略扫描与每日维护任务会自动出现在这里',
     detailTitle: '任务详情 #{{id}}',

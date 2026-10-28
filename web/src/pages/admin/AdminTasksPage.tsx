@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
-import { Eye, Play, RefreshCw } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
+import { Eye, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { adminTasksApi } from '../../api';
 import type { MaintenanceTask } from '../../api';
 import { PageHeader } from '../../components/PageHeader';
+import { useConfirm } from '../../components/ConfirmDialog';
 import { EmptyState, ErrorState } from '../../components/States';
 import { DataTable } from '../../components/DataTable';
 import type { DataTableColumn } from '../../components/DataTable';
@@ -75,6 +76,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 export default function AdminTasksPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
 
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
@@ -116,6 +118,28 @@ export default function AdminTasksPage() {
 
   const runTask = runMutation.mutate;
   const running = runMutation.isPending;
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => adminTasksApi.delete(id),
+    onSuccess: async (_result, id) => {
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'tasks'] });
+      toast.success(t('adminSystem.tasks.deleteSuccess', { id }));
+    },
+  });
+
+  const deleteTask = deleteMutation.mutate;
+  const deleting = deleteMutation.isPending;
+  const requestDelete = useCallback(
+    async (task: MaintenanceTask) => {
+      const ok = await confirm({
+        title: t('adminSystem.tasks.deleteTitle'),
+        description: t('adminSystem.tasks.deleteDescription', { id: task.id }),
+        danger: true,
+      });
+      if (ok) deleteTask(task.id);
+    },
+    [confirm, deleteTask, t],
+  );
 
   const columns = useMemo<DataTableColumn<MaintenanceTask>[]>(
     () => [
@@ -233,7 +257,7 @@ export default function AdminTasksPage() {
       {
         id: 'actions',
         header: t('common.table.actions'),
-        className: 'w-[110px]',
+        className: 'w-[150px]',
         cell: (row) => (
           <div className="flex items-center gap-1">
             <Tooltip>
@@ -252,6 +276,26 @@ export default function AdminTasksPage() {
               </TooltipTrigger>
               <TooltipContent>{t('common.action.run')}</TooltipContent>
             </Tooltip>
+            {row.status === 'failed' && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t('common.action.delete')}
+                      disabled={deleting}
+                      onClick={() => {
+                        void requestDelete(row);
+                      }}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{t('common.action.delete')}</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -269,7 +313,7 @@ export default function AdminTasksPage() {
         ),
       },
     ],
-    [t, running, runTask],
+    [t, running, runTask, deleting, requestDelete],
   );
 
   const header = (

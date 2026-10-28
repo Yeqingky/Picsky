@@ -96,6 +96,34 @@ func TestPathRendererKeepsGeneratedVariablesAcrossSequences(t *testing.T) {
 	}
 }
 
+func TestExtractSequence(t *testing.T) {
+	cases := []struct {
+		template string
+		relPath  string
+		want     uint64
+		ok       bool
+	}{
+		{"{seq}.{ext}", "930.webp", 930, true},
+		{"{seq}.{ext}", "0.png", 0, false},
+		{"{seq}.{ext}", "007.png", 0, false},
+		{"{seq}.{ext}", "abc.png", 0, false},
+		{"{seq}.{ext}", "2/1.png", 0, false},
+		{"img/{seq}.{ext}", "img/12.jpg", 12, true},
+		{"img/{seq}.{ext}", "other/12.jpg", 0, false},
+		{"{md5:2}/{seq}.{ext}", "ab/7.png", 7, true},
+		{"{seq}-{rand:8}.{ext}", "42-a2b3c4d5.jpg", 42, true},
+		{"{sha256:8}_{seq}.{ext}", "a2b3c4d5_15.png", 15, true},
+		{"{md5}.{ext}", "abc.png", 0, false},
+	}
+	for _, testCase := range cases {
+		got, ok := ExtractSequence(testCase.template, testCase.relPath)
+		if ok != testCase.ok || got != testCase.want {
+			t.Errorf("ExtractSequence(%q, %q) = %d, %v; 期望 %d, %v",
+				testCase.template, testCase.relPath, got, ok, testCase.want, testCase.ok)
+		}
+	}
+}
+
 func TestValidateTemplateRejects(t *testing.T) {
 	cases := []string{
 		"",

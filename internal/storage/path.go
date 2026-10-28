@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -145,6 +146,83 @@ func RenderPath(template string, vars PathVars) (string, error) {
 		sequence = 1
 	}
 	return renderer.Render(sequence)
+}
+
+// SequenceMatcher 按魔法路径模板从渲染结果中反向提取 {seq} 值.
+type SequenceMatcher struct {
+	pattern *regexp.Regexp
+}
+
+// NewSequenceMatcher 编译提取表达式; 模板不含 {seq} 时返回 nil, nil.
+func NewSequenceMatcher(template string) (*SequenceMatcher, error) {
+	if !strings.Contains(template, "{seq}") {
+		return nil, nil
+	}
+	if err := ValidateTemplate(template); err != nil {
+		return nil, err
+	}
+	var pattern strings.Builder
+	pattern.WriteString("^")
+	sequenceCount := 0
+	for i := 0; i < len(template); {
+		if template[i] != '{' {
+			start := i
+			for i < len(template) && template[i] != '{' {
+				i++
+			}
+			pattern.WriteString(regexp.QuoteMeta(template[start:i]))
+			continue
+		}
+		end := strings.IndexByte(template[i:], '}')
+		if end < 0 {
+			return nil, fmt.Errorf("模板存在未闭合的变量: %s", template[i:])
+		}
+		token := template[i+1 : i+end]
+		if token == "seq" {
+			sequenceCount++
+			pattern.WriteString("([0-9]+)")
+		} else {
+			pattern.WriteString("[^/]+?")
+		}
+		i += end + 1
+	}
+	if sequenceCount != 1 {
+		return nil, errors.New("魔法路径模板必须恰好包含一个 {seq}")
+	}
+	pattern.WriteString("$")
+	compiled, err := regexp.Compile(pattern.String())
+	if err != nil {
+		return nil, fmt.Errorf("序号提取表达式非法: %w", err)
+	}
+	return &SequenceMatcher{pattern: compiled}, nil
+}
+
+// Extract 从渲染后的相对路径中提取序号; 不匹配或序号为 0 时返回 false.
+func (m *SequenceMatcher) Extract(relPath string) (uint64, bool) {
+	if m == nil || m.pattern == nil {
+		return 0, false
+	}
+	matches := m.pattern.FindStringSubmatch(relPath)
+	if len(matches) != 2 {
+		return 0, false
+	}
+	if len(matches[1]) > 1 && matches[1][0] == '0' {
+		return 0, false
+	}
+	value, err := strconv.ParseUint(matches[1], 10, 64)
+	if err != nil || value == 0 {
+		return 0, false
+	}
+	return value, true
+}
+
+// ExtractSequence 按模板从相对路径中提取序号, 用于删除后释放序号.
+func ExtractSequence(template, relPath string) (uint64, bool) {
+	matcher, err := NewSequenceMatcher(template)
+	if err != nil {
+		return 0, false
+	}
+	return matcher.Extract(relPath)
 }
 
 func validateRenderedPath(rel string) (string, error) {

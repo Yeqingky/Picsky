@@ -83,8 +83,8 @@ func TestConflictPolicyMigrationMapsLegacyValuesToSkip(t *testing.T) {
 	if err := database.Order("version DESC").First(&latest).Error; err != nil {
 		t.Fatalf("读取迁移版本失败: %v", err)
 	}
-	if latest.Version != 11 {
-		t.Errorf("迁移版本应为 11, 实际 %d", latest.Version)
+	if latest.Version != schemaVersion {
+		t.Errorf("迁移版本应为 %d, 实际 %d", schemaVersion, latest.Version)
 	}
 	if !database.Migrator().HasTable(&model.PolicyScanManifest{}) {
 		t.Fatal("迁移未创建 policy_scan_manifests 表")
@@ -307,6 +307,98 @@ type userBeforeRestoreGroup struct {
 }
 
 func (userBeforeRestoreGroup) TableName() string { return "users" }
+
+func TestSequenceCounterMigrationConvertsLegacyRows(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open("file:sequence-counter-migration?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		t.Fatalf("读取测试数据库连接失败: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	if err := database.AutoMigrate(&SchemaMigration{}, &legacyStoragePolicy{}); err != nil {
+		t.Fatalf("准备旧版表结构失败: %v", err)
+	}
+	now := time.Now().UTC()
+	policies := []legacyStoragePolicy{
+		{Name: "seq", Type: "webdav", Enabled: true, PathTemplate: "img/{seq}.{ext}", ConflictPolicy: model.ConflictRename, Config: "{}", CreatedAt: now, UpdatedAt: now},
+		{Name: "hash", Type: "webdav", Enabled: true, PathTemplate: "{md5}.{ext}", ConflictPolicy: model.ConflictRename, Config: "{}", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := database.Create(&policies).Error; err != nil {
+		t.Fatalf("写入旧策略失败: %v", err)
+	}
+	if err := database.Exec("CREATE TABLE policy_sequences (policy_id integer PRIMARY KEY, next_value integer NOT NULL)").Error; err != nil {
+		t.Fatalf("创建旧计数器表失败: %v", err)
+	}
+	legacyRows := []struct {
+		PolicyID  int64
+		NextValue int64
+	}{
+		{PolicyID: policies[0].ID, NextValue: 42},
+		{PolicyID: policies[1].ID, NextValue: 9},
+		{PolicyID: 999, NextValue: 7},
+	}
+	for _, row := range legacyRows {
+		if err := database.Exec("INSERT INTO policy_sequences (policy_id, next_value) VALUES (?, ?)", row.PolicyID, row.NextValue).Error; err != nil {
+			t.Fatalf("写入旧计数器失败: %v", err)
+		}
+	}
+	if err := database.Create(&SchemaMigration{Version: 11, AppliedAt: now}).Error; err != nil {
+		t.Fatalf("写入旧迁移版本失败: %v", err)
+	}
+
+	if err := Run(database); err != nil {
+		t.Fatalf("升级迁移失败: %v", err)
+	}
+	for _, column := range []string{"path_template", "allocated", "released"} {
+		if !database.Migrator().HasColumn(&model.PolicySequence{}, column) {
+			t.Errorf("新计数器表缺少列 %q", column)
+		}
+	}
+	if database.Migrator().HasColumn(&model.PolicySequence{}, "next_value") {
+		t.Error("旧 next_value 列应被移除")
+	}
+
+	var sequence model.PolicySequence
+	if err := database.Where("policy_id = ?", policies[0].ID).First(&sequence).Error; err != nil {
+		t.Fatalf("读取转换后的计数器失败: %v", err)
+	}
+	if sequence.PathTemplate != "img/{seq}.{ext}" || sequence.Allocated != 41 || sequence.Released != "[]" {
+		t.Errorf("计数器转换不正确: %+v", sequence)
+	}
+
+	for _, id := range []int64{policies[1].ID, 999} {
+		var count int64
+		if err := database.Model(&model.PolicySequence{}).Where("policy_id = ?", id).Count(&count).Error; err != nil {
+			t.Fatalf("统计计数器失败: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("策略 %d 的旧计数器应被丢弃", id)
+		}
+	}
+	if !database.Migrator().HasColumn(&model.StoragePolicy{}, "reuse_released_seq") {
+		t.Error("存储策略缺少 reuse_released_seq 列")
+	}
+}
+
+type legacyStoragePolicy struct {
+	ID             int64     `gorm:"primaryKey;autoIncrement"`
+	Name           string    `gorm:"size:64;not null;uniqueIndex"`
+	Type           string    `gorm:"size:32;not null"`
+	Enabled        bool      `gorm:"not null"`
+	PathTemplate   string    `gorm:"size:255;not null"`
+	ConflictPolicy string    `gorm:"size:16;not null;default:'rename'"`
+	Config         string    `gorm:"type:text;not null;default:'{}'"`
+	Secrets        string    `gorm:"type:text"`
+	Sort           int       `gorm:"not null;default:0"`
+	CreatedAt      time.Time `gorm:"not null"`
+	UpdatedAt      time.Time `gorm:"not null"`
+}
+
+func (legacyStoragePolicy) TableName() string { return "storage_policies" }
 
 func TestSequencePolicyMigrationCreatesCounterAndForcesRename(t *testing.T) {
 	database, err := gorm.Open(sqlite.Open("file:sequence-policy-migration?mode=memory&cache=shared"), &gorm.Config{})

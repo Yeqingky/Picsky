@@ -244,6 +244,35 @@ func (f *fixture) reloadUser(id int64) *model.User {
 	return &user
 }
 
+// setReuseReleasedSeq 打开或关闭策略的释放序号复用.
+func (f *fixture) setReuseReleasedSeq(policyID int64, enabled bool) {
+	f.t.Helper()
+	value := enabled
+	if _, err := f.svc.Policies.Update(policyID, service.PolicyInput{ReuseReleasedSeq: &value}, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		f.t.Fatalf("更新序号复用开关失败: %v", err)
+	}
+}
+
+// sequenceRow 读取策略的序号计数器.
+func (f *fixture) sequenceRow(policyID int64) model.PolicySequence {
+	f.t.Helper()
+	var row model.PolicySequence
+	if err := f.database.Where("policy_id = ?", policyID).First(&row).Error; err != nil {
+		f.t.Fatalf("读取序号计数器失败: %v", err)
+	}
+	return row
+}
+
+// mustDelete 删除记录并要求成功.
+func (f *fixture) mustDelete(principal *service.Principal, id int64) *service.DeleteResult {
+	f.t.Helper()
+	result, err := f.svc.Images.Delete(principal, id, "127.0.0.1", "test-agent")
+	if err != nil {
+		f.t.Fatalf("删除记录失败: %v", err)
+	}
+	return result
+}
+
 func TestUploadDedupAndQuota(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5:2}/{md5}.{ext}", model.ConflictRename)
@@ -1068,6 +1097,219 @@ func TestConcurrentSequenceUploadsUseDistinctPaths(t *testing.T) {
 	}
 	if !paths["1.png"] || !paths["2.png"] {
 		t.Errorf("并发上传应占用不同递增路径, 实际 %v", paths)
+	}
+}
+
+func TestDeletedSequenceRecordedWhenReuseDisabled(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("序号释放", "{seq}.{ext}", model.ConflictRename)
+
+	first := f.mustUpload(f.admin, &policy.ID, "a.png", pngBytes(t, 120, 4, 4))
+	second := f.mustUpload(f.admin, &policy.ID, "b.png", pngBytes(t, 121, 4, 4))
+	if first.Record.RelPath != "1.png" || second.Record.RelPath != "2.png" {
+		t.Fatalf("初始序号不正确: %q %q", first.Record.RelPath, second.Record.RelPath)
+	}
+
+	deleted := f.mustDelete(f.admin, first.Record.ID)
+	if !deleted.ObjectDeleted {
+		t.Fatalf("删除应同时移除外部对象: %+v", deleted)
+	}
+	row := f.sequenceRow(policy.ID)
+	if row.Allocated != 2 || row.Released != "[1]" {
+		t.Fatalf("删除后计数器应为 allocated=2 released=[1], 实际 %+v", row)
+	}
+
+	var done int64
+	if err := f.database.Model(&model.MaintenanceTask{}).
+		Where("type = ? AND status = ?", model.TaskObjectDelete, model.TaskDone).
+		Count(&done).Error; err != nil {
+		t.Fatalf("统计维护任务失败: %v", err)
+	}
+	if done != 1 {
+		t.Errorf("成功删除也应写入维护队列, 实际 done=%d", done)
+	}
+
+	third := f.mustUpload(f.admin, &policy.ID, "c.png", pngBytes(t, 122, 4, 4))
+	if third.Record.RelPath != "3.png" {
+		t.Fatalf("默认关闭复用时不应使用释放序号, 实际 %q", third.Record.RelPath)
+	}
+	if row := f.sequenceRow(policy.ID); row.Released != "[1]" {
+		t.Errorf("关闭复用时仍应保留释放队列, 实际 %q", row.Released)
+	}
+}
+
+func TestReleasedSequencesReusedInFIFOOrder(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("序号复用", "{seq}.{ext}", model.ConflictRename)
+	f.setReuseReleasedSeq(policy.ID, true)
+
+	first := f.mustUpload(f.admin, &policy.ID, "a.png", pngBytes(t, 130, 4, 4))
+	second := f.mustUpload(f.admin, &policy.ID, "b.png", pngBytes(t, 131, 4, 4))
+	f.mustUpload(f.admin, &policy.ID, "c.png", pngBytes(t, 132, 4, 4))
+
+	f.mustDelete(f.admin, first.Record.ID)
+	f.mustDelete(f.admin, second.Record.ID)
+	if row := f.sequenceRow(policy.ID); row.Allocated != 3 || row.Released != "[1,2]" {
+		t.Fatalf("释放队列应按释放顺序排列, 实际 %+v", row)
+	}
+
+	next := f.mustUpload(f.admin, &policy.ID, "d.png", pngBytes(t, 133, 4, 4))
+	if next.Record.RelPath != "1.png" {
+		t.Fatalf("应优先复用最早释放的序号, 实际 %q", next.Record.RelPath)
+	}
+	next = f.mustUpload(f.admin, &policy.ID, "e.png", pngBytes(t, 134, 4, 4))
+	if next.Record.RelPath != "2.png" {
+		t.Fatalf("应按顺序复用第二个释放序号, 实际 %q", next.Record.RelPath)
+	}
+	next = f.mustUpload(f.admin, &policy.ID, "f.png", pngBytes(t, 135, 4, 4))
+	if next.Record.RelPath != "4.png" {
+		t.Fatalf("释放队列为空后应继续分配新号, 实际 %q", next.Record.RelPath)
+	}
+	if row := f.sequenceRow(policy.ID); row.Allocated != 4 || row.Released != "[]" {
+		t.Errorf("复用后的计数器不正确: %+v", row)
+	}
+}
+
+func TestSharedObjectSequenceReleasedAfterLastReference(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("共享序号", "{seq}.{ext}", model.ConflictRename)
+	f.authorize(policy.ID)
+	f.setReuseReleasedSeq(policy.ID, true)
+	content := pngBytes(t, 140, 4, 4)
+
+	owner := f.mustUpload(f.admin, &policy.ID, "a.png", content)
+	bob := f.register("bob")
+	reused := f.mustUpload(bob, &policy.ID, "b.png", content)
+	if reused.Record.ObjectKey != owner.Record.ObjectKey {
+		t.Fatalf("相同内容应复用同一对象: %q %q", reused.Record.ObjectKey, owner.Record.ObjectKey)
+	}
+
+	if result := f.mustDelete(f.admin, owner.Record.ID); result.ObjectDeleted {
+		t.Fatalf("仍有其他引用时不应删除对象: %+v", result)
+	}
+	if row := f.sequenceRow(policy.ID); row.Released != "[]" {
+		t.Fatalf("仍有引用时不应释放序号: %q", row.Released)
+	}
+
+	if result := f.mustDelete(bob, reused.Record.ID); !result.ObjectDeleted {
+		t.Fatalf("最后一条引用删除时应移除对象: %+v", result)
+	}
+	if row := f.sequenceRow(policy.ID); row.Released != "[1]" {
+		t.Fatalf("对象删除后应释放序号: %q", row.Released)
+	}
+
+	next := f.mustUpload(f.admin, &policy.ID, "c.png", pngBytes(t, 141, 4, 4))
+	if next.Record.RelPath != "1.png" {
+		t.Fatalf("开启复用后应重新使用已释放序号, 实际 %q", next.Record.RelPath)
+	}
+}
+
+func TestTemplateChangeResetsReleasedSequences(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("模板变更", "{seq}.{ext}", model.ConflictRename)
+	f.setReuseReleasedSeq(policy.ID, true)
+
+	first := f.mustUpload(f.admin, &policy.ID, "a.png", pngBytes(t, 150, 4, 4))
+	f.mustUpload(f.admin, &policy.ID, "b.png", pngBytes(t, 151, 4, 4))
+
+	const nextTemplate = "img-{seq}.{ext}"
+	if _, err := f.svc.Policies.Update(policy.ID, service.PolicyInput{PathTemplate: nextTemplate}, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("更新路径模板失败: %v", err)
+	}
+	row := f.sequenceRow(policy.ID)
+	if row.PathTemplate != nextTemplate || row.Allocated != 0 || row.Released != "[]" {
+		t.Fatalf("模板变化后应重置计数器, 实际 %+v", row)
+	}
+
+	// 旧路径不符合新模板, 删除后不应把旧序号写入释放队列.
+	if result := f.mustDelete(f.admin, first.Record.ID); !result.ObjectDeleted {
+		t.Fatalf("删除应移除外部对象: %+v", result)
+	}
+	if row := f.sequenceRow(policy.ID); row.Released != "[]" {
+		t.Errorf("旧模板路径不应释放序号, 实际 %q", row.Released)
+	}
+
+	next := f.mustUpload(f.admin, &policy.ID, "c.png", pngBytes(t, 152, 4, 4))
+	if next.Record.RelPath != "img-1.png" {
+		t.Fatalf("新模板应从 1 开始分配, 实际 %q", next.Record.RelPath)
+	}
+}
+
+func TestFailedObjectDeleteWaitsForManualRetry(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("删除失败", "{seq}.{ext}", model.ConflictRename)
+	f.setReuseReleasedSeq(policy.ID, true)
+
+	uploaded := f.mustUpload(f.admin, &policy.ID, "a.png", pngBytes(t, 160, 4, 4))
+	broken := map[string]string{"endpoint": "http://127.0.0.1:1/dav"}
+	if _, err := f.svc.Policies.Update(policy.ID, service.PolicyInput{Config: broken}, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("更新策略端点失败: %v", err)
+	}
+
+	result := f.mustDelete(f.admin, uploaded.Record.ID)
+	if result.ObjectDeleted || result.Reason != service.DeleteReasonBackendError {
+		t.Fatalf("删除失败应保留外部对象: %+v", result)
+	}
+	if row := f.sequenceRow(policy.ID); row.Released != "[]" {
+		t.Fatalf("删除失败不应释放序号: %q", row.Released)
+	}
+
+	var task model.MaintenanceTask
+	if err := f.database.Where("type = ? AND status = ?", model.TaskObjectDelete, model.TaskFailed).
+		Order("id DESC").First(&task).Error; err != nil {
+		t.Fatalf("失败任务应保留在数据库中: %v", err)
+	}
+	if task.LastError == "" {
+		t.Error("失败任务应记录错误信息")
+	}
+
+	working := map[string]string{"endpoint": f.davEndpoint()}
+	if _, err := f.svc.Policies.Update(policy.ID, service.PolicyInput{Config: working}, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("恢复策略端点失败: %v", err)
+	}
+	if err := f.svc.Tasks.RunNow(task.ID, f.admin); err != nil {
+		t.Fatalf("手动重试失败: %v", err)
+	}
+	reloaded, err := f.svc.Tasks.Get(task.ID)
+	if err != nil {
+		t.Fatalf("读取任务失败: %v", err)
+	}
+	if reloaded.Status != model.TaskDone {
+		t.Errorf("手动重试成功后任务应为 done, 实际 %q", reloaded.Status)
+	}
+	if row := f.sequenceRow(policy.ID); row.Released != "[1]" {
+		t.Fatalf("手动重试成功应释放序号: %q", row.Released)
+	}
+
+	next := f.mustUpload(f.admin, &policy.ID, "b.png", pngBytes(t, 161, 4, 4))
+	if next.Record.RelPath != "1.png" {
+		t.Fatalf("重试成功后应复用释放序号, 实际 %q", next.Record.RelPath)
+	}
+}
+
+func TestDeleteFailedTaskFromQueue(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("删除失败任务", "{seq}.{ext}", model.ConflictRename)
+
+	uploaded := f.mustUpload(f.admin, &policy.ID, "a.png", pngBytes(t, 170, 4, 4))
+	broken := map[string]string{"endpoint": "http://127.0.0.1:1/dav"}
+	if _, err := f.svc.Policies.Update(policy.ID, service.PolicyInput{Config: broken}, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("更新策略端点失败: %v", err)
+	}
+	if result := f.mustDelete(f.admin, uploaded.Record.ID); result.Reason != service.DeleteReasonBackendError {
+		t.Fatalf("删除应失败: %+v", result)
+	}
+
+	var task model.MaintenanceTask
+	if err := f.database.Where("type = ? AND status = ?", model.TaskObjectDelete, model.TaskFailed).
+		Order("id DESC").First(&task).Error; err != nil {
+		t.Fatalf("失败任务应保留: %v", err)
+	}
+	if err := f.svc.Tasks.Delete(task.ID, f.admin); err != nil {
+		t.Fatalf("删除失败任务失败: %v", err)
+	}
+	if _, err := f.svc.Tasks.Get(task.ID); err == nil {
+		t.Error("任务删除后应返回不存在")
 	}
 }
 

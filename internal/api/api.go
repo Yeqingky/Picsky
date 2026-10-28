@@ -119,6 +119,7 @@ func (s *Server) Register(router *gin.Engine) {
 	tasks := admin.Group("/tasks", middleware.Require(model.PermManageSettings))
 	tasks.GET("", s.adminListTasks)
 	tasks.POST("/:id/run", s.adminRunTask)
+	tasks.DELETE("/:id", s.adminDeleteTask)
 
 	logs := admin.Group("/logs", middleware.Require(model.PermViewLogs))
 	logs.GET("", s.adminListLogs)

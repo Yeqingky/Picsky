@@ -251,6 +251,21 @@ func (s *Server) adminRunTask(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// adminDeleteTask 删除已完成或失败的任务.
+func (s *Server) adminDeleteTask(c *gin.Context) {
+	principal := middleware.Principal(c)
+	id, err := idParam(c, "id")
+	if err != nil {
+		s.fail(c, err)
+		return
+	}
+	if err := s.svc.Tasks.Delete(id, principal); err != nil {
+		s.fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // adminListLogs 审计日志列表.
 func (s *Server) adminListLogs(c *gin.Context) {
 	page, pageSize := pagination(c, 20, 200)
