@@ -115,6 +115,9 @@ const POLICY_TABS = [
 
 type PolicyTabId = (typeof POLICY_TABS)[number]['id'];
 
+/** 对象键与域名 URL 对照表只在基本信息与分发域名标签下显示; 魔法路径已有实时预览 */
+const REFERENCE_TABS: readonly PolicyTabId[] = ['basic', 'urls'];
+
 /** 魔法路径变量快捷按钮 (docs/storage-policy.md 第 4 节) */
 const TEMPLATE_VARIABLES = [
   '{md5}',
@@ -766,6 +769,9 @@ export default function AdminPolicyEditPage() {
     );
   }, [form?.urls, preview?.rel_path]);
 
+  // 冲突策略示例只使用列表首项 (默认域名)
+  const defaultDomainUrl = form?.urls[0]?.url.trim().replace(/\/+$/, '') ?? '';
+
   /* ---------------------------------------------------------------- 渲染 */
 
   if (invalidId) {
@@ -1375,6 +1381,51 @@ export default function AdminPolicyEditPage() {
                   {t('adminPolicies.edit.conflictSeqHint')}
                 </p>
               )}
+
+              <Separator />
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">
+                  {t('adminPolicies.edit.conflictExample.title')}
+                </p>
+                {previewSkeleton ? (
+                  <TextLinesSkeleton lines={2} />
+                ) : preview === undefined ? (
+                  <p className="text-muted-foreground text-sm">
+                    {t('adminPolicies.edit.conflictExample.pending')}
+                  </p>
+                ) : defaultDomainUrl === '' ? (
+                  <p className="text-muted-foreground text-sm">
+                    {t('adminPolicies.edit.conflictExample.noDomain')}
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-1.5 text-sm">
+                    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1.5">
+                      <span className="text-muted-foreground text-center whitespace-nowrap">
+                        {t('adminPolicies.edit.conflictExample.existing')}:
+                      </span>
+                      <span className="font-mono break-all">
+                        {`${defaultDomainUrl}/${preview.rel_path}`}
+                      </span>
+                      {form.conflictPolicy === 'rename' && (
+                        <>
+                          <span className="text-muted-foreground text-center whitespace-nowrap">
+                            {t('adminPolicies.edit.conflictExample.rename')}:
+                          </span>
+                          <span className="font-mono break-all">
+                            {`${defaultDomainUrl}/${preview.conflict_rel_path}`}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {form.conflictPolicy !== 'rename' && (
+                      <p className="text-muted-foreground">
+                        {t('adminPolicies.edit.conflictExample.skip')}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {!canStat && (
                 <p className="text-warning text-sm">
                   {t('adminPolicies.edit.conflictDisabled.stat')}
@@ -1529,8 +1580,8 @@ export default function AdminPolicyEditPage() {
         )}
       </Tabs>
 
-      {/* 对照表 (保存结果): 固定在标签下方, 不占标签 */}
-      {(isEdit || savedOnce) && (
+      {/* 对照表 (保存结果): 仅基本信息 / 分发域名显示; 魔法路径已有实时预览 */}
+      {(isEdit || savedOnce) && REFERENCE_TABS.includes(tab) && (
         <PolicySection
           className="mt-8"
           title={t('adminPolicies.edit.section.reference')}

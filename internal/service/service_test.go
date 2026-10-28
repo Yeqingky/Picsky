@@ -1327,6 +1327,9 @@ func TestPathPreviewMatchesUpload(t *testing.T) {
 	if preview.ObjectKey != "0f/0f1e2d3c4b5a69788796a5b4c3d2e1f0.png" {
 		t.Errorf("预览 object_key 不正确: %q", preview.ObjectKey)
 	}
+	if preview.ConflictRelPath != "0f/0f1e2d3c4b5a69788796a5b4c3d2e1f0-1.png" {
+		t.Errorf("哈希模板冲突预览应追加 -1, 实际 %q", preview.ConflictRelPath)
+	}
 
 	sequencePreview, err := f.svc.Policies.Preview(service.PreviewInput{PathTemplate: "{seq}.jpg"})
 	if err != nil {
@@ -1334,6 +1337,9 @@ func TestPathPreviewMatchesUpload(t *testing.T) {
 	}
 	if sequencePreview.RelPath != "1.jpg" {
 		t.Errorf("递增变量预览应从 1 开始, 实际 %q", sequencePreview.RelPath)
+	}
+	if sequencePreview.ConflictRelPath != "2.jpg" {
+		t.Errorf("序号模板冲突预览应为下一个序号, 实际 %q", sequencePreview.ConflictRelPath)
 	}
 
 	if _, err := f.svc.Policies.Create(service.PolicyInput{

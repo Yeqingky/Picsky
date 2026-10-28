@@ -617,9 +617,10 @@ type PreviewInput struct {
 
 // PreviewResult 是路径预览结果.
 type PreviewResult struct {
-	RelPath   string           `json:"rel_path"`
-	ObjectKey string           `json:"object_key"`
-	URLs      []PreviewURLItem `json:"urls"`
+	RelPath         string           `json:"rel_path"`
+	ObjectKey       string           `json:"object_key"`
+	ConflictRelPath string           `json:"conflict_rel_path"` // 冲突重命名后的示例路径
+	URLs            []PreviewURLItem `json:"urls"`
 }
 
 // PreviewURLItem 是预览中的单个域名 URL.
@@ -663,7 +664,7 @@ func (p *Policies) Preview(in PreviewInput) (*PreviewResult, error) {
 		extValue = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(*in.Ext)), ".")
 	}
 
-	relPath, err := storage.RenderPath(template, storage.PathVars{
+	renderer, err := storage.NewPathRenderer(template, storage.PathVars{
 		MD5:    md5Value,
 		SHA256: sha256Value,
 		SHA512: sha512Value,
@@ -672,8 +673,24 @@ func (p *Policies) Preview(in PreviewInput) (*PreviewResult, error) {
 	if err != nil {
 		return nil, apperr.ErrInvalidRequest.WithMessage(err.Error())
 	}
+	sequence := uint64(0)
+	if renderer.HasSequence() {
+		sequence = 1
+	}
+	relPath, err := renderer.Render(sequence)
+	if err != nil {
+		return nil, apperr.ErrInvalidRequest.WithMessage(err.Error())
+	}
+	conflictSequence := uint64(1)
+	if renderer.HasSequence() {
+		conflictSequence = 2
+	}
+	conflictRelPath, err := renderer.Render(conflictSequence)
+	if err != nil {
+		return nil, apperr.ErrInvalidRequest.WithMessage(err.Error())
+	}
 	objectKey := storage.NormalizeObjectKey("", relPath)
-	result := &PreviewResult{RelPath: relPath, ObjectKey: objectKey, URLs: []PreviewURLItem{}}
+	result := &PreviewResult{RelPath: relPath, ObjectKey: objectKey, ConflictRelPath: conflictRelPath, URLs: []PreviewURLItem{}}
 	for _, url := range urls {
 		result.URLs = append(result.URLs, PreviewURLItem{
 			Alias:     url.Alias,

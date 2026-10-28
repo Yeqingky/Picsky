@@ -55,7 +55,7 @@ export const adminPolicies = {
     titleEdit: '编辑存储策略: {{name}}',
     descriptionNew: '新建时预填系统设置中的默认魔法路径与默认冲突策略; 后端类型创建后不可修改。',
     descriptionEdit:
-      '修改分发域名或魔法路径后, 请用页面底部的对照表核对对象键与域名路径是否指向同一对象。',
+      '修改分发域名或魔法路径后, 可在基本信息 / 分发域名标签下用对照表核对对象键与域名路径是否指向同一对象。',
     back: '返回列表',
     loadFailed: '存储策略加载失败',
     invalidId: '策略 ID 无效',
@@ -71,7 +71,7 @@ export const adminPolicies = {
       connectionHint: '外部存储的服务地址与访问凭据; 凭据加密保存, 仅管理员可见。',
       path: '魔法路径',
       pathHint: '每个文件的相对路径生成规则, 必须包含内容哈希变量或 {seq}。',
-      urls: '分发域名别名',
+      urls: '分发域名',
       conflict: '冲突策略',
       conflictHint: '目标路径已存在时的处理方式; rename 使用递增序号, skip 不覆盖。',
       scan: '扫描补录',
@@ -165,6 +165,15 @@ export const adminPolicies = {
 
     conflictSeqHint:
       '包含 {seq} 的模板按策略原子分配递增序号, 序号跨输出格式共享, 扫描补录参与对账; 删除图片释放的序号可选择性复用。',
+
+    conflictExample: {
+      title: '示例:',
+      noDomain: '尚未配置分发域名, 无法生成示例 URL。',
+      existing: '已有对象',
+      rename: '冲突后保存为',
+      skip: '冲突后返回 409, 不覆盖已有对象; 内容相同则直接复用。',
+      pending: '填写合法路径模板后显示示例。',
+    },
 
     test: {
       button: '连接测试',

@@ -433,6 +433,7 @@ export interface PolicyPreviewRequest {
 export interface PolicyPreviewResult {
   rel_path: string;
   object_key: string;
+  conflict_rel_path: string;
   urls: { alias: string; url: string }[];
 }
 
