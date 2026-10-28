@@ -3,6 +3,8 @@ import type { FormEvent, ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   ArrowLeft,
+  Check,
+  Download,
   Eye,
   EyeOff,
   FolderTree,
@@ -16,6 +18,7 @@ import {
   Server,
   Shuffle,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -39,6 +42,13 @@ import {
 import { Alert, AlertDescription } from '../../components/ui/alert';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import {
@@ -52,11 +62,19 @@ import { Separator } from '../../components/ui/separator';
 import { Skeleton } from '../../components/ui/skeleton';
 import { Switch } from '../../components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
+import { Textarea } from '../../components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { cn } from '../../lib/utils';
+import { copyText } from '../../utils/clipboard';
 import { formatDuration } from '../../utils/format';
+import {
+  buildPolicyTransferPayload,
+  parsePolicyTransfer,
+  PolicyTransferError,
+} from './policyTransfer';
+import type { PolicyTransferResult } from './policyTransfer';
 
 /**
  * 可选后端类型: v1 只实现 webdav (docs/storage-policy.md 第 3 节其余类型为后续阶段),
@@ -356,6 +374,8 @@ export default function AdminPolicyEditPage() {
   const [scanPath, setScanPath] = useState('');
   const [dryRun, setDryRun] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   // 标签写入 ?tab=: 刷新与深链保持当前分组; 默认标签不落 URL, 扫描补录仅编辑模式可见
   const [searchParams, setSearchParams] = useSearchParams();
@@ -592,6 +612,74 @@ export default function AdminPolicyEditPage() {
     );
   }, []);
 
+  const exportJson = useMemo(
+    () =>
+      form === null
+        ? ''
+        : JSON.stringify(
+            buildPolicyTransferPayload({
+              name: form.name,
+              type: form.type,
+              enabled: form.enabled,
+              sort: form.sort,
+              endpoint: form.endpoint,
+              username: form.username,
+              password: form.password,
+              pathTemplate: form.pathTemplate,
+              conflictPolicy: form.conflictPolicy,
+              urls: form.urls,
+            }),
+            null,
+            2,
+          ),
+    [form],
+  );
+
+  const transferErrorText = (error: PolicyTransferError): string =>
+    t(`adminPolicies.edit.transfer.error.${error.key}`, {
+      detail: error.detail ?? '',
+      type: error.detail ?? '',
+      field: error.field ?? '',
+    });
+
+  /** 导入为表单补丁: 只覆盖 JSON 中出现的字段; 编辑模式后端类型不可修改 */
+  const applyImport = (raw: string): string | null => {
+    let patch: PolicyTransferResult;
+    try {
+      patch = parsePolicyTransfer(raw, TYPE_OPTIONS);
+    } catch (error) {
+      if (error instanceof PolicyTransferError) return transferErrorText(error);
+      return transferErrorText(new PolicyTransferError('invalidJson'));
+    }
+
+    // URL 行在渲染时需要稳定的 key, 不能在 setState 更新函数里生成
+    const urls =
+      patch.urls === undefined
+        ? undefined
+        : patch.urls.map((row) => ({ key: nextUrlKey(), alias: row.alias, url: row.url }));
+    const nextType = isNew ? patch.type : undefined;
+
+    setForm((current) => {
+      if (current === null) return current;
+      const next: FormState = { ...current };
+      if (patch.name !== undefined) next.name = patch.name;
+      if (nextType !== undefined) next.type = nextType;
+      if (patch.enabled !== undefined) next.enabled = patch.enabled;
+      if (patch.sort !== undefined) next.sort = patch.sort;
+      if (patch.endpoint !== undefined) next.endpoint = patch.endpoint;
+      if (patch.username !== undefined) next.username = patch.username;
+      if (patch.password !== undefined) next.password = patch.password;
+      if (patch.pathTemplate !== undefined) next.pathTemplate = patch.pathTemplate;
+      if (patch.conflictPolicy !== undefined) next.conflictPolicy = patch.conflictPolicy;
+      if (urls !== undefined) next.urls = urls;
+      return next;
+    });
+    setSubmitted(false);
+    setUrlTouched(false);
+    toast.success(t('adminPolicies.edit.transfer.importDone'));
+    return null;
+  };
+
   const insertVariable = (variable: string) => {
     if (form === null) return;
     const element = pathInputRef.current;
@@ -710,7 +798,9 @@ export default function AdminPolicyEditPage() {
           actions={
             <>
               <Skeleton className="h-9 w-20 rounded-lg" />
-              <Skeleton className="h-9 w-24 rounded-lg" />
+              <Skeleton className="h-9 w-16 rounded-lg" />
+              <Skeleton className="h-9 w-16 rounded-lg" />
+              <Skeleton className="h-9 w-20 rounded-lg" />
             </>
           }
         />
@@ -735,6 +825,14 @@ export default function AdminPolicyEditPage() {
             <Button type="button" variant="ghost" onClick={() => navigate('/admin/policies')}>
               <ArrowLeft className="size-4" />
               {t('adminPolicies.edit.back')}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setImportOpen(true)}>
+              <Upload className="size-4" />
+              {t('adminPolicies.edit.transfer.import')}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setExportOpen(true)}>
+              <Download className="size-4" />
+              {t('adminPolicies.edit.transfer.export')}
             </Button>
             <Button type="submit" disabled={saveMutation.isPending}>
               <Save className="size-4" />
@@ -1426,6 +1524,121 @@ export default function AdminPolicyEditPage() {
           </div>
         </PolicySection>
       )}
+
+      {exportOpen && <PolicyExportDialog json={exportJson} onClose={() => setExportOpen(false)} />}
+      {importOpen && (
+        <PolicyImportDialog onImport={applyImport} onClose={() => setImportOpen(false)} />
+      )}
     </form>
+  );
+}
+
+function PolicyExportDialog({ json, onClose }: { json: string; onClose: () => void }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!(await copyText(json))) {
+      toast.error(t('common.action.copyFailed'));
+      return;
+    }
+    setCopied(true);
+    toast.success(t('common.action.copied'));
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl" aria-describedby={undefined}>
+        <DialogHeader>
+          <DialogTitle>{t('adminPolicies.edit.transfer.exportTitle')}</DialogTitle>
+        </DialogHeader>
+        <p className="text-muted-foreground text-sm">
+          {t('adminPolicies.edit.transfer.exportHint')}
+        </p>
+        <Textarea
+          readOnly
+          value={json}
+          rows={16}
+          className="field-sizing-fixed h-80 resize-none overflow-auto font-mono text-xs"
+        />
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            {t('common.action.close')}
+          </Button>
+          <Button type="button" onClick={() => void handleCopy()}>
+            {copied ? <Check className="size-4" /> : <Download className="size-4" />}
+            {t('adminPolicies.edit.transfer.copyJson')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PolicyImportDialog({
+  onImport,
+  onClose,
+}: {
+  onImport: (raw: string) => string | null;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleImport = () => {
+    const message = onImport(text);
+    if (message !== null) {
+      setError(message);
+      return;
+    }
+    onClose();
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl" aria-describedby={undefined}>
+        <DialogHeader>
+          <DialogTitle>{t('adminPolicies.edit.transfer.importTitle')}</DialogTitle>
+        </DialogHeader>
+        <p className="text-muted-foreground text-sm">
+          {t('adminPolicies.edit.transfer.importHint')}
+        </p>
+        <Textarea
+          autoFocus
+          value={text}
+          rows={16}
+          aria-label={t('adminPolicies.edit.transfer.placeholder')}
+          placeholder={t('adminPolicies.edit.transfer.placeholder')}
+          aria-invalid={error !== null}
+          className="field-sizing-fixed h-80 resize-none overflow-auto font-mono text-xs"
+          onChange={(event) => {
+            setText(event.target.value);
+            setError(null);
+          }}
+        />
+        {error !== null && <p className="text-destructive text-sm">{error}</p>}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            {t('common.action.cancel')}
+          </Button>
+          <Button type="button" disabled={text.trim() === ''} onClick={handleImport}>
+            <Upload className="size-4" />
+            {t('adminPolicies.edit.transfer.apply')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

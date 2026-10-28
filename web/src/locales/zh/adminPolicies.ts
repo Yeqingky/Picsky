@@ -167,6 +167,27 @@ export const adminPolicies = {
       needSave: '保存策略后才能进行连接测试。',
     },
 
+    transfer: {
+      import: '导入',
+      export: '导出',
+      exportTitle: '导出策略 JSON',
+      exportHint: '导出当前表单内容 (含未保存的修改); 凭据以明文输出, 请妥善保管。',
+      importTitle: '导入策略 JSON',
+      importHint:
+        '粘贴导出的 JSON 或管理接口返回的策略对象; 仅覆盖 JSON 中出现的字段, 保存后生效。',
+      placeholder: '在此粘贴存储策略 JSON',
+      apply: '导入',
+      importDone: '已导入策略内容, 保存后生效',
+      copyJson: '复制',
+      error: {
+        invalidJson: 'JSON 解析失败: {{detail}}',
+        notObject: 'JSON 顶层必须是对象。',
+        empty: 'JSON 中没有可识别的策略字段。',
+        typeUnsupported: '不支持的存储后端类型: {{type}}。',
+        field: '字段 {{field}} 格式不正确。',
+      },
+    },
+
     conflictDisabled: {
       stat: '该后端未声明 stat 能力, 冲突检查只按记录判断, 不查询对象是否存在。',
     },
