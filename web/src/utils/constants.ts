@@ -3,6 +3,7 @@ export const STORAGE_KEYS = {
   themeMode: 'picsky.theme-mode',
   galleryView: 'picsky.gallery-view',
   uploadPolicy: 'picsky.upload-policy',
+  uploadSettings: 'picsky.upload-settings',
 } as const;
 
 export type GalleryView = 'masonry' | 'list';

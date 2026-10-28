@@ -27,6 +27,10 @@ import { cravatarAvatarUrl } from '../utils/avatar';
 import { isAdminVisible, hasPermission } from '../utils/permissions';
 import type { PermissionName } from '../api/types';
 import { ThemeModeToggleButton } from '../components/ThemeModeToggleButton';
+import {
+  CompressionSettingsButton,
+  UploadSettingsButton,
+} from '../components/upload/UploadSettingsSheets';
 import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
@@ -328,6 +332,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 export function AppLayout() {
   const { t } = useTranslation();
   const siteName = useSiteName();
+  const { permissions } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -360,6 +365,12 @@ export function AppLayout() {
             <Menu />
           </Button>
           <div className="flex-1" />
+          {hasPermission(permissions, 'upload') && (
+            <>
+              <CompressionSettingsButton />
+              <UploadSettingsButton />
+            </>
+          )}
           <ThemeModeToggleButton />
           <UserMenu />
         </header>

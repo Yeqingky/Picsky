@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, CircleCheck, Copy, FileImage, LoaderCircle, RotateCw } from 'lucide-react';
+import {
+  CircleAlert,
+  CircleCheck,
+  CircleSlash,
+  Copy,
+  FileImage,
+  LoaderCircle,
+  RotateCw,
+  X,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { UploadItem } from './types';
 import { uploadItemUrl } from './types';
@@ -46,11 +55,28 @@ function StatusCell({ item }: { item: UploadItem }) {
           </div>
         </div>
       );
+    case 'compressing':
+      return (
+        <span className="text-info flex items-center gap-1 text-xs whitespace-nowrap">
+          <LoaderCircle className="size-3.5 animate-spin" />
+          {t('upload.queue.statusCompressing')}
+        </span>
+      );
     case 'hashing':
       return (
         <span className="text-info flex items-center gap-1 text-xs whitespace-nowrap">
           <LoaderCircle className="size-3.5 animate-spin" />
           {t('upload.queue.statusHashing')}
+        </span>
+      );
+    case 'skipped':
+      return (
+        <span
+          className="text-warning flex items-center gap-1 text-xs whitespace-nowrap"
+          title={item.compressionError}
+        >
+          <CircleSlash className="size-3.5" />
+          {t('upload.queue.statusSkipped')}
         </span>
       );
     case 'failed':
@@ -74,11 +100,13 @@ export function UploadFileRow({
   item,
   onCopy,
   onRetry,
+  onRemove,
   className,
 }: {
   item: UploadItem;
   onCopy: (item: UploadItem) => void;
   onRetry: (id: string) => void;
+  onRemove: (id: string) => void;
   className?: string;
 }) {
   const { t } = useTranslation();
@@ -106,12 +134,29 @@ export function UploadFileRow({
         <p className="truncate text-sm font-medium" title={item.name}>
           {item.name}
         </p>
-        <p className="text-muted-foreground text-xs">{formatBytes(item.size)}</p>
+        <p className="text-muted-foreground text-xs">
+          {formatBytes(item.size)}
+          {item.compressedSize !== undefined && (
+            <>
+              {' -> '}
+              <span
+                className={item.compressedSize > item.size ? 'line-through' : undefined}
+                title={
+                  item.compressedSize > item.size && item.uploadFile === undefined
+                    ? t('upload.compression.largerKeptOriginal')
+                    : undefined
+                }
+              >
+                {formatBytes(item.compressedSize)}
+              </span>
+            </>
+          )}
+        </p>
       </div>
       <div className="flex w-24 shrink-0 justify-end">
         <StatusCell item={item} />
       </div>
-      <div className="flex size-7 shrink-0 items-center justify-center">
+      <div className="flex shrink-0 items-center gap-1">
         {url !== null && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -142,6 +187,25 @@ export function UploadFileRow({
             <TooltipContent>{item.error ?? t('upload.queue.retry')}</TooltipContent>
           </Tooltip>
         )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-foreground"
+              aria-label={t('upload.remove')}
+              disabled={
+                item.status === 'compressing' ||
+                item.status === 'hashing' ||
+                item.status === 'uploading'
+              }
+              onClick={() => onRemove(item.id)}
+            >
+              <X className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t('upload.remove')}</TooltipContent>
+        </Tooltip>
       </div>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>

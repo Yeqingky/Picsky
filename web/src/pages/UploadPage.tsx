@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CloudUpload, Copy } from 'lucide-react';
+import { CloudUpload, Copy, Play, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -8,9 +8,17 @@ import { policiesApi } from '../api/images';
 import { uploadApi } from '../api/upload';
 import type { PolicySummary } from '../api/types';
 import { useAuth } from '../hooks/useAuth';
+import { useUploadSettings } from '../hooks/useUploadSettings';
+import { compressImage } from '../lib/imageCompression';
+import { isAnimatedImage } from '../utils/imageAnimation';
 import { PageHeader } from '../components/PageHeader';
 import { UploadFileRow } from '../components/upload/UploadFileRow';
-import { createUploadItem, uploadItemFilename, uploadItemUrl } from '../components/upload/types';
+import {
+  createUploadItem,
+  uploadItemFilename,
+  uploadItemPayload,
+  uploadItemUrl,
+} from '../components/upload/types';
 import type { UploadItem } from '../components/upload/types';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
@@ -43,7 +51,9 @@ function matchesFilter(item: UploadItem, filter: UploadFilter): boolean {
     case 'done':
       return item.status === 'done' || item.status === 'duplicate';
     case 'uploading':
-      return item.status === 'uploading' || item.status === 'hashing';
+      return (
+        item.status === 'uploading' || item.status === 'hashing' || item.status === 'compressing'
+      );
     case 'queued':
       return item.status === 'pending';
     case 'failed':
@@ -57,6 +67,7 @@ export default function UploadPage() {
   const { t } = useTranslation();
   const { user, hasPermission } = useAuth();
   const canUpload = hasPermission('upload');
+  const settings = useUploadSettings();
 
   const [queue, setQueue] = useState<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -112,9 +123,12 @@ export default function UploadPage() {
         toast.warning(t('upload.error.notImage'));
       }
       if (images.length === 0) return;
-      setQueue((current) => [...current, ...images.map(createUploadItem)]);
+      setQueue((current) => [
+        ...current,
+        ...images.map((file) => createUploadItem(file, settings.autoUpload)),
+      ]);
     },
-    [t],
+    [settings.autoUpload, t],
   );
 
   // 拖拽到页面任意位置 + Ctrl+V 粘贴
@@ -163,16 +177,61 @@ export default function UploadPage() {
   // 串行处理队列: 计算 sha256 -> 秒传检查 -> 上传 (失败可重试)
   useEffect(() => {
     if (!canUpload || runningRef.current || policyId === null) return;
-    const next = queue.find((item) => item.status === 'pending');
+    const next = queue.find((item) => item.status === 'pending' && item.armed);
     if (!next) return;
 
     runningRef.current = true;
     const targetPolicy = policyId;
 
     void (async () => {
+      let payload = uploadItemPayload(next);
       try {
+        if (next.uploadFile === undefined && settings.compression) {
+          let animated = false;
+          try {
+            animated = await isAnimatedImage(next.file);
+          } catch {
+            animated = false;
+          }
+          if (!animated || settings.animated) {
+            updateItem(next.id, { status: 'compressing', progress: 0, error: undefined });
+            try {
+              const compressed = await compressImage(next.file, {
+                quality: settings.quality,
+                format: settings.format,
+                forceWebp: animated,
+              });
+              if (settings.keepOriginal && compressed.file.size >= next.file.size) {
+                // 编码结果没有更小: 保留原图与原始文件名
+                payload = next.file;
+                updateItem(next.id, {
+                  status: 'hashing',
+                  compressionError: undefined,
+                  compressedSize: compressed.file.size,
+                });
+              } else {
+                payload = compressed.file;
+                updateItem(next.id, {
+                  uploadFile: compressed.file,
+                  status: 'hashing',
+                  compressionError: undefined,
+                  compressedSize: compressed.file.size,
+                });
+              }
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : t('upload.error.compressFailed');
+              if (settings.failure === 'skip') {
+                updateItem(next.id, { status: 'skipped', progress: 0, compressionError: message });
+                return;
+              }
+              updateItem(next.id, { status: 'hashing', compressionError: message });
+            }
+          }
+        }
+
         updateItem(next.id, { status: 'hashing', progress: 0, error: undefined });
-        const sha256 = await sha256Hex(next.file);
+        const sha256 = await sha256Hex(payload);
         const check = await uploadApi.check({ sha256, policy_id: targetPolicy });
         if (check.exists && check.record) {
           updateItem(next.id, { status: 'duplicate', progress: 100, dedupRecord: check.record });
@@ -184,7 +243,7 @@ export default function UploadPage() {
             policyId: targetPolicy,
             onProgress: (percent) => updateItem(next.id, { progress: percent }),
           },
-          next.file,
+          payload,
         );
         updateItem(next.id, { status: 'done', progress: 100, result });
       } catch (error) {
@@ -201,7 +260,7 @@ export default function UploadPage() {
         runningRef.current = false;
       }
     })();
-  }, [queue, canUpload, policyId, updateItem, t]);
+  }, [queue, canUpload, policyId, updateItem, t, settings]);
 
   const stats = useMemo(() => {
     let bytes = 0;
@@ -210,18 +269,22 @@ export default function UploadPage() {
     let uploading = 0;
     let queued = 0;
     let failed = 0;
+    let skipped = 0;
     for (const item of queue) {
-      bytes += item.size;
+      const payloadSize = item.uploadFile?.size ?? item.size;
+      if (item.status !== 'skipped') bytes += payloadSize;
       if (item.status === 'done' || item.status === 'duplicate') {
         done += 1;
-        uploaded += item.size;
+        uploaded += payloadSize;
       } else if (item.status === 'uploading') {
         uploading += 1;
-        uploaded += (item.size * item.progress) / 100;
-      } else if (item.status === 'hashing') {
+        uploaded += (payloadSize * item.progress) / 100;
+      } else if (item.status === 'hashing' || item.status === 'compressing') {
         uploading += 1;
       } else if (item.status === 'failed') {
         failed += 1;
+      } else if (item.status === 'skipped') {
+        skipped += 1;
       } else {
         queued += 1;
       }
@@ -232,9 +295,28 @@ export default function UploadPage() {
       uploading,
       queued,
       failed,
+      skipped,
       progress: bytes === 0 ? 0 : Math.round((uploaded / bytes) * 100),
     };
   }, [queue]);
+
+  const waiting = useMemo(
+    () => queue.filter((item) => item.status === 'pending' && !item.armed).length,
+    [queue],
+  );
+
+  const startUploads = useCallback(() => {
+    setQueue((current) =>
+      current.map((item) =>
+        item.status === 'pending' && !item.armed ? { ...item, armed: true } : item,
+      ),
+    );
+  }, []);
+
+  // 开启自动上传时, 把此前等待中的文件一并放行
+  useEffect(() => {
+    if (settings.autoUpload) startUploads();
+  }, [settings.autoUpload, startUploads]);
 
   const completed = useMemo(() => queue.filter((item) => uploadItemUrl(item) !== null), [queue]);
 
@@ -244,7 +326,7 @@ export default function UploadPage() {
   );
 
   const retryItem = (id: string) =>
-    updateItem(id, { status: 'pending', progress: 0, error: undefined });
+    updateItem(id, { status: 'pending', progress: 0, armed: true, error: undefined });
 
   const copyItem = useCallback(
     async (item: UploadItem) => {
@@ -258,6 +340,12 @@ export default function UploadPage() {
     },
     [copyFormat, t],
   );
+
+  const clearQueue = useCallback(() => setQueue([]), []);
+
+  const removeItem = useCallback((id: string) => {
+    setQueue((current) => current.filter((item) => item.id !== id));
+  }, []);
 
   const copyAll = useCallback(async () => {
     const text = completed
@@ -351,11 +439,11 @@ export default function UploadPage() {
       {queue.length > 0 && (
         <>
           <div className="flex flex-col gap-2">
-            <div className="flex items-end justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                <span className="font-medium">
-                  {t('upload.summary.total', { count: stats.total })}
-                </span>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 sm:flex sm:items-end sm:justify-between sm:gap-3">
+              <span className="font-medium">
+                {t('upload.summary.total', { count: stats.total })}
+              </span>
+              <div className="order-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm sm:order-none">
                 <span className="text-success text-xs">
                   {t('upload.summary.done', { count: stats.done })}
                 </span>
@@ -368,8 +456,26 @@ export default function UploadPage() {
                 <span className="text-destructive text-xs">
                   {t('upload.summary.failed', { count: stats.failed })}
                 </span>
+                {stats.skipped > 0 && (
+                  <span className="text-warning text-xs">
+                    {t('upload.summary.skipped', { count: stats.skipped })}
+                  </span>
+                )}
               </div>
-              <span className="text-sm font-medium tabular-nums">{stats.progress}%</span>
+              <div className="order-2 flex h-7 items-center justify-end gap-2 sm:order-none sm:ml-auto">
+                {!settings.autoUpload && waiting > 0 && (
+                  <Button type="button" size="sm" variant="outline" onClick={startUploads}>
+                    <Play className="size-3.5" />
+                    {t('upload.queue.start', { count: waiting })}
+                  </Button>
+                )}
+                <span className="hidden text-sm font-medium tabular-nums sm:inline">
+                  {stats.progress}%
+                </span>
+              </div>
+              <span className="order-4 justify-self-end text-sm font-medium tabular-nums sm:hidden">
+                {stats.progress}%
+              </span>
             </div>
             <div className="bg-muted h-1 overflow-hidden rounded-full">
               <div
@@ -422,6 +528,23 @@ export default function UploadPage() {
                   <Button
                     variant="outline"
                     size="icon"
+                    className="text-destructive hover:text-destructive border-destructive/40 hover:bg-destructive/10 rounded-full"
+                    aria-label={t('upload.clear')}
+                    disabled={stats.uploading > 0}
+                    onClick={clearQueue}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {stats.uploading > 0 ? t('upload.clearBlocked') : t('upload.clear')}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
                     className="rounded-full"
                     aria-label={t('upload.copyAll', { count: completed.length })}
                     disabled={completed.length === 0}
@@ -451,6 +574,7 @@ export default function UploadPage() {
                     void copyItem(target);
                   }}
                   onRetry={retryItem}
+                  onRemove={removeItem}
                   className={index > 0 ? 'border-t border-border' : undefined}
                 />
               ))
