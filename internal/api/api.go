@@ -193,14 +193,34 @@ func (s *Server) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "version": config.Version})
 }
 
-// publicSite 返回站点公开信息 (名称, 注册开关, 找回密码可用性与人机验证配置).
+// publicSite 返回站点公开信息 (名称, 注册开关, 找回密码可用性, 人机验证配置与注册邮箱域名白名单).
 func (s *Server) publicSite(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"site_name":              s.svc.Settings.String("site_name"),
-		"register_enabled":       s.svc.Settings.Bool("register_enabled", true),
-		"password_reset_enabled": s.svc.Mailer.Configured(),
-		"captcha":                s.svc.Captcha.Public(),
+		"site_name":                  s.svc.Settings.String("site_name"),
+		"register_enabled":           s.svc.Settings.Bool("register_enabled", true),
+		"password_reset_enabled":     s.svc.Mailer.Configured(),
+		"captcha":                    s.svc.Captcha.Public(),
+		"registration_email_domains": splitEmailDomains(s.svc.Settings.String("registration_email_allowlist")),
 	})
+}
+
+// splitEmailDomains 将逗号分隔的邮箱域名白名单转为去空, 去重后的列表.
+func splitEmailDomains(raw string) []string {
+	domains := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, item := range strings.Split(raw, ",") {
+		domain := strings.TrimSpace(item)
+		if domain == "" {
+			continue
+		}
+		key := strings.ToLower(domain)
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		domains = append(domains, domain)
+	}
+	return domains
 }
 
 // adminClientIPSources 返回本次请求中包含有效 IP 的来源.

@@ -24,6 +24,8 @@ export interface SiteInfo {
   register_enabled: boolean;
   password_reset_enabled: boolean;
   captcha: CaptchaConfig;
+  /** 注册邮箱域名白名单; 空数组表示不限制 */
+  registration_email_domains: string[];
 }
 
 /* ------------------------------------------------------------------ 认证 */

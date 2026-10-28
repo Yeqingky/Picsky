@@ -12,7 +12,15 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
 import { useAuth } from '../hooks/useAuth';
+import { useSiteInfo } from '../hooks/useSite';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_PATTERN = /^[A-Za-z0-9]+$/;
@@ -35,6 +43,7 @@ export default function RegisterPage() {
 
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
+  const [emailDomain, setEmailDomain] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [captchaToken, setCaptchaToken] = useState('');
@@ -50,17 +59,26 @@ export default function RegisterPage() {
     queryFn: authApi.captchaConfig,
     staleTime: Infinity,
   });
+  const siteQuery = useSiteInfo();
+  const emailDomains = siteQuery.data?.registration_email_domains ?? [];
+  const domainSelectEnabled = emailDomains.length > 0;
+  const selectedEmailDomain = emailDomains.includes(emailDomain)
+    ? emailDomain
+    : (emailDomains[0] ?? '');
   const captchaConfig: CaptchaConfig | undefined = captchaQuery.data;
   const captchaRequired = (captchaConfig?.provider ?? 'none') !== 'none';
 
-  if (isLoading)
+  if (isLoading || siteQuery.isPending)
     return <AuthCardSkeleton fields={4} captcha={captchaQuery.isPending || captchaRequired} />;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const trimmedUsername = username.trim();
-    const normalizedEmail = email.trim().toLowerCase();
+    const emailLocal = email.trim().toLowerCase();
+    const normalizedEmail = domainSelectEnabled
+      ? `${emailLocal}@${selectedEmailDomain.toLowerCase()}`
+      : emailLocal;
     const nextErrors: RegisterFieldErrors = {};
     if (trimmedUsername === '') nextErrors.username = t('auth.register.usernameRequired');
     else if (
@@ -68,7 +86,10 @@ export default function RegisterPage() {
       !USERNAME_PATTERN.test(trimmedUsername)
     )
       nextErrors.username = t('auth.register.usernameInvalid');
-    if (normalizedEmail === '') nextErrors.email = t('auth.register.emailRequired');
+    if (emailLocal === '')
+      nextErrors.email = t(
+        domainSelectEnabled ? 'auth.register.emailLocalRequired' : 'auth.register.emailRequired',
+      );
     else if (!EMAIL_PATTERN.test(normalizedEmail)) nextErrors.email = t('common.form.invalidEmail');
     if (password === '') nextErrors.password = t('common.form.required');
     else if (Array.from(password).length < MIN_PASSWORD_LENGTH)
@@ -171,15 +192,47 @@ export default function RegisterPage() {
             </p>
           )}
         </div>
-        <Input
-          id="register-email"
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value.toLowerCase())}
-          aria-invalid={Boolean(fieldErrors.email)}
-          aria-describedby={fieldErrors.email ? 'register-email-error' : undefined}
-          autoComplete="email"
-        />
+        {domainSelectEnabled ? (
+          <div className="flex min-w-0 gap-2">
+            <Input
+              id="register-email"
+              className="min-w-0 flex-1"
+              type="text"
+              value={email}
+              onChange={(event) => setEmail(event.target.value.toLowerCase())}
+              placeholder={t('auth.register.emailLocalPlaceholder')}
+              aria-invalid={Boolean(fieldErrors.email)}
+              aria-describedby={fieldErrors.email ? 'register-email-error' : undefined}
+              autoComplete="off"
+            />
+            <Select value={selectedEmailDomain} onValueChange={setEmailDomain}>
+              <SelectTrigger
+                className="w-40 shrink-0"
+                aria-label={t('auth.register.emailDomain')}
+                aria-invalid={Boolean(fieldErrors.email)}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {emailDomains.map((domain) => (
+                  <SelectItem key={domain} value={domain}>
+                    @{domain}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : (
+          <Input
+            id="register-email"
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value.toLowerCase())}
+            aria-invalid={Boolean(fieldErrors.email)}
+            aria-describedby={fieldErrors.email ? 'register-email-error' : undefined}
+            autoComplete="email"
+          />
+        )}
       </div>
 
       <div className="flex flex-col gap-2">

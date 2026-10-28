@@ -816,6 +816,21 @@ func TestHealthAndAuthFlow(t *testing.T) {
 	if site.Status != http.StatusOK || s.decode(site)["password_reset_enabled"] != true {
 		t.Errorf("配置 SMTP 后找回密码应可用: %s", string(site.Body))
 	}
+	if err := s.svc.Settings.Update(map[string]string{
+		"registration_email_allowlist": " Example.com, corp.test ,example.com",
+	}); err != nil {
+		t.Fatalf("配置邮箱域名白名单失败: %v", err)
+	}
+	site = s.raw(http.MethodGet, "/api/v1/site", nil, nil, nil)
+	domains, ok := s.decode(site)["registration_email_domains"].([]any)
+	if !ok || len(domains) != 2 || domains[0] != "Example.com" || domains[1] != "corp.test" {
+		t.Errorf("站点公开信息应返回去空去重的邮箱域名白名单: %s", string(site.Body))
+	}
+	if err := s.svc.Settings.Update(map[string]string{
+		"registration_email_allowlist": "",
+	}); err != nil {
+		t.Fatalf("重置邮箱域名白名单失败: %v", err)
+	}
 
 	unauthorized := s.raw(http.MethodGet, "/api/v1/images", nil, nil, nil)
 	if unauthorized.Status != http.StatusUnauthorized {
