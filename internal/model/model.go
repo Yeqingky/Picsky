@@ -89,6 +89,12 @@ type StoragePolicy struct {
 	UpdatedAt      time.Time `gorm:"not null" json:"updated_at"`
 }
 
+// PolicySequence 是策略的递增序号分配器; 每个策略一条, 序号跨输出格式共享.
+type PolicySequence struct {
+	PolicyID  int64 `gorm:"primaryKey" json:"policy_id"`
+	NextValue int64 `gorm:"not null" json:"next_value"`
+}
+
 // PolicyURL 是策略的分发域名别名.
 type PolicyURL struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
@@ -210,6 +216,7 @@ func AllModels() []any {
 		&Group{},
 		&GroupPolicy{},
 		&StoragePolicy{},
+		&PolicySequence{},
 		&PolicyURL{},
 		&User{},
 		&Image{},

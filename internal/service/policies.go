@@ -302,6 +302,9 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 	default:
 		return apperr.ErrInvalidRequest.WithMessage("未知冲突策略: " + in.ConflictPolicy)
 	}
+	if strings.Contains(in.PathTemplate, "{seq}") && in.ConflictPolicy != model.ConflictRename {
+		return apperr.ErrInvalidRequest.WithMessage("包含 {seq} 的路径模板只支持 rename 冲突策略")
+	}
 	for _, field := range spec.ConfigFields {
 		if field.Required && strings.TrimSpace(in.Config[field.Name]) == "" {
 			return apperr.ErrInvalidRequest.WithMessage("缺少必填后端配置: " + field.Label)
@@ -774,6 +777,11 @@ func (p *Policies) ScanListed(ctx context.Context, policyID, ownerID int64, keys
 	}
 
 	if !dryRun {
+		if strings.Contains(policy.PathTemplate, "{seq}") {
+			if err := reconcilePolicySequence(p.db, policy.ID); err != nil {
+				return nil, err
+			}
+		}
 		var actor *int64
 		if ownerID > 0 {
 			actor = &ownerID

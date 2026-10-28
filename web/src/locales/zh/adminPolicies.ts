@@ -119,6 +119,7 @@ export const adminPolicies = {
       urlInvalid: '地址必须以 http:// 或 https:// 开头',
       urlsRequired: '至少需要配置一个分发域名',
       sortInvalid: '排序必须是整数',
+      seqRequiresRename: '包含 {seq} 的路径模板只支持 rename 冲突策略',
       saveFailed: '保存失败',
     },
 
@@ -158,6 +159,9 @@ export const adminPolicies = {
       sampleNote: '预览使用示例值渲染: seq 1, md5 0f1e2d3c4b5a69788796a5b4c3d2e1f0, ext png。',
       urls: '拼接后的域名 URL',
     },
+
+    conflictSeqHint:
+      '包含 {seq} 的模板按策略原子分配递增序号, 序号跨输出格式共享, 扫描补录与已有纯数字文件名参与对账。',
 
     test: {
       button: '连接测试',

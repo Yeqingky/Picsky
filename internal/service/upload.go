@@ -235,11 +235,11 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if err != nil {
 		return nil, apperr.ErrInternal.WithMessage("魔法路径渲染失败: " + err.Error())
 	}
-	if policy.ConflictPolicy == model.ConflictRename {
+	// 序号策略与重命名上传在策略内串行, 避免并发重复分配或重复写入同一对象.
+	if policy.ConflictPolicy == model.ConflictRename || renderer.HasSequence() {
 		unlock := u.lockPolicyPath(policy.ID)
 		defer unlock()
 
-		// 等待同策略的重命名上传完成后再次检查哈希, 避免并发同内容上传生成孤立对象.
 		var concurrentExisting model.Image
 		err := u.db.Where("policy_id = ? AND sha256 = ? AND kind = ?", policy.ID, sums.SHA256, model.KindImage).
 			Order("id ASC").First(&concurrentExisting).Error
@@ -254,17 +254,9 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 
 	sequence := uint64(0)
 	if renderer.HasSequence() {
-		sequence = 1
-		if policy.ConflictPolicy == model.ConflictRename {
-			prefix, suffix := renderer.SequencePattern()
-			maxSequence, err := u.maxPathSequence(policy.ID, prefix, suffix)
-			if err != nil {
-				return nil, err
-			}
-			sequence, err = nextPathSequence(maxSequence)
-			if err != nil {
-				return nil, apperr.ErrPathConflict.WithMessage(err.Error())
-			}
+		sequence, err = allocatePolicySequence(u.db, policy.ID)
+		if err != nil {
+			return nil, err
 		}
 	}
 	relPath, err := renderer.Render(sequence)
@@ -311,7 +303,12 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 				"policy":     policy.ConflictPolicy,
 			})
 		case model.ConflictRename:
-			if !renderer.HasSequence() && sequence == 0 {
+			if renderer.HasSequence() {
+				sequence, err = allocatePolicySequence(u.db, policy.ID)
+				if err != nil {
+					return nil, err
+				}
+			} else if sequence == 0 {
 				prefix, suffix := renderer.SequencePattern()
 				maxSequence, err := u.maxPathSequence(policy.ID, prefix, suffix)
 				if err != nil {

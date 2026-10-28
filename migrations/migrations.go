@@ -15,7 +15,7 @@ import (
 )
 
 // schemaVersion 是当前迁移版本, 每次结构变更递增并追加一个迁移函数.
-const schemaVersion = 10
+const schemaVersion = 11
 
 // SchemaMigration 记录已应用的迁移版本.
 type SchemaMigration struct {
@@ -149,6 +149,19 @@ var steps = map[int]func(*gorm.DB) error{
 	},
 	10: func(db *gorm.DB) error {
 		return db.AutoMigrate(&model.MaintenanceTask{}, &model.PolicyScanManifest{})
+	},
+	11: func(db *gorm.DB) error {
+		// 策略序号分配器: 每个含 {seq} 的策略一条原子递增计数器.
+		if err := db.AutoMigrate(&model.PolicySequence{}); err != nil {
+			return err
+		}
+		// {seq} 只支持 rename; 旧数据中的 skip 组合统一改为 rename.
+		if !db.Migrator().HasTable(&model.StoragePolicy{}) {
+			return nil
+		}
+		return db.Model(&model.StoragePolicy{}).
+			Where("path_template LIKE ? AND conflict_policy <> ?", "%{seq}%", model.ConflictRename).
+			Update("conflict_policy", model.ConflictRename).Error
 	},
 }
 

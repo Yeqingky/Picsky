@@ -26,8 +26,8 @@ func TestConflictPolicyMigrationMapsLegacyValuesToSkip(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	policies := []model.StoragePolicy{
-		{Name: "old-overwrite", Type: "webdav", Enabled: true, PathTemplate: "{seq}.jpg", ConflictPolicy: "overwrite", Config: "{}", CreatedAt: now, UpdatedAt: now},
-		{Name: "old-fail", Type: "webdav", Enabled: true, PathTemplate: "{seq}.jpg", ConflictPolicy: "fail", Config: "{}", CreatedAt: now, UpdatedAt: now},
+		{Name: "old-overwrite", Type: "webdav", Enabled: true, PathTemplate: "{md5}.jpg", ConflictPolicy: "overwrite", Config: "{}", CreatedAt: now, UpdatedAt: now},
+		{Name: "old-fail", Type: "webdav", Enabled: true, PathTemplate: "{md5}.jpg", ConflictPolicy: "fail", Config: "{}", CreatedAt: now, UpdatedAt: now},
 		{Name: "rename", Type: "webdav", Enabled: true, PathTemplate: "{seq}.jpg", ConflictPolicy: model.ConflictRename, Config: "{}", CreatedAt: now, UpdatedAt: now},
 	}
 	if err := database.Create(&policies).Error; err != nil {
@@ -83,8 +83,8 @@ func TestConflictPolicyMigrationMapsLegacyValuesToSkip(t *testing.T) {
 	if err := database.Order("version DESC").First(&latest).Error; err != nil {
 		t.Fatalf("读取迁移版本失败: %v", err)
 	}
-	if latest.Version != 10 {
-		t.Errorf("迁移版本应为 10, 实际 %d", latest.Version)
+	if latest.Version != 11 {
+		t.Errorf("迁移版本应为 11, 实际 %d", latest.Version)
 	}
 	if !database.Migrator().HasTable(&model.PolicyScanManifest{}) {
 		t.Fatal("迁移未创建 policy_scan_manifests 表")
@@ -307,3 +307,50 @@ type userBeforeRestoreGroup struct {
 }
 
 func (userBeforeRestoreGroup) TableName() string { return "users" }
+
+func TestSequencePolicyMigrationCreatesCounterAndForcesRename(t *testing.T) {
+	database, err := gorm.Open(sqlite.Open("file:sequence-policy-migration?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开测试数据库失败: %v", err)
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		t.Fatalf("读取测试数据库连接失败: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	if err := database.AutoMigrate(&SchemaMigration{}, &model.StoragePolicy{}); err != nil {
+		t.Fatalf("准备旧版表结构失败: %v", err)
+	}
+	now := time.Now().UTC()
+	policies := []model.StoragePolicy{
+		{Name: "seq-skip", Type: "webdav", Enabled: true, PathTemplate: "{seq}.{ext}", ConflictPolicy: model.ConflictSkip, Config: "{}", CreatedAt: now, UpdatedAt: now},
+		{Name: "hash-skip", Type: "webdav", Enabled: true, PathTemplate: "{md5}.{ext}", ConflictPolicy: model.ConflictSkip, Config: "{}", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := database.Create(&policies).Error; err != nil {
+		t.Fatalf("写入旧策略失败: %v", err)
+	}
+	if err := database.Create(&SchemaMigration{Version: 10, AppliedAt: now}).Error; err != nil {
+		t.Fatalf("写入旧迁移版本失败: %v", err)
+	}
+
+	if err := Run(database); err != nil {
+		t.Fatalf("升级迁移失败: %v", err)
+	}
+	if !database.Migrator().HasTable(&model.PolicySequence{}) {
+		t.Fatal("应创建 policy_sequences 表")
+	}
+	var seqPolicy, hashPolicy model.StoragePolicy
+	if err := database.Where("name = ?", "seq-skip").First(&seqPolicy).Error; err != nil {
+		t.Fatalf("读取 {seq} 策略失败: %v", err)
+	}
+	if seqPolicy.ConflictPolicy != model.ConflictRename {
+		t.Errorf("{seq} 策略应迁移为 rename, 实际 %q", seqPolicy.ConflictPolicy)
+	}
+	if err := database.Where("name = ?", "hash-skip").First(&hashPolicy).Error; err != nil {
+		t.Fatalf("读取哈希策略失败: %v", err)
+	}
+	if hashPolicy.ConflictPolicy != model.ConflictSkip {
+		t.Errorf("哈希策略不应改变, 实际 %q", hashPolicy.ConflictPolicy)
+	}
+}

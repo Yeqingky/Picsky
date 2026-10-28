@@ -131,6 +131,7 @@ const TEMPLATE_VARIABLES = [
 ] as const;
 
 const PATH_VARIABLE_RE = /\{(?:md5|sha256|sha512)(?::\d+)?\}|\{seq\}/;
+const SEQ_RE = /\{seq\}/;
 const URL_RE = /^https?:\/\//i;
 const INTEGER_RE = /^-?\d+$/;
 
@@ -484,6 +485,10 @@ export default function AdminPolicyEditPage() {
       next.pathTemplate = t('adminPolicies.edit.error.templateInvalid');
     }
 
+    if (SEQ_RE.test(template) && form.conflictPolicy !== 'rename') {
+      next.conflictPolicy = t('adminPolicies.edit.error.seqRequiresRename');
+    }
+
     if (form.name.trim() === '') next.name = t('adminPolicies.edit.error.nameRequired');
     if (form.endpoint.trim() === '') next.endpoint = t('adminPolicies.edit.error.endpointRequired');
     if (form.sort.trim() !== '' && !INTEGER_RE.test(form.sort.trim())) {
@@ -504,10 +509,12 @@ export default function AdminPolicyEditPage() {
     return next;
   }, [form, t]);
 
+  const sequenceTemplate = form !== null && SEQ_RE.test(form.pathTemplate.trim());
+
   const errorFor = (key: string) => {
     const message = errors[key];
     if (message === undefined) return undefined;
-    if (key === 'pathTemplate') return message;
+    if (key === 'pathTemplate' || key === 'conflictPolicy') return message;
     if (key.startsWith('urls.') && urlTouched) return message;
     return submitted ? message : undefined;
   };
@@ -1315,21 +1322,37 @@ export default function AdminPolicyEditPage() {
                   value={form.conflictPolicy}
                   onValueChange={(value) => updateForm({ conflictPolicy: value as ConflictPolicy })}
                 >
-                  <SelectTrigger id="policy-conflict-policy" className="w-full">
+                  <SelectTrigger
+                    id="policy-conflict-policy"
+                    className="w-full"
+                    aria-invalid={errorFor('conflictPolicy') !== undefined}
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {CONFLICT_OPTIONS.map((option) => (
-                      <SelectItem key={option} value={option}>
+                      <SelectItem
+                        key={option}
+                        value={option}
+                        disabled={option === 'skip' && sequenceTemplate}
+                      >
                         {t(`adminPolicies.conflict.${option}`)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {errorFor('conflictPolicy') !== undefined && (
+                  <p className="text-destructive text-sm">{errorFor('conflictPolicy')}</p>
+                )}
               </div>
               <p className="text-muted-foreground text-sm">
                 {t(`adminPolicies.conflict.${form.conflictPolicy}Hint`)}
               </p>
+              {sequenceTemplate && errorFor('conflictPolicy') === undefined && (
+                <p className="text-muted-foreground text-sm">
+                  {t('adminPolicies.edit.conflictSeqHint')}
+                </p>
+              )}
               {!canStat && (
                 <p className="text-warning text-sm">
                   {t('adminPolicies.edit.conflictDisabled.stat')}

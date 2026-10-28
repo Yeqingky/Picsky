@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"log/slog"
@@ -965,6 +966,66 @@ func TestScannedSequenceContinuesAfterHighestImportedPath(t *testing.T) {
 	result := f.mustUpload(f.admin, &policy.ID, "new.png", pngBytes(t, 95, 4, 4))
 	if result.Record.RelPath != "930.png" {
 		t.Fatalf("扫描到 929.png 后应生成 930.png, 实际 %q", result.Record.RelPath)
+	}
+}
+
+func TestSequenceIsSharedAcrossFormats(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("跨格式序号", "{seq}.{ext}", model.ConflictRename)
+
+	first := f.mustUpload(f.admin, &policy.ID, "a.png", pngBytes(t, 900, 4, 4))
+	if first.Record.RelPath != "1.png" {
+		t.Fatalf("首个文件应为 1.png, 实际 %q", first.Record.RelPath)
+	}
+
+	canvas := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, canvas, &jpeg.Options{Quality: 80}); err != nil {
+		t.Fatalf("编码 JPEG 失败: %v", err)
+	}
+	second := f.mustUpload(f.admin, &policy.ID, "b.jpg", encoded.Bytes())
+	if second.Record.RelPath != "2.jpg" {
+		t.Fatalf("跨格式应继续使用共享序号, 实际 %q", second.Record.RelPath)
+	}
+}
+
+func TestScanReconcilesSequenceCounter(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("扫描对账序号", "{seq}.{ext}", model.ConflictRename)
+
+	first := f.mustUpload(f.admin, &policy.ID, "a.png", pngBytes(t, 901, 4, 4))
+	if first.Record.RelPath != "1.png" {
+		t.Fatalf("首个文件应为 1.png, 实际 %q", first.Record.RelPath)
+	}
+	for name, seed := range map[string]int{"50.webp": 902, "60.jpg": 903} {
+		if err := os.WriteFile(filepath.Join(f.davRoot, name), pngBytes(t, seed, 4, 4), 0o600); err != nil {
+			t.Fatalf("准备扫描对象失败: %v", err)
+		}
+	}
+	if _, err := f.svc.Policies.Scan(context.Background(), policy.ID, f.admin.User.ID, nil, false); err != nil {
+		t.Fatalf("扫描失败: %v", err)
+	}
+
+	next := f.mustUpload(f.admin, &policy.ID, "b.png", pngBytes(t, 904, 4, 4))
+	if next.Record.RelPath != "61.png" {
+		t.Fatalf("扫描后应从 61 继续, 实际 %q", next.Record.RelPath)
+	}
+}
+
+func TestSequenceTemplateRequiresRename(t *testing.T) {
+	f := newFixture(t)
+	input := service.PolicyInput{
+		Name:           "非法序号组合",
+		Type:           "webdav",
+		PathTemplate:   "{seq}.{ext}",
+		ConflictPolicy: model.ConflictSkip,
+		Config:         map[string]string{"endpoint": f.davEndpoint()},
+		URLs:           []service.URLInput{{Alias: "cdn", URL: "https://cdn.example.com/image/", IsDefault: true}},
+	}
+	err := f.svc.Policies.Validate(&input, nil)
+	var apiErr *apperr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != "invalid_request" {
+		t.Fatalf("{seq} 与 skip 组合应被拒绝, 错误: %v", err)
 	}
 }
 
