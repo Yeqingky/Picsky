@@ -38,43 +38,16 @@ export default function AdminPoliciesPage() {
     },
   });
 
-  const scanAllMutation = useMutation({
-    mutationFn: (policies: AdminPolicy[]) =>
-      Promise.allSettled(
-        policies.map((policy) => adminPoliciesApi.scan(policy.id, {}, { silent: true })),
-      ),
-    onSuccess: async (results) => {
-      const submitted = results.filter((result) => result.status === 'fulfilled').length;
-      const failed = results.length - submitted;
-      if (submitted > 0) {
-        toast.success(t('adminPolicies.list.scanAllSubmitted', { count: submitted }));
-      }
-      if (failed > 0) {
-        toast.error(t('adminPolicies.list.scanAllFailed', { count: failed }));
-      }
+  const scanMutation = useMutation({
+    mutationFn: (id: number) => adminPoliciesApi.scan(id),
+    onSuccess: async () => {
+      toast.success(t('adminPolicies.list.scanSubmitted'));
       await queryClient.invalidateQueries({ queryKey: ['admin', 'tasks'] });
     },
   });
 
-  const { mutate: scanAll } = scanAllMutation;
-
-  const handleScanAll = useCallback(() => {
-    const all = policiesQuery.data ?? [];
-    const scannable = all.filter(
-      (policy) => policy.capabilities.includes('list') && policy.capabilities.includes('read'),
-    );
-    if (scannable.length === 0) {
-      toast.info(t('adminPolicies.list.scanAllNone'));
-      return;
-    }
-    const skipped = all.length - scannable.length;
-    if (skipped > 0) {
-      toast.info(t('adminPolicies.list.scanAllSkipped', { count: skipped }));
-    }
-    scanAll(scannable);
-  }, [policiesQuery.data, scanAll, t]);
-
   const { mutate: removePolicy } = removeMutation;
+  const { mutate: scanPolicy } = scanMutation;
 
   const handleDelete = useCallback(
     async (policy: AdminPolicy) => {
@@ -195,45 +168,78 @@ export default function AdminPoliciesPage() {
         id: 'actions',
         header: t('adminPolicies.list.col.actions'),
         className: 'w-[120px]',
-        cell: (row) => (
-          <div className="flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t('common.action.edit')}
-                  onClick={() => navigate(`/admin/policies/${row.id}`)}
-                >
-                  <Pencil className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('common.action.edit')}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex">
+        cell: (row) => {
+          const scannable = row.capabilities.includes('list') && row.capabilities.includes('read');
+          const scanning = scanMutation.isPending && scanMutation.variables === row.id;
+          return (
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t('adminPolicies.list.scan')}
+                      disabled={!scannable || scanning}
+                      onClick={() => scanPolicy(row.id)}
+                    >
+                      <ScanSearch className="size-4" />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {scannable
+                    ? t('adminPolicies.list.scan')
+                    : t('adminPolicies.list.scanUnsupported')}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    className="text-destructive"
-                    aria-label={t('common.action.delete')}
-                    disabled={removeMutation.isPending && removeMutation.variables === row.id}
-                    onClick={() => {
-                      void handleDelete(row);
-                    }}
+                    aria-label={t('common.action.edit')}
+                    onClick={() => navigate(`/admin/policies/${row.id}`)}
                   >
-                    <Trash2 className="size-4" />
+                    <Pencil className="size-4" />
                   </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{t('common.action.delete')}</TooltipContent>
-            </Tooltip>
-          </div>
-        ),
+                </TooltipTrigger>
+                <TooltipContent>{t('common.action.edit')}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-destructive"
+                      aria-label={t('common.action.delete')}
+                      disabled={removeMutation.isPending && removeMutation.variables === row.id}
+                      onClick={() => {
+                        void handleDelete(row);
+                      }}
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{t('common.action.delete')}</TooltipContent>
+              </Tooltip>
+            </div>
+          );
+        },
       },
     ],
-    [t, navigate, handleDelete, removeMutation.isPending, removeMutation.variables],
+    [
+      t,
+      navigate,
+      handleDelete,
+      removeMutation.isPending,
+      removeMutation.variables,
+      scanMutation.isPending,
+      scanMutation.variables,
+      scanPolicy,
+    ],
   );
 
   const createButton = (
@@ -243,30 +249,12 @@ export default function AdminPoliciesPage() {
     </Button>
   );
 
-  const scanAllButton = (
-    <Button
-      variant="outline"
-      onClick={handleScanAll}
-      disabled={scanAllMutation.isPending || policiesQuery.isPending}
-    >
-      <ScanSearch className="size-4" />
-      {scanAllMutation.isPending
-        ? t('adminPolicies.list.scanAllRunning')
-        : t('adminPolicies.list.scanAll')}
-    </Button>
-  );
-
   return (
     <div>
       <PageHeader
         title={t('adminPolicies.list.title')}
         description={t('adminPolicies.list.description')}
-        actions={
-          <>
-            {scanAllButton}
-            {createButton}
-          </>
-        }
+        actions={createButton}
       />
 
       {policiesQuery.isError ? (
