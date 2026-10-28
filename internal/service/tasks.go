@@ -82,38 +82,14 @@ func (t *Tasks) Enqueue(taskType string, payload any) (*model.MaintenanceTask, e
 	return &task, nil
 }
 
-// EnqueuePolicyScan 原子地创建策略扫描任务及其列举清单.
-func (t *Tasks) EnqueuePolicyScan(policyID, userID int64, path *string, dryRun bool, objectKeys []string) (*model.MaintenanceTask, error) {
-	payload, err := json.Marshal(struct {
+// EnqueuePolicyScan 立即创建策略扫描任务; 对象清单由后台任务列举并持久化.
+func (t *Tasks) EnqueuePolicyScan(policyID, userID int64, path *string, dryRun bool) (*model.MaintenanceTask, error) {
+	return t.Enqueue(model.TaskPolicyScan, struct {
 		PolicyID int64   `json:"policy_id"`
 		UserID   int64   `json:"user_id"`
 		Path     *string `json:"path,omitempty"`
 		DryRun   bool    `json:"dry_run,omitempty"`
 	}{PolicyID: policyID, UserID: userID, Path: path, DryRun: dryRun})
-	if err != nil {
-		return nil, apperr.ErrInternal.WithMessage("扫描任务参数序列化失败: " + err.Error())
-	}
-	keys, err := json.Marshal(objectKeys)
-	if err != nil {
-		return nil, apperr.ErrInternal.WithMessage("扫描对象清单序列化失败: " + err.Error())
-	}
-	task := model.MaintenanceTask{
-		Type:      model.TaskPolicyScan,
-		Payload:   string(payload),
-		Status:    model.TaskPending,
-		CreatedAt: nowUTC(),
-	}
-	err = t.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&task).Error; err != nil {
-			return err
-		}
-		return tx.Create(&model.PolicyScanManifest{TaskID: task.ID, ObjectKeys: string(keys)}).Error
-	})
-	if err != nil {
-		return nil, apperr.ErrInternal.WithMessage("入队策略扫描任务失败: " + err.Error())
-	}
-	t.notifyWorker()
-	return &task, nil
 }
 
 func (t *Tasks) notifyWorker() {
@@ -514,7 +490,18 @@ func (t *Tasks) executePolicyScan(ctx context.Context, task *model.MaintenanceTa
 		}
 		result, err = t.policies.ScanListed(ctx, payload.PolicyID, payload.UserID, keys, payload.DryRun)
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		result, err = t.policies.Scan(ctx, payload.PolicyID, payload.UserID, payload.Path, payload.DryRun)
+		keys, listErr := t.policies.ListScanObjects(ctx, payload.PolicyID, payload.Path)
+		if listErr != nil {
+			return listErr
+		}
+		encodedKeys, marshalErr := json.Marshal(keys)
+		if marshalErr != nil {
+			return fmt.Errorf("扫描对象清单序列化失败: %w", marshalErr)
+		}
+		if createErr := t.db.Create(&model.PolicyScanManifest{TaskID: task.ID, ObjectKeys: string(encodedKeys)}).Error; createErr != nil {
+			return fmt.Errorf("保存扫描对象清单失败: %w", createErr)
+		}
+		result, err = t.policies.ScanListed(ctx, payload.PolicyID, payload.UserID, keys, payload.DryRun)
 	}
 	if err != nil {
 		return err

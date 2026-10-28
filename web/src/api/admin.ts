@@ -77,9 +77,9 @@ export const adminPoliciesApi = {
       .post<PolicyTestResult>(`/admin/policies/${id}/test`, undefined, { timeout: 120_000 })
       .then((r) => r.data),
 
-  scan: (id: number, body: PolicyScanRequest = {}) =>
+  scan: (id: number, body: PolicyScanRequest = {}, options?: { silent?: boolean }) =>
     api
-      .post<PolicyScanEnqueued>(`/admin/policies/${id}/scan`, body, { timeout: 600_000 })
+      .post<PolicyScanEnqueued>(`/admin/policies/${id}/scan`, body, { silent: options?.silent })
       .then((r) => r.data),
 
   scanStatus: (id: number, taskId: number) =>

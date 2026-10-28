@@ -1508,44 +1508,31 @@ export default function AdminPolicyEditPage() {
                     <AlertDescription>
                       {scanTask === undefined ? (
                         <p className="text-sm">
-                          {t('adminPolicies.edit.scan.queued', {
+                          {t('adminPolicies.edit.scan.submitted', {
                             id: scanMutation.data.task_id,
-                            objects: scanMutation.data.objects,
                           })}
                         </p>
                       ) : scanTaskStatus === 'running' ? (
                         <p className="text-sm">
-                          {t('adminPolicies.edit.scan.processing', {
-                            id: scanTask.id,
-                            objects: scanMutation.data.objects,
-                          })}
+                          {t('adminPolicies.edit.scan.processing', { id: scanTask.id })}
                         </p>
                       ) : scanTaskStatus === 'pending' ? (
                         <p className="text-sm">
-                          {t('adminPolicies.edit.scan.queued', {
-                            id: scanTask.id,
-                            objects: scanMutation.data.objects,
-                          })}
+                          {t('adminPolicies.edit.scan.submitted', { id: scanTask.id })}
                         </p>
                       ) : scanTaskStatus === 'failed' ? (
                         <p className="text-sm">
                           {t('adminPolicies.edit.scan.taskFailed', {
+                            id: scanTask.id,
                             error: scanTask.last_error || t('adminPolicies.edit.scan.failed'),
                           })}
                         </p>
-                      ) : scanTaskStatus === 'done' && scanResult !== null ? (
+                      ) : scanTaskStatus === 'done' ? (
                         <>
                           <p className="text-sm">
-                            {scanMutation.variables?.body.dry_run === true
-                              ? t('adminPolicies.edit.scan.dryRunPrefix')
-                              : ''}
-                            {t('adminPolicies.edit.scan.result', {
-                              images: scanResult.images,
-                              files: scanResult.files,
-                              skipped: scanResult.skipped,
-                            })}
+                            {t('adminPolicies.edit.scan.done', { id: scanTask.id })}
                           </p>
-                          {scanResult.failed.length > 0 && (
+                          {scanResult !== null && scanResult.failed.length > 0 && (
                             <div className="mt-2 flex flex-col gap-1">
                               <p className="text-sm font-semibold">
                                 {t('adminPolicies.edit.scan.failedTitle', {
@@ -1564,7 +1551,9 @@ export default function AdminPolicyEditPage() {
                           )}
                         </>
                       ) : (
-                        <p className="text-sm">{t('adminPolicies.edit.scan.completed')}</p>
+                        <p className="text-sm">
+                          {t('adminPolicies.edit.scan.done', { id: scanTask.id })}
+                        </p>
                       )}
                       {scanTaskQuery.isError && (
                         <p className="mt-2 text-sm">

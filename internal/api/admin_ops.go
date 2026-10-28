@@ -144,12 +144,12 @@ func (s *Server) adminScanPolicy(c *gin.Context) {
 		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
 		return
 	}
-	task, objectCount, err := s.svc.Policies.EnqueueScan(c.Request.Context(), id, principal.User.ID, payload.Path, payload.DryRun)
+	task, err := s.svc.Policies.EnqueueScan(id, principal.User.ID, payload.Path, payload.DryRun)
 	if err != nil {
 		s.fail(c, err)
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"task_id": task.ID, "status": task.Status, "objects": objectCount})
+	c.JSON(http.StatusAccepted, gin.H{"task_id": task.ID, "status": task.Status})
 }
 
 // adminGetPolicyScanTask 查询当前策略的扫描任务状态与结果.

@@ -715,36 +715,43 @@ type ScanFailure struct {
 	Error string `json:"error"`
 }
 
-// ListScanObjects 列举扫描补录的对象键, 不读取对象内容.
-func (p *Policies) ListScanObjects(ctx context.Context, policyID int64, subPath *string) ([]string, error) {
+// scanSource 校验扫描能力与子路径, 返回适配器和规范化前缀.
+func (p *Policies) scanSource(policyID int64, subPath *string) (storage.Adapter, string, error) {
 	policy, err := p.Get(policyID)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	adapter, err := p.Adapter(policy)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	caps := adapter.Capabilities()
 	if !caps.Has(storage.CapList) || !caps.Has(storage.CapRead) {
-		return nil, apperr.ErrInvalidRequest.WithMessage("该存储后端不支持列举与读取能力, 无法扫描补录")
+		return nil, "", apperr.ErrInvalidRequest.WithMessage("该存储后端不支持列举与读取能力, 无法扫描补录")
 	}
-
 	prefix := ""
 	if subPath != nil && strings.TrimSpace(*subPath) != "" {
 		if err := storage.ValidatePrefix(*subPath); err != nil {
-			return nil, apperr.ErrInvalidRequest.WithMessage(err.Error())
+			return nil, "", apperr.ErrInvalidRequest.WithMessage(err.Error())
 		}
 		prefix = storage.NormalizeObjectKey("", strings.TrimSpace(*subPath))
+	}
+	if _, err := p.DefaultURL(policy.ID); err != nil {
+		return nil, "", err
+	}
+	return adapter, prefix, nil
+}
+
+// ListScanObjects 列举扫描补录的对象键, 不读取对象内容.
+func (p *Policies) ListScanObjects(ctx context.Context, policyID int64, subPath *string) ([]string, error) {
+	adapter, prefix, err := p.scanSource(policyID, subPath)
+	if err != nil {
+		return nil, err
 	}
 	objects, err := adapter.List(ctx, prefix)
 	if err != nil {
 		return nil, apperr.ErrBackend.WithMessage(err.Error())
 	}
-	if _, err := p.DefaultURL(policy.ID); err != nil {
-		return nil, err
-	}
-
 	keys := make([]string, 0, len(objects))
 	for _, object := range objects {
 		if !object.IsDir {
@@ -754,20 +761,15 @@ func (p *Policies) ListScanObjects(ctx context.Context, policyID int64, subPath 
 	return keys, nil
 }
 
-// EnqueueScan 先列举对象键, 再将扫描任务和清单持久化入队.
-func (p *Policies) EnqueueScan(ctx context.Context, policyID, ownerID int64, subPath *string, dryRun bool) (*model.MaintenanceTask, int, error) {
+// EnqueueScan 立即创建扫描任务; 对象列举与清单持久化由后台任务完成.
+func (p *Policies) EnqueueScan(policyID, ownerID int64, subPath *string, dryRun bool) (*model.MaintenanceTask, error) {
 	if p.tasks == nil {
-		return nil, 0, apperr.ErrInternal.WithMessage("维护任务队列未初始化")
+		return nil, apperr.ErrInternal.WithMessage("维护任务队列未初始化")
 	}
-	keys, err := p.ListScanObjects(ctx, policyID, subPath)
-	if err != nil {
-		return nil, 0, err
+	if _, _, err := p.scanSource(policyID, subPath); err != nil {
+		return nil, err
 	}
-	task, err := p.tasks.EnqueuePolicyScan(policyID, ownerID, subPath, dryRun, keys)
-	if err != nil {
-		return nil, 0, err
-	}
-	return task, len(keys), nil
+	return p.tasks.EnqueuePolicyScan(policyID, ownerID, subPath, dryRun)
 }
 
 // Scan 同步扫描补录, 供自动扫描和测试使用.

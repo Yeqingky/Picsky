@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, ScanSearch, Trash2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
@@ -37,6 +37,42 @@ export default function AdminPoliciesPage() {
       toast.success(t('common.state.success'));
     },
   });
+
+  const scanAllMutation = useMutation({
+    mutationFn: (policies: AdminPolicy[]) =>
+      Promise.allSettled(
+        policies.map((policy) => adminPoliciesApi.scan(policy.id, {}, { silent: true })),
+      ),
+    onSuccess: async (results) => {
+      const submitted = results.filter((result) => result.status === 'fulfilled').length;
+      const failed = results.length - submitted;
+      if (submitted > 0) {
+        toast.success(t('adminPolicies.list.scanAllSubmitted', { count: submitted }));
+      }
+      if (failed > 0) {
+        toast.error(t('adminPolicies.list.scanAllFailed', { count: failed }));
+      }
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'tasks'] });
+    },
+  });
+
+  const { mutate: scanAll } = scanAllMutation;
+
+  const handleScanAll = useCallback(() => {
+    const all = policiesQuery.data ?? [];
+    const scannable = all.filter(
+      (policy) => policy.capabilities.includes('list') && policy.capabilities.includes('read'),
+    );
+    if (scannable.length === 0) {
+      toast.info(t('adminPolicies.list.scanAllNone'));
+      return;
+    }
+    const skipped = all.length - scannable.length;
+    if (skipped > 0) {
+      toast.info(t('adminPolicies.list.scanAllSkipped', { count: skipped }));
+    }
+    scanAll(scannable);
+  }, [policiesQuery.data, scanAll, t]);
 
   const { mutate: removePolicy } = removeMutation;
 
@@ -207,12 +243,30 @@ export default function AdminPoliciesPage() {
     </Button>
   );
 
+  const scanAllButton = (
+    <Button
+      variant="outline"
+      onClick={handleScanAll}
+      disabled={scanAllMutation.isPending || policiesQuery.isPending}
+    >
+      <ScanSearch className="size-4" />
+      {scanAllMutation.isPending
+        ? t('adminPolicies.list.scanAllRunning')
+        : t('adminPolicies.list.scanAll')}
+    </Button>
+  );
+
   return (
     <div>
       <PageHeader
         title={t('adminPolicies.list.title')}
         description={t('adminPolicies.list.description')}
-        actions={createButton}
+        actions={
+          <>
+            {scanAllButton}
+            {createButton}
+          </>
+        }
       />
 
       {policiesQuery.isError ? (

@@ -1452,12 +1452,9 @@ func TestTaskQueueScanAndLogPurge(t *testing.T) {
 		Update("status", model.TaskDone).Error; err != nil {
 		t.Fatalf("清理自动扫描任务失败: %v", err)
 	}
-	task, objects, err := f.svc.Policies.EnqueueScan(context.Background(), policy.ID, f.admin.User.ID, nil, false)
+	task, err := f.svc.Policies.EnqueueScan(policy.ID, f.admin.User.ID, nil, false)
 	if err != nil {
-		t.Fatalf("列举并入队扫描失败: %v", err)
-	}
-	if objects != 1 {
-		t.Fatalf("扫描清单应包含一个对象, 实际 %d", objects)
+		t.Fatalf("入队扫描失败: %v", err)
 	}
 	var scanned int64
 	if err := f.database.Model(&model.Image{}).Where("policy_id = ? AND object_key = ?", policy.ID, "queued.png").Count(&scanned).Error; err != nil {
@@ -1518,6 +1515,14 @@ func TestTaskQueueScanAndLogPurge(t *testing.T) {
 	}
 	if scanResult.Images != 1 || scanResult.Files != 0 {
 		t.Fatalf("后台扫描结果统计错误: %+v", scanResult)
+	}
+	var manifest model.PolicyScanManifest
+	if err := f.database.Where("task_id = ?", task.ID).First(&manifest).Error; err != nil {
+		t.Fatalf("后台任务应持久化扫描清单: %v", err)
+	}
+	var manifestKeys []string
+	if err := json.Unmarshal([]byte(manifest.ObjectKeys), &manifestKeys); err != nil || len(manifestKeys) != 1 {
+		t.Fatalf("扫描清单内容不正确: %v %v", manifestKeys, err)
 	}
 	if err := f.database.Model(&model.Image{}).Where("policy_id = ? AND object_key = ?", policy.ID, "queued.png").Count(&scanned).Error; err != nil {
 		t.Fatalf("统计扫描后记录失败: %v", err)

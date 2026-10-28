@@ -4,6 +4,12 @@ export const adminPolicies = {
     title: '存储策略',
     description: '配置后端存储、魔法路径、分发域名与冲突策略; 策略由用户组授权后对组内用户可见。',
     create: '新建策略',
+    scanAll: '扫描补录',
+    scanAllRunning: '提交中…',
+    scanAllSubmitted: '已提交 {{count}} 个扫描任务。',
+    scanAllFailed: '{{count}} 个扫描任务提交失败。',
+    scanAllSkipped: '已跳过 {{count}} 个不支持列举与读取的策略。',
+    scanAllNone: '没有支持列举与读取的存储策略。',
     loadFailed: '存储策略加载失败',
     empty: '暂无存储策略',
     emptyHint: '新建一条策略后, 可在用户组中把策略加入白名单授权给用户。',
@@ -107,7 +113,7 @@ export const adminPolicies = {
       scanPath: '扫描路径',
       scanPathOptional: '可选; 留空表示从存储根目录开始扫描。',
       dryRun: '仅试运行 (dry run)',
-      dryRunHint: '只统计数量与失败明细, 不写入数据库。',
+      dryRunHint: '仅执行检查, 不写入数据库; 结果保存在任务记录中。',
     },
 
     error: {
@@ -210,16 +216,14 @@ export const adminPolicies = {
 
     scan: {
       button: '开始扫描',
-      running: '列举中…',
+      running: '提交中…',
       backgroundRunningButton: '后台扫描中…',
-      queued: '已列举 {{objects}} 个对象, 扫描任务 #{{id}} 已排队。',
-      processing: '扫描任务 #{{id}} 正在后台处理 {{objects}} 个对象。',
-      completed: '后台扫描任务已完成。',
-      taskFailed: '后台扫描任务失败: {{error}}',
+      submitted: '扫描任务 #{{id}} 已提交。',
+      processing: '扫描任务 #{{id}} 正在后台处理。',
+      done: '扫描任务 #{{id}} 已完成。',
+      taskFailed: '扫描任务 #{{id}} 失败: {{error}}',
       failed: '扫描失败',
-      result: '图片 {{images}} 个, 其他文件 {{files}} 个, 跳过 {{skipped}} 个',
       failedTitle: '失败明细 ({{count}})',
-      dryRunPrefix: '试运行: ',
       q21: '扫描补录的路径会参与 {seq} 的最大序号计算; 非图片文件只占用路径、不进图库, 也不计配额 (kind=file)。',
     },
 

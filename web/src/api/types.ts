@@ -412,7 +412,6 @@ export interface PolicyScanRequest {
 export interface PolicyScanEnqueued {
   task_id: number;
   status: MaintenanceTaskStatus;
-  objects: number;
 }
 
 export interface PolicyScanResult {
