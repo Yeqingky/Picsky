@@ -11,26 +11,31 @@ export interface GalleryFiltersValue {
   keyword: string;
   format: string;
   policyId: number | null;
+  /** 上传用户邮箱模糊搜索 */
+  user: string;
 }
 
 /** Radix Select 不支持空字符串值, 用哨兵表示 "全部" */
 const ALL_FORMATS = '__all_formats__';
 const ALL_POLICIES = '__all_policies__';
 
-/** 图库筛选: 原始文件名 / 格式 / 存储策略 */
+/** 图库筛选: 原始文件名 / 格式 / 存储策略 / 上传用户 */
 export function GalleryFilters({
   value,
   policies,
+  canFilterUser = false,
   onChange,
   onClear,
 }: {
   value: GalleryFiltersValue;
   policies: PolicySummary[];
+  canFilterUser?: boolean;
   onChange: (patch: Partial<GalleryFiltersValue>) => void;
   onClear: () => void;
 }) {
   const { t } = useTranslation();
-  const hasFilters = value.keyword !== '' || value.format !== '' || value.policyId !== null;
+  const hasFilters =
+    value.keyword !== '' || value.format !== '' || value.policyId !== null || value.user !== '';
 
   return (
     <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -88,6 +93,20 @@ export function GalleryFilters({
           </SelectContent>
         </Select>
       </div>
+
+      {canFilterUser && (
+        <div className="flex w-full flex-col gap-1.5 md:w-56">
+          <Label htmlFor="gallery-filter-user">{t('gallery.filters.user')}</Label>
+          <Input
+            id="gallery-filter-user"
+            type="search"
+            inputMode="email"
+            value={value.user}
+            onChange={(event) => onChange({ user: event.target.value })}
+            placeholder={t('gallery.filters.userPlaceholder')}
+          />
+        </div>
+      )}
 
       {hasFilters && (
         <Button variant="ghost" size="sm" onClick={onClear}>

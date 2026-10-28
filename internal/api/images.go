@@ -43,13 +43,14 @@ func (s *Server) listImages(c *gin.Context) {
 	}
 
 	result, err := s.svc.Images.List(principal, service.ListFilter{
-		Page:     page,
-		PageSize: pageSize,
-		Keyword:  c.Query("keyword"),
-		Format:   c.Query("format"),
-		From:     from,
-		To:       to,
-		PolicyID: policyID,
+		Page:      page,
+		PageSize:  pageSize,
+		Keyword:   c.Query("keyword"),
+		Format:    c.Query("format"),
+		UserEmail: c.Query("user"),
+		From:      from,
+		To:        to,
+		PolicyID:  policyID,
 	})
 	if err != nil {
 		s.fail(c, err)
@@ -86,39 +87,12 @@ func (s *Server) getImage(c *gin.Context) {
 		s.fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, s.toImageDTO(record, metas[record.PolicyID]))
-}
-
-// patchImage 修改记录的原始文件名.
-func (s *Server) patchImage(c *gin.Context) {
-	principal := middleware.Principal(c)
-	id, err := idParam(c, "id")
+	emails, err := s.svc.Images.UserEmails([]int64{record.UserID})
 	if err != nil {
 		s.fail(c, err)
 		return
 	}
-	var payload struct {
-		OriginalFilename *string `json:"original_filename"`
-	}
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
-		return
-	}
-	if payload.OriginalFilename == nil {
-		s.fail(c, apperr.ErrInvalidRequest.WithMessage("目前仅支持修改 original_filename"))
-		return
-	}
-	record, err := s.svc.Images.Rename(principal, id, *payload.OriginalFilename)
-	if err != nil {
-		s.fail(c, err)
-		return
-	}
-	metas, err := s.metaFor([]int64{record.PolicyID})
-	if err != nil {
-		s.fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, s.toImageDTO(record, metas[record.PolicyID]))
+	c.JSON(http.StatusOK, s.toImageDTO(record, metas[record.PolicyID], emails[record.UserID]))
 }
 
 // deleteImage 删除记录.

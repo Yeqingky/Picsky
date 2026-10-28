@@ -1161,6 +1161,18 @@ func TestUploadImagesAndKeys(t *testing.T) {
 	if item["original_filename"] != "photo.png" || item["policy_name"] != "主存储" {
 		t.Errorf("列表项字段不正确: %v", item)
 	}
+	if item["user_email"] != "admin@example.com" {
+		t.Errorf("列表项应返回上传用户邮箱: %v", item["user_email"])
+	}
+
+	fuzzy := s.raw(http.MethodGet, "/api/v1/images?user=ADMIN%40EXA", nil, nil, []*http.Cookie{cookie})
+	if fuzzy.Status != http.StatusOK || s.decode(fuzzy)["total"].(float64) != 1 {
+		t.Errorf("邮箱模糊筛选失败: %d %s", fuzzy.Status, string(fuzzy.Body))
+	}
+	miss := s.raw(http.MethodGet, "/api/v1/images?user=nobody", nil, nil, []*http.Cookie{cookie})
+	if miss.Status != http.StatusOK || s.decode(miss)["total"].(float64) != 0 {
+		t.Errorf("邮箱筛选不匹配时应返回空列表: %d %s", miss.Status, string(miss.Body))
+	}
 	if item["width"].(float64) != 8 || item["height"].(float64) != 8 {
 		t.Errorf("列表项尺寸不正确: %v", item)
 	}
@@ -1168,13 +1180,6 @@ func TestUploadImagesAndKeys(t *testing.T) {
 	detail := s.raw(http.MethodGet, fmt.Sprintf("/api/v1/images/%d", id), nil, nil, []*http.Cookie{cookie})
 	if detail.Status != http.StatusOK {
 		t.Errorf("详情失败: %d %s", detail.Status, string(detail.Body))
-	}
-
-	renamed := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/images/%d", id), map[string]any{
-		"original_filename": "renamed",
-	}, []*http.Cookie{cookie})
-	if renamed.Status != http.StatusOK || s.decode(renamed)["original_filename"] != "renamed.png" {
-		t.Errorf("改名失败: %d %s", renamed.Status, string(renamed.Body))
 	}
 
 	created := s.json(http.MethodPost, "/api/v1/keys", map[string]any{

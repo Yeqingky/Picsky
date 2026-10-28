@@ -11,6 +11,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useUploadSettings } from '../hooks/useUploadSettings';
 import { compressImage } from '../lib/imageCompression';
 import { isAnimatedImage } from '../utils/imageAnimation';
+import { CopyFormatToggle } from '../components/CopyFormatToggle';
 import { PageHeader } from '../components/PageHeader';
 import { UploadFileRow } from '../components/upload/UploadFileRow';
 import {
@@ -39,12 +40,6 @@ import { cn } from '../lib/utils';
 type UploadFilter = 'all' | 'done' | 'uploading' | 'queued' | 'failed';
 
 const FILTERS: UploadFilter[] = ['all', 'done', 'uploading', 'queued', 'failed'];
-
-const COPY_FORMATS: { value: CopyFormat; labelKey: string }[] = [
-  { value: 'direct', labelKey: 'upload.format.url' },
-  { value: 'markdown', labelKey: 'upload.format.md' },
-  { value: 'html', labelKey: 'upload.format.html' },
-];
 
 function matchesFilter(item: UploadItem, filter: UploadFilter): boolean {
   switch (filter) {
@@ -500,29 +495,7 @@ export default function UploadPage() {
             </Select>
 
             <div className="flex items-center gap-2">
-              <div
-                role="radiogroup"
-                aria-label={t('upload.format.label')}
-                className="bg-muted flex items-center gap-1 rounded-full p-1"
-              >
-                {COPY_FORMATS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={copyFormat === option.value}
-                    onClick={() => setCopyFormat(option.value)}
-                    className={cn(
-                      'h-6 rounded-full px-2.5 text-xs font-medium transition-colors',
-                      copyFormat === option.value
-                        ? 'bg-card text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {t(option.labelKey)}
-                  </button>
-                ))}
-              </div>
+              <CopyFormatToggle value={copyFormat} onChange={setCopyFormat} />
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

@@ -1,25 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { ExternalLink, Save, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { imagesApi } from '../../api/images';
 import { ApiError } from '../../api/client';
-import type { DeleteResult, ImageRecord } from '../../api/types';
+import type { DeleteResult } from '../../api/types';
 import { LazyImage } from '../LazyImage';
 import { UrlList } from '../UrlList';
-import { CopyButton, CopyFormatMenu } from '../CopyButton';
+import { CopyButton } from '../CopyButton';
+import { CopyFormatToggle } from '../CopyFormatToggle';
 import { useConfirm } from '../ConfirmDialog';
 import { useAuth } from '../../hooks/useAuth';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { Input } from '../ui/input';
 import { Skeleton } from '../ui/skeleton';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '../ui/sheet';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { dimensions } from '../../utils/image';
+import type { CopyFormat } from '../../utils/clipboard';
 
 function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -36,7 +36,12 @@ function HashRow({ label, value }: { label: string; value: string }) {
       <Badge variant="outline" className="w-16 shrink-0 justify-center">
         {label}
       </Badge>
-      <span className="min-w-0 flex-1 font-mono text-xs break-all">{value}</span>
+      <code
+        tabIndex={0}
+        className="bg-muted/50 focus-visible:ring-ring block min-w-0 flex-1 overflow-x-auto rounded-md border px-2 py-1 font-mono text-xs whitespace-nowrap focus-visible:ring-2 focus-visible:outline-none"
+      >
+        {value}
+      </code>
       <CopyButton value={value} />
     </div>
   );
@@ -47,16 +52,23 @@ export interface ImageDetailDrawerProps {
   open: boolean;
   onClose: () => void;
   onDeleted?: (result: DeleteResult) => void;
+  onFilterUser?: (email: string) => void;
 }
 
-/** 图片详情抽屉: 预览 + 完整哈希 + 尺寸 + 来源 + 对象状态 + 配额状态 + 各域名 URL */
-export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDetailDrawerProps) {
+/** 图片详情抽屉: 预览 + 完整哈希 + 尺寸 + 上传用户 + 来源 + 对象状态 + 配额状态 + URL */
+export function ImageDetailDrawer({
+  imageId,
+  open,
+  onClose,
+  onDeleted,
+  onFilterUser,
+}: ImageDetailDrawerProps) {
   const { t } = useTranslation();
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
   const canDelete = hasPermission('delete_own') || hasPermission('delete_all');
-  const [filename, setFilename] = useState('');
+  const [copyFormat, setCopyFormat] = useState<CopyFormat>('direct');
 
   const { data, isPending, isError, refetch } = useQuery({
     queryKey: ['images', 'detail', imageId],
@@ -64,23 +76,9 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
     enabled: open && imageId !== null,
   });
 
-  useEffect(() => {
-    if (data) setFilename(data.original_filename);
-  }, [data]);
-
   const invalidateGallery = async () => {
     await queryClient.invalidateQueries({ queryKey: ['images'] });
   };
-
-  const renameMutation = useMutation({
-    mutationFn: (record: ImageRecord) =>
-      imagesApi.rename(record.id, { original_filename: filename }),
-    onSuccess: async (record) => {
-      queryClient.setQueryData(['images', 'detail', record.id], record);
-      await invalidateGallery();
-      toast.success(t('common.state.success'));
-    },
-  });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => imagesApi.remove(id),
@@ -110,10 +108,6 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
     if (ok) deleteMutation.mutate(data.id);
   };
 
-  const renameError =
-    renameMutation.error instanceof ApiError
-      ? renameMutation.error.message
-      : t('common.state.failed');
   const deleteError =
     deleteMutation.error instanceof ApiError
       ? deleteMutation.error.message
@@ -152,15 +146,9 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
                 <div className="flex flex-col gap-2">
                   <div className="flex gap-3 text-sm">
                     <Skeleton className="h-4 w-24 shrink-0 rounded-sm" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1">
-                        <Skeleton className="h-9 min-w-0 flex-1 rounded-lg" />
-                        <Skeleton className="size-8 shrink-0 rounded-lg" />
-                      </div>
-                      <Skeleton className="mt-1 h-4 w-3/4 rounded-sm" />
-                    </div>
+                    <Skeleton className="h-4 min-w-0 flex-1 rounded-sm" />
                   </div>
-                  {Array.from({ length: 9 }, (_, index) => (
+                  {Array.from({ length: 10 }, (_, index) => (
                     <div key={index} className="flex gap-3 text-sm">
                       <Skeleton className="h-4 w-24 shrink-0 rounded-sm" />
                       <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -243,45 +231,7 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
               <section>
                 <h3 className="mb-2 text-base font-medium">{t('gallery.detail.basic')}</h3>
                 <dl className="flex flex-col gap-2">
-                  <FieldRow label={t('gallery.detail.filename')}>
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-1">
-                        <Input
-                          value={filename}
-                          onChange={(event) => setFilename(event.target.value)}
-                          aria-invalid={renameMutation.isError}
-                          className="flex-1"
-                        />
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                disabled={
-                                  filename.trim() === '' ||
-                                  filename === data.original_filename ||
-                                  renameMutation.isPending
-                                }
-                                onClick={() => renameMutation.mutate(data)}
-                                aria-label={t('common.action.save')}
-                              >
-                                <Save className="size-4" />
-                              </Button>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>{t('common.action.save')}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      {renameMutation.isError ? (
-                        <p className="text-destructive text-sm">{renameError}</p>
-                      ) : (
-                        <p className="text-muted-foreground text-sm">
-                          {t('gallery.detail.renameHint')}
-                        </p>
-                      )}
-                    </div>
-                  </FieldRow>
+                  <FieldRow label={t('gallery.detail.filename')}>{data.original_filename}</FieldRow>
                   <FieldRow label={t('gallery.detail.policy')}>{data.policy_name}</FieldRow>
                   <FieldRow label={t('gallery.detail.path')}>
                     <span className="font-mono text-xs">{data.rel_path}</span>
@@ -297,6 +247,21 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
                     {dimensions(data.width, data.height)}
                   </FieldRow>
                   <FieldRow label={t('gallery.detail.mime')}>{data.mime}</FieldRow>
+                  <FieldRow label={t('gallery.detail.uploader')}>
+                    {data.user_email === '' ? (
+                      '—'
+                    ) : onFilterUser ? (
+                      <button
+                        type="button"
+                        className="text-primary text-left hover:underline"
+                        onClick={() => onFilterUser(data.user_email)}
+                      >
+                        {data.user_email}
+                      </button>
+                    ) : (
+                      data.user_email
+                    )}
+                  </FieldRow>
                   <FieldRow label={t('gallery.detail.source')}>
                     {t(`common.source.${data.source}`, { defaultValue: data.source })}
                   </FieldRow>
@@ -321,9 +286,9 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
               <hr className="border-border" />
 
               <section>
-                <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-base font-medium">{t('gallery.detail.urls')}</h3>
-                  <CopyFormatMenu url={data.url} filename={data.original_filename} />
+                  <CopyFormatToggle value={copyFormat} onChange={setCopyFormat} />
                 </div>
                 <UrlList
                   urls={
@@ -331,13 +296,9 @@ export function ImageDetailDrawer({ imageId, open, onClose, onDeleted }: ImageDe
                       ? data.urls
                       : [{ alias: '—', url: data.url, is_default: true }]
                   }
+                  filename={data.original_filename}
+                  copyFormat={copyFormat}
                 />
-                <Button variant="outline" size="sm" className="mt-2" asChild>
-                  <a href={data.url} target="_blank" rel="noreferrer noopener">
-                    <ExternalLink className="size-4" />
-                    {t('gallery.detail.openOriginal')}
-                  </a>
-                </Button>
               </section>
 
               <hr className="border-border" />

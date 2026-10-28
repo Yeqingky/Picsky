@@ -197,6 +197,8 @@ export interface ImageRecord {
   width: number | null;
   height: number | null;
   original_filename: string;
+  /** 上传用户邮箱 (管理端可见) */
+  user_email: string;
   /** web / api / scan */
   source: string;
   client_ip: string | null;
@@ -214,10 +216,8 @@ export interface ImageListParams {
   /** RFC3339 */
   to?: string;
   policy_id?: number;
-}
-
-export interface ImageUpdateRequest {
-  original_filename: string;
+  /** 上传用户邮箱模糊搜索 */
+  user?: string;
 }
 
 export interface DeleteResult {

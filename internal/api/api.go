@@ -75,7 +75,6 @@ func (s *Server) Register(router *gin.Engine) {
 	user.POST("/upload/base64", s.uploadBase64)
 	user.GET("/images", s.listImages)
 	user.GET("/images/:id", s.getImage)
-	user.PATCH("/images/:id", s.patchImage)
 	user.DELETE("/images/:id", s.deleteImage)
 	user.POST("/images/batch-delete", s.batchDeleteImages)
 	user.GET("/policies", s.userPolicies)
@@ -302,6 +301,7 @@ type imageDTO struct {
 	Width            *int      `json:"width"`
 	Height           *int      `json:"height"`
 	OriginalFilename string    `json:"original_filename"`
+	UserEmail        string    `json:"user_email"`
 	QuotaCharged     bool      `json:"quota_charged"`
 	Source           string    `json:"source"`
 	ClientIP         string    `json:"client_ip"`
@@ -384,7 +384,7 @@ func (s *Server) urlsFor(meta *policyMeta, relPath string) []urlDTO {
 }
 
 // toImageDTO 组装单条记录.
-func (s *Server) toImageDTO(record *model.Image, meta *policyMeta) imageDTO {
+func (s *Server) toImageDTO(record *model.Image, meta *policyMeta, userEmail string) imageDTO {
 	dto := imageDTO{
 		ID:               record.ID,
 		UserID:           record.UserID,
@@ -405,6 +405,7 @@ func (s *Server) toImageDTO(record *model.Image, meta *policyMeta) imageDTO {
 		Width:            record.Width,
 		Height:           record.Height,
 		OriginalFilename: record.OriginalFilename,
+		UserEmail:        userEmail,
 		QuotaCharged:     record.QuotaCharged,
 		Source:           record.Source,
 		ClientIP:         record.ClientIP,
@@ -427,9 +428,17 @@ func (s *Server) toImageDTOs(records []model.Image) ([]imageDTO, error) {
 	if err != nil {
 		return nil, err
 	}
+	userIDs := make([]int64, 0, len(records))
+	for idx := range records {
+		userIDs = append(userIDs, records[idx].UserID)
+	}
+	emails, err := s.svc.Images.UserEmails(userIDs)
+	if err != nil {
+		return nil, err
+	}
 	dtos := make([]imageDTO, 0, len(records))
 	for idx := range records {
-		dtos = append(dtos, s.toImageDTO(&records[idx], metas[records[idx].PolicyID]))
+		dtos = append(dtos, s.toImageDTO(&records[idx], metas[records[idx].PolicyID], emails[records[idx].UserID]))
 	}
 	return dtos, nil
 }

@@ -4,7 +4,6 @@ import type {
   DeleteResult,
   ImageListParams,
   ImageRecord,
-  ImageUpdateRequest,
   Paginated,
   PolicySummary,
 } from './types';
@@ -14,9 +13,6 @@ export const imagesApi = {
     api.get<Paginated<ImageRecord>>('/images', { params }).then((r) => r.data),
 
   get: (id: number) => api.get<ImageRecord>(`/images/${id}`).then((r) => r.data),
-
-  rename: (id: number, body: ImageUpdateRequest) =>
-    api.patch<ImageRecord>(`/images/${id}`, body).then((r) => r.data),
 
   remove: (id: number) => api.delete<DeleteResult>(`/images/${id}`).then((r) => r.data),
 

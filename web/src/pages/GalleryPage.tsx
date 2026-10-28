@@ -95,6 +95,7 @@ export default function GalleryPage() {
     keyword: '',
     format: searchParams.get('format') ?? '',
     policyId: readPolicyId(searchParams),
+    user: searchParams.get('user') ?? '',
   }));
   const [view, setViewState] = useState<GalleryView>(readStoredView);
   const [paginationModel, setPaginationModel] = useState({
@@ -106,16 +107,19 @@ export default function GalleryPage() {
   const [detailId, setDetailId] = useState<number | null>(null);
   const { hasPermission } = useAuth();
   const canDelete = hasPermission('delete_own') || hasPermission('delete_all');
+  const canViewAll = hasPermission('view_all');
 
   const debouncedKeyword = useDebouncedValue(filters.keyword, 400);
+  const debouncedUser = useDebouncedValue(filters.user, 400);
 
   const queryParams = useMemo(
     () => ({
       keyword: debouncedKeyword.trim() === '' ? undefined : debouncedKeyword.trim(),
       format: filters.format === '' ? undefined : filters.format,
       policy_id: filters.policyId ?? undefined,
+      user: canViewAll && debouncedUser.trim() !== '' ? debouncedUser.trim() : undefined,
     }),
-    [debouncedKeyword, filters.format, filters.policyId],
+    [canViewAll, debouncedKeyword, debouncedUser, filters.format, filters.policyId],
   );
 
   const infinite = useInfiniteQuery({
@@ -347,8 +351,9 @@ export default function GalleryPage() {
       <GalleryFilters
         value={filters}
         policies={policiesQuery.data ?? []}
+        canFilterUser={canViewAll}
         onChange={(patch) => setFilters((current) => ({ ...current, ...patch }))}
-        onClear={() => setFilters({ keyword: '', format: '', policyId: null })}
+        onClear={() => setFilters({ keyword: '', format: '', policyId: null, user: '' })}
       />
 
       {showSkeleton && view === 'masonry' && <MasonrySkeleton />}
@@ -465,6 +470,14 @@ export default function GalleryPage() {
         imageId={detailId}
         open={detailId !== null}
         onClose={() => setDetailId(null)}
+        onFilterUser={
+          canViewAll
+            ? (email) => {
+                setFilters({ keyword: '', format: '', policyId: null, user: email });
+                setDetailId(null);
+              }
+            : undefined
+        }
       />
     </div>
   );

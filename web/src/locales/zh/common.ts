@@ -114,6 +114,11 @@ export const common = {
     direct: '直链',
     markdown: 'Markdown',
     html: 'HTML',
+    short: {
+      direct: 'URL',
+      markdown: 'MD',
+      html: 'HTML',
+    },
   },
 
   form: {

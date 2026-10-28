@@ -63,12 +63,6 @@ export const upload = {
     failed: '失败',
     empty: '当前筛选下没有文件',
   },
-  format: {
-    label: '复制格式',
-    url: 'URL',
-    md: 'MD',
-    html: 'HTML',
-  },
   copyAll: '复制全部 ({{count}})',
   clear: '清空列表',
   remove: '从列表移除',

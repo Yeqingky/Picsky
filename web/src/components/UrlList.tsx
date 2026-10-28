@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import type { UploadUrlAlias } from '../api/types';
+import type { CopyFormat } from '../utils/clipboard';
+import { renderCopyText } from '../utils/clipboard';
 import { CopyButton } from './CopyButton';
 import { Badge } from './ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -8,10 +10,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 export function UrlList({
   urls,
   filename,
+  copyFormat = 'direct',
   emptyText = '—',
 }: {
   urls: readonly UploadUrlAlias[];
   filename?: string;
+  copyFormat?: CopyFormat;
   emptyText?: string;
 }) {
   const { t } = useTranslation();
@@ -34,15 +38,9 @@ export function UrlList({
             <TooltipContent>{item.url}</TooltipContent>
           </Tooltip>
           <CopyButton
-            value={item.url}
+            value={renderCopyText(copyFormat, { url: item.url, filename })}
             tooltip={t('common.action.copyAlias', { alias: item.alias || '—' })}
           />
-          {filename !== undefined && (
-            <CopyButton
-              value={`![${filename}](${item.url})`}
-              tooltip={t('common.action.copyMarkdown')}
-            />
-          )}
         </div>
       ))}
     </div>

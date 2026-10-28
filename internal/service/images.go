@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/yeqingky/Picsky/internal/apperr"
-	"github.com/yeqingky/Picsky/internal/imgdetect"
 	"github.com/yeqingky/Picsky/internal/model"
 	"github.com/yeqingky/Picsky/internal/storage"
 )
@@ -51,6 +50,7 @@ type ListFilter struct {
 	From      *time.Time
 	To        *time.Time
 	UserID    *int64
+	UserEmail string
 	PolicyID  *int64
 	SortField string
 	SortDesc  bool
@@ -81,26 +81,30 @@ func (i *Images) List(principal *Principal, filter ListFilter) (*ListResult, err
 		pageSize = 200
 	}
 
-	query := i.db.Model(&model.Image{}).Where("kind = ?", model.KindImage)
+	query := i.db.Model(&model.Image{}).Where("images.kind = ?", model.KindImage)
 	if !principal.Has(model.PermViewAll) {
-		query = query.Where("user_id = ?", principal.User.ID)
+		query = query.Where("images.user_id = ?", principal.User.ID)
 	} else if filter.UserID != nil {
-		query = query.Where("user_id = ?", *filter.UserID)
+		query = query.Where("images.user_id = ?", *filter.UserID)
+	}
+	if email := strings.ToLower(strings.TrimSpace(filter.UserEmail)); email != "" && principal.Has(model.PermViewAll) {
+		query = query.Joins("JOIN users ON users.id = images.user_id").
+			Where("LOWER(users.email) LIKE ?", "%"+email+"%")
 	}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
-		query = query.Where("original_filename LIKE ?", "%"+keyword+"%")
+		query = query.Where("images.original_filename LIKE ?", "%"+keyword+"%")
 	}
 	if format := strings.ToLower(strings.TrimSpace(filter.Format)); format != "" {
-		query = query.Where("format = ?", format)
+		query = query.Where("images.format = ?", format)
 	}
 	if filter.From != nil {
-		query = query.Where("created_at >= ?", filter.From.UTC())
+		query = query.Where("images.created_at >= ?", filter.From.UTC())
 	}
 	if filter.To != nil {
-		query = query.Where("created_at <= ?", filter.To.UTC())
+		query = query.Where("images.created_at <= ?", filter.To.UTC())
 	}
 	if filter.PolicyID != nil {
-		query = query.Where("policy_id = ?", *filter.PolicyID)
+		query = query.Where("images.policy_id = ?", *filter.PolicyID)
 	}
 
 	var total int64
@@ -108,10 +112,16 @@ func (i *Images) List(principal *Principal, filter ListFilter) (*ListResult, err
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
 
-	sortColumn := "created_at"
+	sortColumn := "images.created_at"
 	switch filter.SortField {
-	case "size", "created_at", "original_filename", "format":
-		sortColumn = filter.SortField
+	case "size":
+		sortColumn = "images.size"
+	case "created_at":
+		sortColumn = "images.created_at"
+	case "original_filename":
+		sortColumn = "images.original_filename"
+	case "format":
+		sortColumn = "images.format"
 	}
 	direction := "DESC"
 	if !filter.SortDesc && filter.SortField == "" {
@@ -124,7 +134,7 @@ func (i *Images) List(principal *Principal, filter ListFilter) (*ListResult, err
 	}
 
 	var items []model.Image
-	if err := query.Order(fmt.Sprintf("%s %s, id DESC", sortColumn, direction)).
+	if err := query.Order(fmt.Sprintf("%s %s, images.id DESC", sortColumn, direction)).
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&items).Error; err != nil {
@@ -136,6 +146,31 @@ func (i *Images) List(principal *Principal, filter ListFilter) (*ListResult, err
 	return &ListResult{Total: total, Page: page, PageSize: pageSize, Items: items}, nil
 }
 
+// UserEmails 批量读取用户邮箱, 用于图库展示上传用户.
+func (i *Images) UserEmails(userIDs []int64) (map[int64]string, error) {
+	unique := make([]int64, 0, len(userIDs))
+	seen := make(map[int64]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	emails := make(map[int64]string, len(unique))
+	if len(unique) == 0 {
+		return emails, nil
+	}
+	var users []model.User
+	if err := i.db.Select("id", "email").Where("id IN ?", unique).Find(&users).Error; err != nil {
+		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	for _, user := range users {
+		emails[user.ID] = user.Email
+	}
+	return emails, nil
+}
+
 // Get 读取单条记录.
 func (i *Images) Get(principal *Principal, id int64) (*model.Image, error) {
 	record, err := i.find(id)
@@ -145,34 +180,6 @@ func (i *Images) Get(principal *Principal, id int64) (*model.Image, error) {
 	if record.UserID != principal.User.ID && !principal.Has(model.PermViewAll) {
 		return nil, apperr.ErrNotFound.WithMessage("记录不存在")
 	}
-	return record, nil
-}
-
-// Rename 修改记录的原始文件名主体.
-func (i *Images) Rename(principal *Principal, id int64, filename string) (*model.Image, error) {
-	record, err := i.find(id)
-	if err != nil {
-		return nil, err
-	}
-	if record.UserID != principal.User.ID && !principal.Has(model.PermDeleteAll) {
-		return nil, apperr.ErrNotFound.WithMessage("记录不存在")
-	}
-	base := imgdetect.SanitizeFilenameBase(filename)
-	if base == "" {
-		return nil, apperr.ErrInvalidRequest.WithMessage("文件名不能为空")
-	}
-	updated := base + "." + record.Ext
-	if err := i.db.Model(&model.Image{}).Where("id = ?", record.ID).Update("original_filename", updated).Error; err != nil {
-		return nil, apperr.ErrInternal.WithMessage(err.Error())
-	}
-	record.OriginalFilename = updated
-	i.audit.Recordf(Entry{
-		UserID:     &principal.User.ID,
-		Action:     "image_rename",
-		TargetType: "image",
-		TargetID:   &record.ID,
-		Detail:     map[string]any{"original_filename": updated},
-	})
 	return record, nil
 }
 
