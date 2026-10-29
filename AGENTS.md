@@ -72,7 +72,7 @@ Picsky/
 - 对外错误响应必须通过 `apperr.From` 归一; 所有 5xx 与 `backend_error` 使用通用消息并移除 `Details`, 原始错误仅写服务端日志; Lsky 5xx 返回实际状态码, 后端错误使用 502, 不按业务失败返回 HTTP 200.
 - Lsky 上传在 multipart 文件缓冲前完成认证、上传权限与限流预检; 仅使用表单 `token` 的请求要求它是首个 multipart 字段, 通过认证后按用户组文件大小上限读取.
 - 原生 multipart 上传必须在解析请求体前完成认证、上传权限与限流预检; 所有 multipart 非文件字段值每项最多 4 KiB, 最多 64 项, 字段名和值合计最多 64 KiB (Lsky `token` 计入预算).
-- Base64 JSON 上传必须流式读取 `data` 并直接解码到共用上传缓冲, 禁止在内存完整保留编码字符串或解码副本; 不限组仍受 2 GiB 单次硬上限约束, `data` 字段前后区段各最多 32 KiB, data URL 头最多 4 KiB, 解码缓冲遵循 `PICSKY_UPLOAD_MEMORY_LIMIT`.
+- Base64 JSON 上传必须在读取请求体前完成认证, 上传权限与限流预检, 并流式读取 `data` 直接解码到共用上传缓冲, 禁止在内存完整保留编码字符串或解码副本; 不限组仍受 2 GiB 单次硬上限约束, `data` 字段前后区段各最多 32 KiB, data URL 头最多 4 KiB, 解码缓冲遵循 `PICSKY_UPLOAD_MEMORY_LIMIT`.
 - 未设置 `PICSKY_TEMP_DIR` 时, spool 可将处理期溢出文件写入系统临时目录, 但 `CleanupStale` 必须跳过目录扫描; 仅对应用专用且隔离的临时目录执行启动残留清理.
 - `/upload/check` 必须按当前 `user_id` 查询记录; 相同哈希仅由其他用户持有时返回 `exists: false` 且不包含记录 ID、URL 或大小; `/upload` 跨用户复用只返回当前用户自己的新记录.
 - 注册页启用注册邮箱域名白名单时, 邮箱字段由左侧本地部分输入框与右侧域名下拉框组成, 提交时拼接为完整邮箱; 未启用白名单时为完整邮箱输入框; 白名单域名由 `GET /site` 的 `registration_email_domains` 提供.

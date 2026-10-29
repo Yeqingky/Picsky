@@ -1769,6 +1769,53 @@ func TestNativeUploadChecksRateLimitBeforeReadingMultipartBody(t *testing.T) {
 	}
 }
 
+func TestBase64UploadChecksPermissionBeforeReadingBody(t *testing.T) {
+	s := newServer(t)
+	adminCookie, _ := s.bootstrap()
+	group := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+		"name":        "无上传权限组",
+		"permissions": []string{"manage_keys"},
+	}, []*http.Cookie{adminCookie})
+	if group.Status != http.StatusCreated {
+		t.Fatalf("创建无上传权限组失败: %d %s", group.Status, string(group.Body))
+	}
+	groupID := int64(s.decode(group)["id"].(float64))
+	created := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
+		"username": "base64noupload",
+		"email":    "base64-no-upload@example.com",
+		"password": "password123",
+		"group_id": groupID,
+	}, []*http.Cookie{adminCookie})
+	if created.Status != http.StatusCreated {
+		t.Fatalf("创建无上传权限用户失败: %d %s", created.Status, string(created.Body))
+	}
+	login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "base64-no-upload@example.com",
+		"password":   "password123",
+	}, nil)
+	if login.Status != http.StatusOK {
+		t.Fatalf("无上传权限用户登录失败: %d %s", login.Status, string(login.Body))
+	}
+
+	body := fmt.Sprintf(`{"data":"%s","padding":"%s"}`,
+		base64.StdEncoding.EncodeToString(pngContent(t, 27)), strings.Repeat("x", 2<<20))
+	countedBody := &countingReadCloser{reader: bytes.NewReader([]byte(body))}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/upload/base64", countedBody)
+	request.ContentLength = int64(len(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(s.sessionCookie(login))
+	recorder := httptest.NewRecorder()
+
+	s.engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("无上传权限应返回 403, 实际 %d %s", recorder.Code, recorder.Body.String())
+	}
+	if countedBody.bytesRead >= int64(len(body))/2 {
+		t.Errorf("权限拒绝前读取了大部分 base64 请求体: %d/%d 字节", countedBody.bytesRead, len(body))
+	}
+}
+
 func TestLskyMultipartBudgetIncludesFirstTokenField(t *testing.T) {
 	s := newServer(t)
 	adminCookie, policyID := s.bootstrap()

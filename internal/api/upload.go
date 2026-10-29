@@ -76,6 +76,11 @@ func (s *Server) uploadCheck(c *gin.Context) {
 // uploadBase64 处理 JSON base64 上传.
 func (s *Server) uploadBase64(c *gin.Context) {
 	principal := middleware.Principal(c)
+	permit, err := s.svc.Upload.Preflight(principal)
+	if err != nil {
+		s.fail(c, err)
+		return
+	}
 	limit := service.UploadLimit(s.svc.Settings, principal.Group)
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, base64UploadRequestBodyLimit(limit))
@@ -93,6 +98,7 @@ func (s *Server) uploadBase64(c *gin.Context) {
 		Source:    s.sourceOf(principal),
 		ClientIP:  clientIP(c),
 		UserAgent: userAgent(c),
+		Permit:    permit,
 	})
 	if err != nil {
 		s.fail(c, err)
