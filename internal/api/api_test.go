@@ -2005,6 +2005,63 @@ func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
 	}
 }
 
+func TestAdminAreaRequiresAnyAdminPermission(t *testing.T) {
+	s := newServer(t)
+	adminCookie, _ := s.bootstrap()
+
+	newUserCookie := func(groupName, username string, permissions []string) *http.Cookie {
+		t.Helper()
+		group := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+			"name":        groupName,
+			"permissions": permissions,
+		}, []*http.Cookie{adminCookie})
+		if group.Status != http.StatusCreated {
+			t.Fatalf("创建用户组 %s 失败: %d %s", groupName, group.Status, string(group.Body))
+		}
+		groupID := int64(s.decode(group)["id"].(float64))
+		created := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
+			"username": username,
+			"email":    username + "@example.com",
+			"password": "password123",
+			"group_id": groupID,
+		}, []*http.Cookie{adminCookie})
+		if created.Status != http.StatusCreated {
+			t.Fatalf("创建用户 %s 失败: %d %s", username, created.Status, string(created.Body))
+		}
+		login := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+			"identifier": username + "@example.com",
+			"password":   "password123",
+		}, nil)
+		if login.Status != http.StatusOK {
+			t.Fatalf("用户 %s 登录失败: %d %s", username, login.Status, string(login.Body))
+		}
+		return s.sessionCookie(login)
+	}
+
+	checkAccess := func(cookie *http.Cookie, path string, want int) {
+		t.Helper()
+		result := s.raw(http.MethodGet, path, nil, nil, []*http.Cookie{cookie})
+		if result.Status != want {
+			t.Errorf("GET %s 应返回 %d, 实际 %d %s", path, want, result.Status, string(result.Body))
+		}
+	}
+
+	userManagerCookie := newUserCookie("仅用户管理组", "usermanager", []string{"manage_users"})
+	checkAccess(userManagerCookie, "/api/v1/admin/users", http.StatusOK)
+	checkAccess(userManagerCookie, "/api/v1/admin/stats", http.StatusOK)
+	checkAccess(userManagerCookie, "/api/v1/admin/groups", http.StatusForbidden)
+	checkAccess(userManagerCookie, "/api/v1/admin/settings", http.StatusForbidden)
+	checkAccess(userManagerCookie, "/api/v1/admin/logs", http.StatusForbidden)
+
+	viewerCookie := newUserCookie("仅查看全部组", "viewall", []string{"view_all"})
+	checkAccess(viewerCookie, "/api/v1/admin/stats", http.StatusOK)
+	checkAccess(viewerCookie, "/api/v1/admin/users", http.StatusForbidden)
+
+	uploaderCookie := newUserCookie("仅上传组", "uploadonly", []string{"upload"})
+	checkAccess(uploaderCookie, "/api/v1/admin/stats", http.StatusForbidden)
+	checkAccess(uploaderCookie, "/api/v1/admin/users", http.StatusForbidden)
+}
+
 func TestLskyCompatibilityLayer(t *testing.T) {
 	s := newServer(t)
 	cookie, policyID := s.bootstrap()

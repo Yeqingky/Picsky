@@ -72,8 +72,11 @@ func (p *Principal) Has(bit model.Permission) bool {
 
 // IsAdmin 判断主体是否具备任一管理权限.
 func (p *Principal) IsAdmin() bool {
+	if p == nil {
+		return false
+	}
 	adminBits := model.PermManagePolicies | model.PermManageUsers | model.PermManageGroups | model.PermManageSettings | model.PermViewLogs | model.PermViewAll | model.PermDeleteAll
-	return p.Has(adminBits)
+	return p.Permissions&adminBits != 0
 }
 
 // Auth 负责注册, 登录, 会话, 密码, TOTP, 邮箱验证与密码找回.

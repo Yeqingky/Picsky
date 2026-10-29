@@ -88,6 +88,7 @@ Picsky/
 - 维护任务 (队列) 必须幂等可重试, 已完成任务可手动重跑, 不得绕过权限与能力降级; 外部对象删除成功与失败都必须写入维护队列, 驱动必须校验删除响应; 失败的对象删除任务保留为 `failed`, 不自动重试也不自动清理, 必须由管理员手动重试或删除, 重试成功后释放 `{seq}`; 手动策略扫描必须立即创建任务并返回任务 ID, 由后台队列列举并持久化对象清单后读取解析, 前端通过任务状态接口查询状态; WebDAV 只是内部存储通道, 不得对外暴露.
 - 内置用户组 (`管理员` / `只读`, 由 `groups.is_system` 标记) 的权限位固定, 不可删除, 不可设为默认组; 调整组规则时同步更新 `docs/permissions.md`.
 - 删除用户组时必须同时检查 `users.group_id` 与 `users.restore_group_id`, 避免验证或解封后恢复到已删除的用户组.
+- 后台区域入口按任一管理权限位判定 (`view_all`, `delete_all`, `manage_policies`, `manage_users`, `manage_groups`, `manage_settings`, `view_logs`), 各管理接口仍按自身权限位校验; `/admin/stats` 只要求后台入口.
 - 用户组权限委派必须是调用者当前有效权限的子集; 创建用户/改组、创建/更新用户组与设置新用户默认组都校验此约束; API 密钥调用按 `scopes` 裁剪后的权限计算. 管理员更新或删除用户前也校验目标用户实际权限组, 未验证/封禁账号按 `restore_group_id` 判定, 超出调用者权限返回 403.
 - 前端样式只使用 Tailwind CSS v4 与 `src/index.css` 的语义令牌 (`background`, `card`, `muted`, `primary`, `destructive`, `success`, `warning`, `info`, `border`, `ring`, `chart-*`), 禁止硬编码色值与 CSS-in-JS.
 - 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示; 注册邮箱白名单按完整域名精确匹配, 留空时不限制; 列表输入复用 `TagsInput`.
