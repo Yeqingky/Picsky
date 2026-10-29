@@ -38,6 +38,14 @@ import (
 	_ "github.com/yeqingky/Picsky/internal/storage/webdav"
 )
 
+func optional[T any](value T) service.OptionalField[T] {
+	return service.OptionalField[T]{Set: true, Value: &value}
+}
+
+func optionalNull[T any]() service.OptionalField[T] {
+	return service.OptionalField[T]{Set: true}
+}
+
 // fixture 是集成测试夹具: 内存数据库 + 进程内 WebDAV 后端 + 已注册的管理员.
 type fixture struct {
 	t         *testing.T
@@ -681,7 +689,7 @@ func TestBuiltinGroupGuards(t *testing.T) {
 	}
 	original := service.GroupInput{
 		Name:        readonly.Name,
-		Sort:        readonly.Sort,
+		Sort:        optional(readonly.Sort),
 		Permissions: readonly.Permissions.Names(),
 	}
 	if _, err := f.svc.Groups.Update(readonlyID, original, f.admin, "127.0.0.1", "test-agent"); err != nil {
@@ -783,6 +791,17 @@ func TestPermissionDelegationIsBoundToActor(t *testing.T) {
 		rejectForbidden(err, tc.action)
 	}
 	rejectForbidden(f.svc.Users.Delete(f.admin.User.ID, actor, "127.0.0.1", "test-agent"), "删除管理员")
+	_, err = f.svc.Groups.Update(adminGroup.ID, service.GroupInput{Name: "被改名的管理员组"}, actor, "127.0.0.1", "test-agent")
+	rejectForbidden(err, "修改管理员组")
+	rejectForbidden(f.svc.Groups.Delete(adminGroup.ID, actor, "127.0.0.1", "test-agent"), "删除管理员组")
+	rejectForbidden(f.svc.Groups.SetPolicies(adminGroup.ID, nil, actor, "127.0.0.1", "test-agent"), "覆盖管理员组策略")
+	reloadedAdminGroup, err := f.svc.Groups.Get(adminGroup.ID)
+	if err != nil {
+		t.Fatalf("读取管理员组失败: %v", err)
+	}
+	if reloadedAdminGroup.Name != "管理员" || reloadedAdminGroup.Permissions != model.AllPermissions() {
+		t.Errorf("被拒绝的用户组操作不应改动管理员组: %+v", reloadedAdminGroup)
+	}
 	if _, err := f.svc.Auth.Login(context.Background(), service.LoginInput{
 		Email: "admin@example.com", Password: "password123",
 	}, "127.0.0.1", "test-agent"); err != nil {
@@ -868,6 +887,85 @@ func TestPermissionDelegationIsBoundToActor(t *testing.T) {
 	}
 }
 
+func TestGroupUpdatePreservesOmittedFields(t *testing.T) {
+	f := newFixture(t)
+	created, err := f.svc.Groups.Create(service.GroupInput{
+		Name:             "保留字段组",
+		Description:      optional("原始说明"),
+		Permissions:      []string{"upload"},
+		QuotaMode:        optional(model.QuotaModeCount),
+		QuotaValue:       optional(int64(10)),
+		MaxFileSizeBytes: optional(int64(2048)),
+		UploadRateLimit:  optional(3),
+		Sort:             optional(7),
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("创建用户组失败: %v", err)
+	}
+
+	updated, err := f.svc.Groups.Update(created.ID, service.GroupInput{Name: "改名"}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("仅更新名称失败: %v", err)
+	}
+	if updated.Description != "原始说明" || updated.Permissions != model.PermUpload ||
+		updated.QuotaMode == nil || *updated.QuotaMode != model.QuotaModeCount ||
+		updated.QuotaValue == nil || *updated.QuotaValue != 10 ||
+		updated.MaxFileSizeBytes == nil || *updated.MaxFileSizeBytes != 2048 ||
+		updated.UploadRateLimit == nil || *updated.UploadRateLimit != 3 || updated.Sort != 7 {
+		t.Errorf("仅更新名称不应清空其他字段: %+v", updated)
+	}
+
+	updated, err = f.svc.Groups.Update(created.ID, service.GroupInput{QuotaMode: optional("")}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("清空配额方式失败: %v", err)
+	}
+	if updated.QuotaMode != nil || updated.QuotaValue != nil {
+		t.Errorf("空配额方式应清空配额: %+v", updated)
+	}
+	if updated.MaxFileSizeBytes == nil || *updated.MaxFileSizeBytes != 2048 ||
+		updated.UploadRateLimit == nil || *updated.UploadRateLimit != 3 {
+		t.Errorf("清空配额不应清空上传限额: %+v", updated)
+	}
+
+	updated, err = f.svc.Groups.Update(created.ID, service.GroupInput{
+		QuotaMode:  optional(model.QuotaModeBytes),
+		QuotaValue: optional(int64(5)),
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("重新设置配额失败: %v", err)
+	}
+	updated, err = f.svc.Groups.Update(created.ID, service.GroupInput{
+		QuotaMode:  optionalNull[string](),
+		QuotaValue: optionalNull[int64](),
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("显式 null 清空配额失败: %v", err)
+	}
+	if updated.QuotaMode != nil || updated.QuotaValue != nil {
+		t.Errorf("显式 null 应清空配额: %+v", updated)
+	}
+
+	updated, err = f.svc.Groups.Update(created.ID, service.GroupInput{Permissions: []string{"delete_own"}}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("移除上传权限失败: %v", err)
+	}
+	if updated.Permissions != model.PermDeleteOwn || updated.QuotaMode != nil || updated.QuotaValue != nil ||
+		updated.MaxFileSizeBytes != nil || updated.UploadRateLimit != nil {
+		t.Errorf("移除上传权限应清空配额与上传限额: %+v", updated)
+	}
+	if updated.Description != "原始说明" || updated.Sort != 7 {
+		t.Errorf("移除上传权限不应清空说明或排序: %+v", updated)
+	}
+
+	updated, err = f.svc.Groups.Update(created.ID, service.GroupInput{Description: optional(""), Sort: optional(0)}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("清空说明与排序失败: %v", err)
+	}
+	if updated.Description != "" || updated.Sort != 0 {
+		t.Errorf("显式空值应清空说明与排序: %+v", updated)
+	}
+}
+
 func TestRateLimit(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)
@@ -880,11 +978,9 @@ func TestRateLimit(t *testing.T) {
 	}
 	if _, err := f.svc.Groups.Update(f.normalGID, service.GroupInput{
 		Name:            group.Name,
-		Description:     group.Description,
+		Description:     optional(group.Description),
 		Permissions:     group.Permissions.Names(),
-		QuotaMode:       group.QuotaMode,
-		QuotaValue:      group.QuotaValue,
-		UploadRateLimit: new(1),
+		UploadRateLimit: optional(1),
 	}, f.admin, "127.0.0.1", "test-agent"); err != nil {
 		t.Fatalf("更新用户组失败: %v", err)
 	}

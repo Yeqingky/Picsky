@@ -1962,6 +1962,33 @@ func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
 		t.Errorf("解封管理员应返回 403, 实际 %d %s", unban.Status, string(unban.Body))
 	}
 
+	for _, attempt := range []struct {
+		name    string
+		method  string
+		path    string
+		payload map[string]any
+	}{
+		{"修改管理员组", http.MethodPatch, fmt.Sprintf("/api/v1/admin/groups/%d", adminGroup.ID), map[string]any{
+			"name": "被改名的管理员组",
+		}},
+		{"删除管理员组", http.MethodDelete, fmt.Sprintf("/api/v1/admin/groups/%d", adminGroup.ID), nil},
+		{"覆盖管理员组策略", http.MethodPut, fmt.Sprintf("/api/v1/admin/groups/%d/policies", adminGroup.ID), map[string]any{
+			"policy_ids": []int64{},
+		}},
+	} {
+		result := s.json(attempt.method, attempt.path, attempt.payload, []*http.Cookie{managerCookie})
+		if result.Status != http.StatusForbidden {
+			t.Errorf("%s 应返回 403, 实际 %d %s", attempt.name, result.Status, string(result.Body))
+		}
+	}
+	var reloadedAdminGroup model.Group
+	if err := s.db.First(&reloadedAdminGroup, adminGroup.ID).Error; err != nil {
+		t.Fatalf("读取管理员组失败: %v", err)
+	}
+	if reloadedAdminGroup.Name != "管理员" || reloadedAdminGroup.Permissions != model.AllPermissions() {
+		t.Errorf("被拒绝的用户组操作不应改动管理员组: %+v", reloadedAdminGroup)
+	}
+
 	selfPromotion := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/users/%d", managerID), map[string]any{
 		"group_id": adminGroup.ID,
 	}, []*http.Cookie{managerCookie})
@@ -2002,6 +2029,57 @@ func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
 	group := newMember["group"].(map[string]any)
 	if int64(group["id"].(float64)) != settingsGroupID {
 		t.Errorf("新用户应进入权限受限的默认组: got %v, want %d", group["id"], settingsGroupID)
+	}
+}
+
+func TestAdminGroupPatchPreservesOmittedFields(t *testing.T) {
+	s := newServer(t)
+	cookie, _ := s.bootstrap()
+	created := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+		"name":                "保留字段组",
+		"description":         "原始说明",
+		"permissions":         []string{"upload"},
+		"quota_mode":          "count",
+		"quota_value":         10,
+		"max_file_size_bytes": 2048,
+		"upload_rate_limit":   3,
+		"sort":                7,
+	}, []*http.Cookie{cookie})
+	if created.Status != http.StatusCreated {
+		t.Fatalf("创建用户组失败: %d %s", created.Status, string(created.Body))
+	}
+	groupID := int64(s.decode(created)["id"].(float64))
+
+	patched := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/groups/%d", groupID), map[string]any{
+		"name": "改名",
+	}, []*http.Cookie{cookie})
+	if patched.Status != http.StatusOK {
+		t.Fatalf("仅更新名称失败: %d %s", patched.Status, string(patched.Body))
+	}
+	group := s.decode(patched)
+	permissions, _ := group["permissions"].([]any)
+	if len(permissions) != 1 || permissions[0] != "upload" {
+		t.Errorf("仅更新名称不应清空权限: %v", group["permissions"])
+	}
+	if group["description"] != "原始说明" || group["quota_mode"] != "count" ||
+		group["quota_value"].(float64) != 10 || group["max_file_size_bytes"].(float64) != 2048 ||
+		group["upload_rate_limit"].(float64) != 3 || group["sort"].(float64) != 7 {
+		t.Errorf("仅更新名称不应清空其他字段: %v", group)
+	}
+
+	cleared := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/groups/%d", groupID), map[string]any{
+		"permissions": []string{"delete_own"},
+	}, []*http.Cookie{cookie})
+	if cleared.Status != http.StatusOK {
+		t.Fatalf("移除上传权限失败: %d %s", cleared.Status, string(cleared.Body))
+	}
+	clearedGroup := s.decode(cleared)
+	if clearedGroup["quota_mode"] != nil || clearedGroup["quota_value"] != nil ||
+		clearedGroup["max_file_size_bytes"] != nil || clearedGroup["upload_rate_limit"] != nil {
+		t.Errorf("移除上传权限应清空配额与上传限额: %v", clearedGroup)
+	}
+	if clearedGroup["name"] != "改名" || clearedGroup["description"] != "原始说明" || clearedGroup["sort"].(float64) != 7 {
+		t.Errorf("移除上传权限不应清空其他字段: %v", clearedGroup)
 	}
 }
 

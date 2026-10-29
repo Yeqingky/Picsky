@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -22,18 +23,39 @@ func NewGroups(database *gorm.DB, settings *Settings, audit *Audit) *Groups {
 	return &Groups{db: database, settings: settings, audit: audit}
 }
 
-// GroupInput 是用户组创建/更新入参.
+// OptionalField 区分 JSON 字段未出现, 显式为 null 与有值三种状态.
+type OptionalField[T any] struct {
+	Set   bool
+	Value *T
+}
+
+// UnmarshalJSON 记录字段出现状态; null 保留 Set 且 Value 为 nil.
+func (o *OptionalField[T]) UnmarshalJSON(data []byte) error {
+	o.Set = true
+	if string(data) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var value T
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	o.Value = &value
+	return nil
+}
+
+// GroupInput 是用户组创建/更新入参; OptionalField 未出现或切片为 nil 表示更新时不修改.
 type GroupInput struct {
-	Name             string   `json:"name"`
-	Description      string   `json:"description"`
-	IsDefault        *bool    `json:"is_default"`
-	Permissions      []string `json:"permissions"`
-	QuotaMode        *string  `json:"quota_mode"`
-	QuotaValue       *int64   `json:"quota_value"`
-	MaxFileSizeBytes *int64   `json:"max_file_size_bytes"`
-	UploadRateLimit  *int     `json:"upload_rate_limit"`
-	Sort             int      `json:"sort"`
-	PolicyIDs        []int64  `json:"policy_ids"`
+	Name             string                `json:"name"`
+	Description      OptionalField[string] `json:"description"`
+	IsDefault        *bool                 `json:"is_default"`
+	Permissions      []string              `json:"permissions"`
+	QuotaMode        OptionalField[string] `json:"quota_mode"`
+	QuotaValue       OptionalField[int64]  `json:"quota_value"`
+	MaxFileSizeBytes OptionalField[int64]  `json:"max_file_size_bytes"`
+	UploadRateLimit  OptionalField[int]    `json:"upload_rate_limit"`
+	Sort             OptionalField[int]    `json:"sort"`
+	PolicyIDs        []int64               `json:"policy_ids"`
 }
 
 // GroupView 是用户组视图.
@@ -86,16 +108,31 @@ func (g *Groups) Create(in GroupInput, actor *Principal, ip, userAgent string) (
 	if permissionsExceedActor(actor, permissions) {
 		return nil, apperr.ErrInvalidRequest.WithMessage("用户组权限不能超出当前用户权限")
 	}
+	description := ""
+	if in.Description.Value != nil {
+		description = strings.TrimSpace(*in.Description.Value)
+	}
+	sort := 0
+	if in.Sort.Value != nil {
+		sort = *in.Sort.Value
+	}
+	quotaMode := normalizeQuotaMode(in.QuotaMode.Value)
+	quotaValue := in.QuotaValue.Value
+	maxFileSize := in.MaxFileSizeBytes.Value
+	rateLimit := in.UploadRateLimit.Value
+	if !permissions.Has(model.PermUpload) {
+		quotaMode, quotaValue, maxFileSize, rateLimit = nil, nil, nil, nil
+	}
 	group := model.Group{
 		Name:             in.Name,
-		Description:      strings.TrimSpace(in.Description),
+		Description:      description,
 		IsDefault:        in.IsDefault != nil && *in.IsDefault,
 		Permissions:      permissions,
-		QuotaMode:        normalizeQuotaMode(in.QuotaMode),
-		QuotaValue:       in.QuotaValue,
-		MaxFileSizeBytes: in.MaxFileSizeBytes,
-		UploadRateLimit:  in.UploadRateLimit,
-		Sort:             in.Sort,
+		QuotaMode:        quotaMode,
+		QuotaValue:       quotaValue,
+		MaxFileSizeBytes: maxFileSize,
+		UploadRateLimit:  rateLimit,
+		Sort:             sort,
 		CreatedAt:        nowUTC(),
 		UpdatedAt:        nowUTC(),
 	}
@@ -131,6 +168,9 @@ func (g *Groups) Update(id int64, in GroupInput, actor *Principal, ip, userAgent
 	if err != nil {
 		return nil, err
 	}
+	if permissionsExceedActor(actor, group.Permissions) {
+		return nil, apperr.ErrForbidden.WithMessage("目标用户组权限超出当前用户权限")
+	}
 	if in.Name == "" {
 		in.Name = group.Name
 	}
@@ -145,16 +185,52 @@ func (g *Groups) Update(id int64, in GroupInput, actor *Principal, ip, userAgent
 	if in.IsDefault != nil {
 		isDefault = *in.IsDefault
 	}
+	description := group.Description
+	if in.Description.Set {
+		description = ""
+		if in.Description.Value != nil {
+			description = strings.TrimSpace(*in.Description.Value)
+		}
+	}
+	sort := group.Sort
+	if in.Sort.Set {
+		sort = 0
+		if in.Sort.Value != nil {
+			sort = *in.Sort.Value
+		}
+	}
+	quotaMode := group.QuotaMode
+	if in.QuotaMode.Set {
+		quotaMode = normalizeQuotaMode(in.QuotaMode.Value)
+	}
+	quotaValue := group.QuotaValue
+	if in.QuotaValue.Set {
+		quotaValue = in.QuotaValue.Value
+	}
+	maxFileSize := group.MaxFileSizeBytes
+	if in.MaxFileSizeBytes.Set {
+		maxFileSize = in.MaxFileSizeBytes.Value
+	}
+	rateLimit := group.UploadRateLimit
+	if in.UploadRateLimit.Set {
+		rateLimit = in.UploadRateLimit.Value
+	}
+	if quotaMode == nil {
+		quotaValue = nil
+	}
+	if !permissions.Has(model.PermUpload) {
+		quotaMode, quotaValue, maxFileSize, rateLimit = nil, nil, nil, nil
+	}
 	updates := map[string]any{
 		"name":                in.Name,
-		"description":         strings.TrimSpace(in.Description),
+		"description":         description,
 		"is_default":          isDefault,
 		"permissions":         int64(permissions),
-		"quota_mode":          normalizeQuotaMode(in.QuotaMode),
-		"quota_value":         in.QuotaValue,
-		"max_file_size_bytes": in.MaxFileSizeBytes,
-		"upload_rate_limit":   in.UploadRateLimit,
-		"sort":                in.Sort,
+		"quota_mode":          quotaMode,
+		"quota_value":         quotaValue,
+		"max_file_size_bytes": maxFileSize,
+		"upload_rate_limit":   rateLimit,
+		"sort":                sort,
 		"updated_at":          nowUTC(),
 	}
 	if err := g.db.Transaction(func(tx *gorm.DB) error {
@@ -191,6 +267,9 @@ func (g *Groups) Delete(id int64, actor *Principal, ip, userAgent string) error 
 	group, err := g.Get(id)
 	if err != nil {
 		return err
+	}
+	if permissionsExceedActor(actor, group.Permissions) {
+		return apperr.ErrForbidden.WithMessage("目标用户组权限超出当前用户权限")
 	}
 	if group.IsSystem {
 		return apperr.ErrInvalidRequest.WithMessage("内置用户组不能删除")
@@ -230,6 +309,9 @@ func (g *Groups) SetPolicies(id int64, policyIDs []int64, actor *Principal, ip, 
 	group, err := g.Get(id)
 	if err != nil {
 		return err
+	}
+	if permissionsExceedActor(actor, group.Permissions) {
+		return apperr.ErrForbidden.WithMessage("目标用户组权限超出当前用户权限")
 	}
 	if err := g.db.Transaction(func(tx *gorm.DB) error {
 		return g.replacePolicies(tx, group.ID, policyIDs)
@@ -297,9 +379,15 @@ func (g *Groups) validate(in *GroupInput, group *model.Group) (model.Permission,
 		return 0, apperr.ErrInvalidRequest.WithMessage("用户组名称已存在")
 	}
 
-	permissions, err := model.PermissionsFromNames(in.Permissions)
-	if err != nil {
-		return 0, apperr.ErrInvalidRequest.WithMessage(err.Error())
+	var permissions model.Permission
+	if group != nil && in.Permissions == nil {
+		permissions = group.Permissions
+	} else {
+		parsed, err := model.PermissionsFromNames(in.Permissions)
+		if err != nil {
+			return 0, apperr.ErrInvalidRequest.WithMessage(err.Error())
+		}
+		permissions = parsed
 	}
 	if group != nil && group.IsSystem {
 		if permissions != group.Permissions {
@@ -309,22 +397,25 @@ func (g *Groups) validate(in *GroupInput, group *model.Group) (model.Permission,
 			return 0, apperr.ErrInvalidRequest.WithMessage("内置用户组不能设为默认组")
 		}
 	}
-	if in.QuotaMode != nil {
-		mode := strings.TrimSpace(*in.QuotaMode)
+	if in.QuotaMode.Set && in.QuotaMode.Value != nil {
+		mode := strings.TrimSpace(*in.QuotaMode.Value)
 		switch mode {
 		case "", model.QuotaModeCount, model.QuotaModeBytes:
 		default:
 			return 0, apperr.ErrInvalidRequest.WithMessage("配额方式只能是 count 或 bytes")
 		}
 	}
-	if in.QuotaValue != nil && *in.QuotaValue < 0 {
+	if in.QuotaValue.Set && in.QuotaValue.Value != nil && *in.QuotaValue.Value < 0 {
 		return 0, apperr.ErrInvalidRequest.WithMessage("配额数值不能为负数")
 	}
-	if in.MaxFileSizeBytes != nil && *in.MaxFileSizeBytes < 0 {
+	if in.MaxFileSizeBytes.Set && in.MaxFileSizeBytes.Value != nil && *in.MaxFileSizeBytes.Value < 0 {
 		return 0, apperr.ErrInvalidRequest.WithMessage("单文件上限不能为负数")
 	}
-	if in.UploadRateLimit != nil && *in.UploadRateLimit < 0 {
+	if in.UploadRateLimit.Set && in.UploadRateLimit.Value != nil && *in.UploadRateLimit.Value < 0 {
 		return 0, apperr.ErrInvalidRequest.WithMessage("上传速率限制不能为负数")
+	}
+	if in.Sort.Set && in.Sort.Value != nil && *in.Sort.Value < 0 {
+		return 0, apperr.ErrInvalidRequest.WithMessage("排序不能为负数")
 	}
 	return permissions, nil
 }

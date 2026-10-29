@@ -90,6 +90,7 @@ Picsky/
 - 删除用户组时必须同时检查 `users.group_id` 与 `users.restore_group_id`, 避免验证或解封后恢复到已删除的用户组.
 - 后台区域入口按任一管理权限位判定 (`view_all`, `delete_all`, `manage_policies`, `manage_users`, `manage_groups`, `manage_settings`, `view_logs`), 各管理接口仍按自身权限位校验; `/admin/stats` 只要求后台入口.
 - 用户组权限委派必须是调用者当前有效权限的子集; 创建用户/改组、创建/更新用户组与设置新用户默认组都校验此约束; API 密钥调用按 `scopes` 裁剪后的权限计算. 管理员更新或删除用户前也校验目标用户实际权限组, 未验证/封禁账号按 `restore_group_id` 判定, 超出调用者权限返回 403.
+- 更新/删除用户组或覆盖其策略白名单前校验目标组当前权限, 超出调用者权限返回 403; 组 PATCH 未出现的字段保持不变, 显式 `null` 清除可空字段, 移除 `upload` 权限时自动清除配额与上传限额.
 - 前端样式只使用 Tailwind CSS v4 与 `src/index.css` 的语义令牌 (`background`, `card`, `muted`, `primary`, `destructive`, `success`, `warning`, `info`, `border`, `ring`, `chart-*`), 禁止硬编码色值与 CSS-in-JS.
 - 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示; 注册邮箱白名单按完整域名精确匹配, 留空时不限制; 列表输入复用 `TagsInput`.
 - 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 不引入 MUI, Emotion, 其它 UI 库或图标库, 图标统一 lucide-react, 全局提示统一 sonner.
