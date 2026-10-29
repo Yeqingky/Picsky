@@ -723,7 +723,7 @@ func TestPermissionDelegationIsBoundToActor(t *testing.T) {
 	f := newFixture(t)
 	managerGroup, err := f.svc.Groups.Create(service.GroupInput{
 		Name:        "受限管理组",
-		Permissions: []string{"manage_users", "manage_groups", "manage_settings"},
+		Permissions: []string{"upload", "delete_own", "manage_keys", "manage_users", "manage_groups", "manage_settings"},
 	}, f.admin, "127.0.0.1", "test-agent")
 	if err != nil {
 		t.Fatalf("创建受限管理组失败: %v", err)
@@ -737,10 +737,14 @@ func TestPermissionDelegationIsBoundToActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("创建受限管理用户失败: %v", err)
 	}
-	scopes := int64(model.PermManageUsers | model.PermManageGroups)
+	scopes := int64(model.PermUpload | model.PermDeleteOwn | model.PermManageKeys | model.PermManageUsers | model.PermManageGroups)
 	actor, err := f.svc.Auth.PrincipalFor(manager.ID, nil, &scopes)
 	if err != nil {
 		t.Fatalf("加载受限管理主体失败: %v", err)
+	}
+	fullActor, err := f.svc.Auth.PrincipalFor(manager.ID, nil, nil)
+	if err != nil {
+		t.Fatalf("加载管理主体失败: %v", err)
 	}
 
 	var adminGroup model.Group
@@ -754,8 +758,54 @@ func TestPermissionDelegationIsBoundToActor(t *testing.T) {
 			t.Errorf("%s 应因超出当前权限而返回 invalid_request, 实际: %v", action, err)
 		}
 	}
+	rejectForbidden := func(err error, action string) {
+		t.Helper()
+		var apiErr *apperr.Error
+		if !errors.As(err, &apiErr) || apiErr.Code != "forbidden" || apiErr.Status != 403 {
+			t.Errorf("%s 应因目标权限超出当前权限而返回 403 forbidden, 实际: %v", action, err)
+		}
+	}
 
-	_, err = f.svc.Users.Update(manager.ID, service.UserInput{GroupID: &adminGroup.ID}, actor, "127.0.0.1", "test-agent")
+	bannedStatus := model.UserStatusBanned
+	quotaMode := model.QuotaModeCount
+	quotaValue := int64(1)
+	defaultPolicyID := int64(1)
+	for _, tc := range []struct {
+		action string
+		input  service.UserInput
+	}{
+		{"修改管理员密码", service.UserInput{Password: "attacker-pass-123"}},
+		{"封禁管理员", service.UserInput{Status: &bannedStatus}},
+		{"覆盖管理员配额", service.UserInput{QuotaMode: &quotaMode, QuotaValue: &quotaValue}},
+		{"设置管理员默认策略", service.UserInput{DefaultPolicyID: &defaultPolicyID}},
+	} {
+		_, err := f.svc.Users.Update(f.admin.User.ID, tc.input, actor, "127.0.0.1", "test-agent")
+		rejectForbidden(err, tc.action)
+	}
+	rejectForbidden(f.svc.Users.Delete(f.admin.User.ID, actor, "127.0.0.1", "test-agent"), "删除管理员")
+	if _, err := f.svc.Auth.Login(context.Background(), service.LoginInput{
+		Email: "admin@example.com", Password: "password123",
+	}, "127.0.0.1", "test-agent"); err != nil {
+		t.Errorf("被拒绝的密码修改不应影响管理员登录: %v", err)
+	}
+
+	secondAdmin, err := f.svc.Users.Create(service.UserInput{
+		Username: "secondadmin",
+		Email:    "second-admin@example.com",
+		Password: "password123",
+		GroupID:  &adminGroup.ID,
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("创建第二个管理员失败: %v", err)
+	}
+	if _, err := f.svc.Users.Update(secondAdmin.ID, service.UserInput{Status: &bannedStatus}, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("封禁第二个管理员失败: %v", err)
+	}
+	normalStatus := model.UserStatusNormal
+	_, err = f.svc.Users.Update(secondAdmin.ID, service.UserInput{Status: &normalStatus}, actor, "127.0.0.1", "test-agent")
+	rejectForbidden(err, "解封管理员")
+
+	_, err = f.svc.Users.Update(manager.ID, service.UserInput{GroupID: &adminGroup.ID}, fullActor, "127.0.0.1", "test-agent")
 	rejectExcess(err, "将自己移入管理员组")
 
 	_, err = f.svc.Users.Create(service.UserInput{

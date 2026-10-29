@@ -1911,6 +1911,57 @@ func TestAdminPermissionDelegationIsBoundToActor(t *testing.T) {
 	if err := s.db.Where("name = ?", "管理员").First(&adminGroup).Error; err != nil {
 		t.Fatalf("读取管理员组失败: %v", err)
 	}
+	var adminUser model.User
+	if err := s.db.Where("username = ?", "admin").First(&adminUser).Error; err != nil {
+		t.Fatalf("读取管理员账号失败: %v", err)
+	}
+	for _, attempt := range []struct {
+		name    string
+		method  string
+		path    string
+		payload map[string]any
+	}{
+		{"修改管理员密码", http.MethodPatch, fmt.Sprintf("/api/v1/admin/users/%d", adminUser.ID), map[string]any{
+			"password": "attacker-pass-123",
+		}},
+		{"封禁管理员", http.MethodPatch, fmt.Sprintf("/api/v1/admin/users/%d", adminUser.ID), map[string]any{
+			"status": 2,
+		}},
+		{"删除管理员", http.MethodDelete, fmt.Sprintf("/api/v1/admin/users/%d", adminUser.ID), nil},
+	} {
+		result := s.json(attempt.method, attempt.path, attempt.payload, []*http.Cookie{managerCookie})
+		if result.Status != http.StatusForbidden {
+			t.Errorf("%s 应返回 403, 实际 %d %s", attempt.name, result.Status, string(result.Body))
+		}
+	}
+	if adminLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+		"identifier": "admin@example.com",
+		"password":   "password123",
+	}, nil); adminLogin.Status != http.StatusOK {
+		t.Errorf("被拒绝的密码修改不应影响管理员登录: %d %s", adminLogin.Status, string(adminLogin.Body))
+	}
+
+	secondAdmin := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
+		"username": "secondadmin",
+		"email":    "second-admin@example.com",
+		"password": "password123",
+		"group_id": adminGroup.ID,
+	}, []*http.Cookie{adminCookie})
+	if secondAdmin.Status != http.StatusCreated {
+		t.Fatalf("创建第二个管理员失败: %d %s", secondAdmin.Status, string(secondAdmin.Body))
+	}
+	secondAdminID := int64(s.decode(secondAdmin)["id"].(float64))
+	if banned := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/users/%d", secondAdminID), map[string]any{
+		"status": 2,
+	}, []*http.Cookie{adminCookie}); banned.Status != http.StatusOK {
+		t.Fatalf("封禁第二个管理员失败: %d %s", banned.Status, string(banned.Body))
+	}
+	if unban := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/users/%d", secondAdminID), map[string]any{
+		"status": 0,
+	}, []*http.Cookie{managerCookie}); unban.Status != http.StatusForbidden {
+		t.Errorf("解封管理员应返回 403, 实际 %d %s", unban.Status, string(unban.Body))
+	}
+
 	selfPromotion := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/users/%d", managerID), map[string]any{
 		"group_id": adminGroup.ID,
 	}, []*http.Cookie{managerCookie})

@@ -236,6 +236,9 @@ func (u *Users) Update(id int64, in UserInput, actor *Principal, ip, userAgent s
 		}
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
+	if err := u.ensureTargetWithinActor(&user, actor); err != nil {
+		return nil, err
+	}
 
 	updates := map[string]any{"updated_at": nowUTC()}
 	if in.Nickname != "" {
@@ -250,22 +253,9 @@ func (u *Users) Update(id int64, in UserInput, actor *Principal, ip, userAgent s
 			return nil, apperr.ErrInvalidRequest.WithMessage("账号状态无效")
 		}
 
-		groupID := user.GroupID
-		if user.Status != model.UserStatusNormal && user.RestoreGroupID != nil {
-			groupID = *user.RestoreGroupID
-		}
-		if user.Status != model.UserStatusNormal && user.RestoreGroupID == nil {
-			readOnly, err := u.auth.readOnlyGroup()
-			if err != nil {
-				return nil, err
-			}
-			if groupID == readOnly.ID {
-				defaultGroup, err := u.auth.defaultGroup()
-				if err != nil {
-					return nil, err
-				}
-				groupID = defaultGroup.ID
-			}
+		groupID, err := u.targetGroupID(&user)
+		if err != nil {
+			return nil, err
 		}
 		if in.GroupID != nil {
 			var group model.Group
@@ -382,6 +372,9 @@ func (u *Users) Delete(id int64, actor *Principal, ip, userAgent string) error {
 		}
 		return apperr.ErrInternal.WithMessage(err.Error())
 	}
+	if err := u.ensureTargetWithinActor(&user, actor); err != nil {
+		return err
+	}
 	if actor != nil && actor.User != nil && actor.User.ID == user.ID {
 		return apperr.ErrInvalidRequest.WithMessage("不能删除当前登录账号")
 	}
@@ -428,6 +421,47 @@ func (u *Users) UserByID(id int64) (*model.User, error) {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
 	return &user, nil
+}
+
+// targetGroupID 返回用户的实际权限归属组; 限制状态账号使用恢复目标组.
+func (u *Users) targetGroupID(user *model.User) (int64, error) {
+	if user.Status == model.UserStatusNormal {
+		return user.GroupID, nil
+	}
+	if user.RestoreGroupID != nil {
+		return *user.RestoreGroupID, nil
+	}
+	readOnly, err := u.auth.readOnlyGroup()
+	if err != nil {
+		return 0, err
+	}
+	if user.GroupID != readOnly.ID {
+		return user.GroupID, nil
+	}
+	defaultGroup, err := u.auth.defaultGroup()
+	if err != nil {
+		return 0, err
+	}
+	return defaultGroup.ID, nil
+}
+
+// ensureTargetWithinActor 校验目标用户的实际权限归属组不超出调用者有效权限.
+func (u *Users) ensureTargetWithinActor(user *model.User, actor *Principal) error {
+	groupID, err := u.targetGroupID(user)
+	if err != nil {
+		return err
+	}
+	var group model.Group
+	if err := u.db.First(&group, groupID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.ErrNotFound.WithMessage("用户组不存在")
+		}
+		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if permissionsExceedActor(actor, group.Permissions) {
+		return apperr.ErrForbidden.WithMessage("目标用户权限超出当前用户权限")
+	}
+	return nil
 }
 
 // views 批量组装用户视图.
