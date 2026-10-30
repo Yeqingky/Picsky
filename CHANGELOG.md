@@ -1,8 +1,10 @@
-# 未发布
+# v0.4.2
 
 ## 修复
 
 - 修复思琳中国驱动上传 WebP / AVIF 等不支持格式时返回 502 的问题: 驱动声明仅支持 PNG / JPEG / GIF, 后端返回明确的 `unsupported_format`; 压缩输出自动改用 JPEG, 未压缩原图格式不支持时直接提示失败.
+
+Full Changelog: v0.4.1...v0.4.2
 
 # v0.4.1
 
