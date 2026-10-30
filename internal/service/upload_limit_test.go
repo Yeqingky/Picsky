@@ -19,6 +19,7 @@ func TestCheckPolicyFileSizeLimit(t *testing.T) {
 		{name: "未超过策略上限", limit: limit, size: limit},
 		{name: "策略不限制", limit: 0, size: 1 << 40},
 		{name: "超过策略上限", limit: limit, size: limit + 1, wantMsg: "此存储策略最大支持50MB", wantFail: true},
+		{name: "接近整数 MB", limit: 20<<20 - 194, size: 20<<20 - 193, wantMsg: "此存储策略最大支持20MB", wantFail: true},
 		{name: "非整数 MB", limit: 1<<20 + 512<<10, size: 1<<20 + 512<<10 + 1, wantMsg: "此存储策略最大支持1.5MB", wantFail: true},
 	}
 	for _, testCase := range tests {

@@ -39,6 +39,8 @@ Picsky/
 │   ├── service/    业务逻辑 (上传, 图库, 策略, 用户组, 设置, 维护队列)
 │   ├── spool/      上传缓冲 (内存 / 临时文件)
 │   ├── storage/    适配器接口, 能力声明, 魔法路径渲染
+│   │   ├── celine/ 思琳中国驱动 (固定地址, 无配置, 仅上传)
+│   │   ├── sobot/  Sobot 驱动 (固定租户, 无配置, 仅上传)
 │   │   └── webdav/ WebDAV 驱动 (v1)
 │   └── web/        go:embed 前端产物 (build/ 由 scripts/build.sh 生成)
 ├── migrations/     数据库迁移与默认设置
@@ -67,6 +69,7 @@ Picsky/
 - 不把 `README` 用作变更日志; 变更日志写入仓库根目录的 `CHANGELOG.md` 并随版本提交, 每次发布在文件顶部追加版本段落, 版本倒序排列; 版本数量较多或单文件过长时改用 `CHANGELOG/` 目录, 每个版本一个文件.
 - 存储适配器必须声明能力 (`upload`, `delete`, `overwrite`, `stat`, `presign`, `multipart`); 新增驱动不得假设后端支持删除或覆盖, 上层按能力降级. 驱动未声明 `delete` 时删除记录直接返回 403, 不删除记录与外部对象.
 - `sobot` 驱动固定租户与上传地址, 无配置项, 只接受图片, 由后端返回直链 (`url_from_backend`), 只声明 `upload` 能力; 策略不配置分发域名, 记录 `rel_path` / `object_key` 取返回 URL 的路径.
+- `celine` 驱动固定思琳中国上传地址与公开路径, 无鉴权与配置项, 只接受图片, 由后端返回直链 (`url_from_backend`), 只声明 `upload` 能力; 单文件上限 20,971,326 字节 (20 MiB 扣除 multipart 开销), 服务端会重编码图片并清理元数据, 记录的哈希与大小仍按原始上传内容计算.
 - 魔法路径模板必须包含内容哈希变量或单个 `{seq}`; `{seq}` 只允许 `rename`, 使用策略级原子计数器分配并跨输出格式共享, 已有匹配路径与扫描补录参与初始化与对账; 删除图片且外部对象确认删除后序号写入释放队列, 策略开关 `reuse_released_seq` 控制是否按先进先出复用, 关闭时仍记录; 模板变化时重置计数器并清空队列; 未使用 `{seq}` 时冲突重命名追加 `-N`, 其他生成变量在重试中固定.
 - 冲突策略只使用 `rename` / `skip`; `overwrite` 是后端能力声明, 不作为冲突策略.
 - Lsky Pro 兼容层是适配层: 不得绕过认证, 权限, 配额与能力降级; 兼容字段有变更时先更新 `docs/lsky-compat.md`.
@@ -74,7 +77,7 @@ Picsky/
 - Lsky 上传在 multipart 文件缓冲前完成认证、上传权限与限流预检; 仅使用表单 `token` 的请求要求它是首个 multipart 字段, 通过认证后按用户组文件大小上限读取.
 - 原生 multipart 上传必须在解析请求体前完成认证、上传权限与限流预检; 所有 multipart 非文件字段值每项最多 4 KiB, 最多 64 项, 字段名和值合计最多 64 KiB (Lsky `token` 计入预算).
 - Base64 JSON 上传必须在读取请求体前完成认证, 上传权限与限流预检, 并流式读取 `data` 直接解码到共用上传缓冲, 禁止在内存完整保留编码字符串或解码副本; 不限组仍受 2 GiB 单次硬上限约束, `data` 字段前后区段各最多 32 KiB, data URL 头最多 4 KiB, 解码缓冲遵循 `PICSKY_UPLOAD_MEMORY_LIMIT`.
-- 驱动可声明单对象体积上限 (`max_file_size_bytes`, `0` 表示不限); 上传先校验用户组单文件上限, 通过后再校验策略驱动上限, 仅策略上限触发时返回 `file_too_large` 与 "此存储策略最大支持xxMB"; Sobot 固定 50 MiB (52,428,800 字节), WebUI 以右下角 toast 提示.
+- 驱动可声明单对象体积上限 (`max_file_size_bytes`, `0` 表示不限); 上传先校验用户组单文件上限, 通过后再校验策略驱动上限, 仅策略上限触发时返回 `file_too_large` 与 "此存储策略最大支持xxMB"; Sobot 固定 50 MiB (52,428,800 字节), Celine 20,971,326 字节 (20 MiB 扣除 multipart 开销), WebUI 以右下角 toast 提示.
 - 未设置 `PICSKY_TEMP_DIR` 时, spool 可将处理期溢出文件写入系统临时目录, 但 `CleanupStale` 必须跳过目录扫描; 仅对应用专用且隔离的临时目录执行启动残留清理.
 - `/upload/check` 必须按当前 `user_id` 查询记录; 相同哈希仅由其他用户持有时返回 `exists: false` 且不包含记录 ID、URL 或大小; `/upload` 跨用户复用只返回当前用户自己的新记录.
 - 注册页启用注册邮箱域名白名单时, 邮箱字段由左侧本地部分输入框与右侧域名下拉框组成, 提交时拼接为完整邮箱; 未启用白名单时为完整邮箱输入框; 白名单域名由 `GET /site` 的 `registration_email_domains` 提供.

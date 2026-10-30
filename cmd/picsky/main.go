@@ -25,6 +25,7 @@ import (
 	"github.com/yeqingky/Picsky/migrations"
 
 	// 注册存储驱动.
+	_ "github.com/yeqingky/Picsky/internal/storage/celine"
 	_ "github.com/yeqingky/Picsky/internal/storage/sobot"
 	_ "github.com/yeqingky/Picsky/internal/storage/webdav"
 )

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -592,7 +593,12 @@ func checkPolicyFileSizeLimit(limit, size int64) error {
 	if limit <= 0 || size <= limit {
 		return nil
 	}
-	megabytes := strconv.FormatFloat(float64(limit)/float64(1<<20), 'f', -1, 64)
+	megabytesValue := float64(limit) / float64(1<<20)
+	rounded := math.Round(megabytesValue)
+	megabytes := strconv.FormatFloat(megabytesValue, 'f', -1, 64)
+	if math.Abs(megabytesValue-rounded) < 0.01 {
+		megabytes = strconv.FormatInt(int64(rounded), 10)
+	}
 	return apperr.ErrFileTooLarge.
 		WithMessage("此存储策略最大支持" + megabytes + "MB").
 		WithDetails(map[string]any{"size": size, "limit": limit, "scope": "policy"})
