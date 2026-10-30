@@ -82,6 +82,7 @@ type PolicyView struct {
 	ConfigFields   []storage.Field   `json:"config_fields"`
 	SecretFields   []storage.Field   `json:"secret_fields"`
 	URLFromBackend bool              `json:"url_from_backend"`
+	Formats        []string          `json:"formats"`
 }
 
 // ConfigMap 解码非敏感配置.
@@ -183,6 +184,10 @@ func (p *Policies) View(policy *model.StoragePolicy) (*PolicyView, error) {
 		secrets = map[string]string{}
 	}
 	spec, _ := storage.SpecOf(policy.Type)
+	formats := spec.Formats
+	if formats == nil {
+		formats = []string{}
+	}
 	view := &PolicyView{
 		StoragePolicy:  policy,
 		URLs:           urls,
@@ -194,6 +199,7 @@ func (p *Policies) View(policy *model.StoragePolicy) (*PolicyView, error) {
 		ConfigFields:   spec.ConfigFields,
 		SecretFields:   spec.SecretFields,
 		URLFromBackend: spec.URLFromBackend,
+		Formats:        formats,
 	}
 	if view.URLs == nil {
 		view.URLs = []model.PolicyURL{}

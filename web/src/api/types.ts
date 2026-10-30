@@ -242,6 +242,8 @@ export interface PolicySummary {
   name: string;
   type: string;
   urls: UploadUrlAlias[];
+  /** 驱动支持的图片格式; 空表示不额外限制 */
+  formats: string[];
   is_default: boolean;
 }
 

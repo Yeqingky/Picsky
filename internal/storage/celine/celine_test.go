@@ -35,6 +35,9 @@ func TestDriverSpec(t *testing.T) {
 	if spec.MaxFileSize != maxFileSize {
 		t.Errorf("Celine 单文件上限 = %d, 期望 %d", spec.MaxFileSize, maxFileSize)
 	}
+	if len(spec.Formats) != 3 || spec.Formats[0] != "png" || spec.Formats[1] != "jpeg" || spec.Formats[2] != "gif" {
+		t.Errorf("Celine 支持格式 = %v, 期望 png/jpeg/gif", spec.Formats)
+	}
 	if spec.MaxFileSize >= 20<<20 {
 		t.Errorf("Celine 单文件上限必须低于 20 MiB 请求体上限: %d", spec.MaxFileSize)
 	}

@@ -7,6 +7,30 @@ import (
 	"github.com/yeqingky/Picsky/internal/apperr"
 )
 
+func TestCheckPolicyFormats(t *testing.T) {
+	allowed := []string{"png", "jpeg", "gif"}
+	if err := checkPolicyFormats(nil, "webp"); err != nil {
+		t.Errorf("未声明格式限制时应通过, 实际 %v", err)
+	}
+	if err := checkPolicyFormats(allowed, "png"); err != nil {
+		t.Errorf("允许的格式应通过, 实际 %v", err)
+	}
+	err := checkPolicyFormats(allowed, "webp")
+	var apiErr *apperr.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("期望 API 错误, 实际 %v", err)
+	}
+	if apiErr.Code != "unsupported_format" {
+		t.Errorf("错误码 = %q, 期望 unsupported_format", apiErr.Code)
+	}
+	if apiErr.Message != "此存储策略不支持 WEBP 格式, 仅支持 PNG, JPEG, GIF" {
+		t.Errorf("错误消息 = %q", apiErr.Message)
+	}
+	if apiErr.Details["scope"] != "policy" {
+		t.Errorf("scope = %v, 期望 policy", apiErr.Details["scope"])
+	}
+}
+
 func TestCheckPolicyFileSizeLimit(t *testing.T) {
 	const limit = int64(50 << 20)
 	tests := []struct {

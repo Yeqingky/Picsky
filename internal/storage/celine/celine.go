@@ -53,6 +53,7 @@ func init() {
 		SecretFields:   []storage.Field{},
 		URLFromBackend: true,
 		MaxFileSize:    maxFileSize,
+		Formats:        []string{"png", "jpeg", "gif"},
 	}, newAdapter)
 }
 

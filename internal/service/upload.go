@@ -201,6 +201,9 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 		return nil, err
 	}
 	if spec, ok := storage.SpecOf(policy.Type); ok {
+		if err := checkPolicyFormats(spec.Formats, detected.Format); err != nil {
+			return nil, err
+		}
 		if err := checkPolicyFileSizeLimit(spec.MaxFileSize, sums.Size); err != nil {
 			return nil, err
 		}
@@ -585,6 +588,25 @@ func (u *Upload) reuseRecord(req UploadRequest, policy *model.StoragePolicy, url
 		UserAgent: req.UserAgent,
 	})
 	return &UploadResult{Record: &record, URLs: urls, Dedup: true, QuotaCharged: false, Status: 200}, nil
+}
+
+// checkPolicyFormats 校验驱动声明的图片格式; 空列表表示不额外限制.
+func checkPolicyFormats(allowed []string, format string) error {
+	if len(allowed) == 0 {
+		return nil
+	}
+	for _, item := range allowed {
+		if item == format {
+			return nil
+		}
+	}
+	labels := make([]string, len(allowed))
+	for i, item := range allowed {
+		labels[i] = strings.ToUpper(item)
+	}
+	return apperr.ErrUnsupportedFormat.
+		WithMessage("此存储策略不支持 " + strings.ToUpper(format) + " 格式, 仅支持 " + strings.Join(labels, ", ")).
+		WithDetails(map[string]any{"format": format, "allowed": allowed, "scope": "policy"})
 }
 
 // checkPolicyFileSizeLimit 校验驱动声明的单对象体积上限; limit <= 0 表示不限.

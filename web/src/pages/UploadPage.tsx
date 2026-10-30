@@ -9,6 +9,7 @@ import { uploadApi } from '../api/upload';
 import type { PolicySummary } from '../api/types';
 import { useAuth } from '../hooks/useAuth';
 import { useUploadSettings } from '../hooks/useUploadSettings';
+import type { UploadOutputFormat } from '../hooks/useUploadSettings';
 import { compressImage } from '../lib/imageCompression';
 import { isAnimatedImage } from '../utils/imageAnimation';
 import { CopyFormatToggle } from '../components/CopyFormatToggle';
@@ -40,6 +41,55 @@ import { cn } from '../lib/utils';
 type UploadFilter = 'all' | 'done' | 'uploading' | 'queued' | 'failed';
 
 const FILTERS: UploadFilter[] = ['all', 'done', 'uploading', 'queued', 'failed'];
+
+const FORMAT_LABELS: Record<string, string> = {
+  jpeg: 'JPEG',
+  png: 'PNG',
+  gif: 'GIF',
+  webp: 'WebP',
+  avif: 'AVIF',
+  bmp: 'BMP',
+  tiff: 'TIFF',
+  ico: 'ICO',
+  heic: 'HEIC',
+};
+
+function formatLabel(format: string): string {
+  return FORMAT_LABELS[format] ?? format.toUpperCase();
+}
+
+/** 从浏览器 MIME 或文件名推断图片格式, 仅用于策略格式预检. */
+function fileFormatName(file: File): string {
+  const byType: Record<string, string> = {
+    'image/jpeg': 'jpeg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/avif': 'avif',
+    'image/bmp': 'bmp',
+    'image/tiff': 'tiff',
+    'image/x-icon': 'ico',
+    'image/vnd.microsoft.icon': 'ico',
+    'image/heic': 'heic',
+    'image/heif': 'heic',
+  };
+  const type = file.type.toLowerCase();
+  if (byType[type]) return byType[type];
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+  switch (extension) {
+    case 'jpg':
+    case 'jpeg':
+      return 'jpeg';
+    case 'tif':
+      return 'tiff';
+    default:
+      return extension;
+  }
+}
+
+function policyAllowsFormat(formats: string[] | undefined, format: string): boolean {
+  return !formats || formats.length === 0 || formats.includes(format);
+}
 
 function matchesFilter(item: UploadItem, filter: UploadFilter): boolean {
   switch (filter) {
@@ -78,6 +128,18 @@ export default function UploadPage() {
     queryFn: policiesApi.listMine,
     staleTime: 5 * 60 * 1000,
   });
+
+  const selectedPolicy = policies?.find((policy) => policy.id === policyId);
+  const policyFormats = selectedPolicy?.formats;
+  const compressionFormat = useMemo<UploadOutputFormat>(() => {
+    const requested = settings.format;
+    const requestedName = requested === 'jpg' ? 'jpeg' : requested;
+    if (policyAllowsFormat(policyFormats, requestedName)) return requested;
+    if (policyAllowsFormat(policyFormats, 'jpeg')) return 'jpeg';
+    return requested;
+  }, [settings.format, policyFormats]);
+  const formatOverride = compressionFormat !== settings.format;
+  const formatNoticeRef = useRef<number | null>(null);
 
   /** 策略选择: 记忆上次选择, 首次用 default_policy_id, 再退化为默认/第一个策略 */
   useEffect(() => {
@@ -188,15 +250,20 @@ export default function UploadPage() {
           } catch {
             animated = false;
           }
-          if (!animated || settings.animated) {
+          if (!animated || (settings.animated && policyAllowsFormat(policyFormats, 'webp'))) {
             updateItem(next.id, { status: 'compressing', progress: 0, error: undefined });
             try {
               const compressed = await compressImage(next.file, {
                 quality: settings.quality,
-                format: settings.format,
+                format: compressionFormat,
                 forceWebp: animated,
               });
-              if (settings.keepOriginal && compressed.file.size >= next.file.size) {
+              const originalAllowed = policyAllowsFormat(policyFormats, fileFormatName(next.file));
+              if (
+                settings.keepOriginal &&
+                originalAllowed &&
+                compressed.file.size >= next.file.size
+              ) {
                 // 编码结果没有更小: 保留原图与原始文件名
                 payload = next.file;
                 updateItem(next.id, {
@@ -205,6 +272,14 @@ export default function UploadPage() {
                   compressedSize: compressed.file.size,
                 });
               } else {
+                if (formatOverride && formatNoticeRef.current !== targetPolicy) {
+                  formatNoticeRef.current = targetPolicy;
+                  toast.info(
+                    t('upload.error.policyFormatOverride', {
+                      format: formatLabel(compressionFormat),
+                    }),
+                  );
+                }
                 payload = compressed.file;
                 updateItem(next.id, {
                   uploadFile: compressed.file,
@@ -223,6 +298,17 @@ export default function UploadPage() {
               updateItem(next.id, { status: 'hashing', compressionError: message });
             }
           }
+        }
+
+        const payloadFormat = fileFormatName(payload);
+        if (!policyAllowsFormat(policyFormats, payloadFormat)) {
+          const message = t('upload.error.policyFormat', {
+            format: formatLabel(payloadFormat),
+            allowed: (policyFormats ?? []).map(formatLabel).join(', '),
+          });
+          toast.error(message);
+          updateItem(next.id, { status: 'failed', error: message });
+          return;
         }
 
         updateItem(next.id, { status: 'hashing', progress: 0, error: undefined });
@@ -255,7 +341,17 @@ export default function UploadPage() {
         runningRef.current = false;
       }
     })();
-  }, [queue, canUpload, policyId, updateItem, t, settings]);
+  }, [
+    queue,
+    canUpload,
+    policyId,
+    updateItem,
+    t,
+    settings,
+    policyFormats,
+    compressionFormat,
+    formatOverride,
+  ]);
 
   const stats = useMemo(() => {
     let bytes = 0;

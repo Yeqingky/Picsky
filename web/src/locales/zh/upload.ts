@@ -86,5 +86,7 @@ export const upload = {
     compressFailed: '图片压缩失败',
     noPolicy: '请先选择存储策略',
     notImage: '已忽略非图片文件',
+    policyFormat: '此存储策略不支持 {{format}} 格式, 仅支持 {{allowed}}',
+    policyFormatOverride: '当前存储策略不支持所选压缩格式, 已自动使用 {{format}} 压缩',
   },
 };

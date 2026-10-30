@@ -10,6 +10,7 @@ import (
 	"github.com/yeqingky/Picsky/internal/apperr"
 	"github.com/yeqingky/Picsky/internal/middleware"
 	"github.com/yeqingky/Picsky/internal/service"
+	"github.com/yeqingky/Picsky/internal/storage"
 )
 
 // listImages 返回图片列表.
@@ -167,6 +168,15 @@ func (s *Server) userPolicies(c *gin.Context) {
 			"type":       policy.Type,
 			"urls":       urlItems,
 			"is_default": policy.ID == defaultPolicyID,
+		}
+		if spec, ok := storage.SpecOf(policy.Type); ok {
+			formats := spec.Formats
+			if formats == nil {
+				formats = []string{}
+			}
+			item["formats"] = formats
+		} else {
+			item["formats"] = []string{}
 		}
 		items = append(items, item)
 	}
