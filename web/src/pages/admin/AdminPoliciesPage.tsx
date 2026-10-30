@@ -105,15 +105,27 @@ export default function AdminPoliciesPage() {
         className: 'w-[150px]',
         sortable: true,
         sortValue: (row) => row.conflict_policy,
-        cell: (row) => (
-          <p className="text-sm">{t(`adminPolicies.conflict.${row.conflict_policy}`)}</p>
-        ),
+        cell: (row) =>
+          row.url_from_backend ? (
+            <span className="text-muted-foreground text-sm">
+              {t('adminPolicies.list.notApplicable')}
+            </span>
+          ) : (
+            <p className="text-sm">{t(`adminPolicies.conflict.${row.conflict_policy}`)}</p>
+          ),
       },
       {
         id: 'urls',
         header: t('adminPolicies.list.col.urls'),
         className: 'w-[200px]',
         cell: (row) => {
+          if (row.url_from_backend) {
+            return (
+              <span className="text-muted-foreground text-sm">
+                {t('adminPolicies.list.notApplicable')}
+              </span>
+            );
+          }
           const urls = row.urls;
           if (urls.length === 0) {
             return <span className="text-muted-foreground text-sm">—</span>;
@@ -126,7 +138,7 @@ export default function AdminPoliciesPage() {
                   <span className="text-sm">
                     {t('adminPolicies.list.urlsCount', { count: urls.length })}
                   </span>
-                  <Badge>{defaultUrl.alias || '—'}</Badge>
+                  <Badge>{defaultUrl.alias || t('common.defaultAlias')}</Badge>
                 </span>
               </TooltipTrigger>
               <TooltipContent>{defaultUrl.url}</TooltipContent>

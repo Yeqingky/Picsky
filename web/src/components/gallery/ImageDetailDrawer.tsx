@@ -67,7 +67,7 @@ export function ImageDetailDrawer({
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const { hasPermission } = useAuth();
-  const canDelete = hasPermission('delete_own') || hasPermission('delete_all');
+  const hasDeletePermission = hasPermission('delete_own') || hasPermission('delete_all');
   const [copyFormat, setCopyFormat] = useState<CopyFormat>('direct');
 
   const { data, isPending, isError, refetch } = useQuery({
@@ -75,6 +75,8 @@ export function ImageDetailDrawer({
     queryFn: () => imagesApi.get(imageId as number),
     enabled: open && imageId !== null,
   });
+  // 后端不支持删除时不提供删除入口, 避免留下无法清理的外部对象
+  const canDelete = hasDeletePermission && (data?.policy_capabilities.includes('delete') ?? false);
 
   const invalidateGallery = async () => {
     // 详情查询对应的记录已被删除, 刷新会触发服务端 404; 只刷新列表类查询
@@ -104,14 +106,10 @@ export function ImageDetailDrawer({
 
   const handleDelete = async () => {
     if (!data) return;
-    const deletesObject = data.policy_capabilities.includes('delete');
     const ok = await confirm({
-      title: t(deletesObject ? 'gallery.detail.deleteImage' : 'gallery.detail.delete'),
-      description: t(
-        deletesObject ? 'common.confirm.deleteImageObject' : 'common.confirm.deleteImage',
-      ),
+      title: t('gallery.detail.deleteImage'),
+      description: t('common.confirm.deleteImageObject'),
       danger: true,
-      hint: deletesObject ? undefined : t('common.confirm.objectDeleteUnsupported'),
     });
     if (ok) deleteMutation.mutate(data.id);
   };
@@ -302,7 +300,7 @@ export function ImageDetailDrawer({
                   urls={
                     data.urls.length > 0
                       ? data.urls
-                      : [{ alias: '—', url: data.url, is_default: true }]
+                      : [{ alias: t('common.defaultAlias'), url: data.url, is_default: true }]
                   }
                   filename={data.original_filename}
                   copyFormat={copyFormat}
@@ -321,11 +319,7 @@ export function ImageDetailDrawer({
                     disabled={deleteMutation.isPending}
                   >
                     <Trash2 className="size-4" />
-                    {t(
-                      data.policy_capabilities.includes('delete')
-                        ? 'gallery.detail.deleteImage'
-                        : 'gallery.detail.delete',
-                    )}
+                    {t('gallery.detail.deleteImage')}
                   </Button>
                 )}
                 {deleteMutation.isError && (

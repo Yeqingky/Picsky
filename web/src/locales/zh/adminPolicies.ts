@@ -12,6 +12,7 @@ export const adminPolicies = {
     emptyHint: '新建一条策略后, 可在用户组中把策略加入白名单授权给用户。',
     deleteTitle: '删除策略 "{{name}}"?',
     urlsCount: '{{count}} 个域名',
+    notApplicable: '不适用',
     col: {
       name: '名称',
       type: '后端类型',
@@ -27,6 +28,7 @@ export const adminPolicies = {
 
   type: {
     webdav: 'WebDAV',
+    sobot: 'Sobot',
     s3: 'S3 兼容',
     aliyun_oss: '阿里云 OSS',
     tencent_cos: '腾讯云 COS',
@@ -43,6 +45,7 @@ export const adminPolicies = {
   },
 
   capability: {
+    upload: '上传',
     delete: '删除',
     overwrite: '覆盖',
     stat: '对象查询',
@@ -59,6 +62,8 @@ export const adminPolicies = {
     descriptionNew: '新建时预填系统设置中的默认魔法路径与默认冲突策略; 后端类型创建后不可修改。',
     descriptionEdit:
       '修改分发域名或魔法路径后, 可在基本信息 / 分发域名标签下用对照表核对对象键与域名路径是否指向同一对象。',
+    descriptionNewUrlBackend: '选择 Sobot 后只需填写策略名称; 后端类型创建后不可修改。',
+    descriptionEditUrlBackend: '该后端由服务端返回图片直链; 修改策略名称或启用状态后保存即可。',
     back: '返回列表',
     loadFailed: '存储策略加载失败',
     invalidId: '策略 ID 无效',
@@ -91,6 +96,8 @@ export const adminPolicies = {
       typeReadonly: '后端类型创建后不可修改。',
       enabled: '启用策略',
       enabledHint: '禁用后不再对用户可见; 已存在记录的直链不受影响。',
+      urlBackendHint:
+        '该后端由服务端返回图片直链, 只需填写策略名称; 连接, 魔法路径, 分发域名与冲突策略由驱动内部处理。',
       sort: '排序',
       sortHint: '数字越小越靠前。',
       endpoint: '服务地址 (endpoint)',

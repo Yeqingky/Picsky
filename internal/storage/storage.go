@@ -25,7 +25,8 @@ type Capability uint16
 
 // 能力集合, 与 docs/storage-policy.md 第 3.1 节一致.
 const (
-	CapDelete    Capability = 1 << iota // 删除对象
+	CapUpload    Capability = 1 << iota // 上传对象
+	CapDelete                           // 删除对象
 	CapOverwrite                        // 覆盖同键对象
 	CapStat                             // 查询对象是否存在与大小
 	CapList                             // 递归列举目录
@@ -40,6 +41,7 @@ var capabilityNames = []struct {
 	bit  Capability
 	name string
 }{
+	{CapUpload, "upload"},
 	{CapDelete, "delete"},
 	{CapOverwrite, "overwrite"},
 	{CapStat, "stat"},
@@ -106,11 +108,21 @@ type Spec struct {
 	Capabilities []string `json:"capabilities"`
 	ConfigFields []Field  `json:"config_fields"`
 	SecretFields []Field  `json:"secret_fields"`
-	caps         Capability
+	// URLFromBackend 表示驱动在后端分配最终直链, 策略不配置分发域名,
+	// 上传后以驱动返回的 URL 与路径作为记录直链与相对路径.
+	URLFromBackend bool `json:"url_from_backend"`
+	caps           Capability
 }
 
 // Has 判断驱动是否声明某能力.
 func (s Spec) Has(cap Capability) bool { return s.caps.Has(cap) }
+
+// PutResult 是写入结果.
+// URL 非空表示后端分配了最终直链, 上层用它作为记录 URL, 并从其路径推导相对路径;
+// 为空时上层按策略分发域名与渲染路径拼接.
+type PutResult struct {
+	URL string
+}
 
 // Adapter 是存储后端驱动接口.
 type Adapter interface {
@@ -119,7 +131,7 @@ type Adapter interface {
 	// Capabilities 返回能力位.
 	Capabilities() Capability
 	// Put 写入对象; 需要 CapMkdir 时驱动自行创建父目录.
-	Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) error
+	Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) (PutResult, error)
 	// Stat 查询对象; 需要 CapStat, 对象不存在返回 ErrNotFound.
 	Stat(ctx context.Context, key string) (ObjectInfo, error)
 	// Delete 删除对象; 需要 CapDelete, 对象不存在视为成功.
@@ -128,7 +140,7 @@ type Adapter interface {
 	List(ctx context.Context, prefix string) ([]ObjectInfo, error)
 	// Read 读取对象内容; 需要 CapRead.
 	Read(ctx context.Context, key string) (io.ReadCloser, error)
-	// Test 写入并删除一个探测对象, 用于连接测试.
+	// Test 写入一个探测对象, 用于连接测试; 声明 CapDelete 的驱动应自行清理.
 	Test(ctx context.Context, prefix string) error
 }
 

@@ -77,18 +77,30 @@ import {
 import type { PolicyTransferResult } from './policyTransfer';
 
 /**
- * 可选后端类型: v1 只实现 webdav (docs/storage-policy.md 第 3 节其余类型为后续阶段),
- * 未注册的类型提交会被后端以 400 拒绝, 因此这里只列出可用驱动。
+ * 可选后端类型: 只列出已注册且管理界面支持的驱动 (docs/storage-policy.md 第 3 节),
+ * 未注册的类型提交会被后端以 400 拒绝。
  */
-const TYPE_OPTIONS = ['webdav'] as const;
+const TYPE_OPTIONS = ['webdav', 'sobot'] as const;
 
 const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
 
-/** 新建时的能力表: 编辑模式以服务端返回的 capabilities 为准 */
-const NEW_TYPE_CAPABILITIES: Record<string, string[]> = {
-  webdav: ['list', 'read', 'delete', 'overwrite', 'stat', 'mkdir'],
+/** 新建时的驱动特征: 编辑模式以服务端返回的 capabilities / url_from_backend 为准 */
+const NEW_TYPE_TRAITS: Record<string, { capabilities: string[]; urlFromBackend: boolean }> = {
+  webdav: {
+    capabilities: ['upload', 'list', 'read', 'delete', 'overwrite', 'stat', 'mkdir'],
+    urlFromBackend: false,
+  },
+  sobot: { capabilities: ['upload'], urlFromBackend: true },
 };
-const DEFAULT_NEW_CAPABILITIES = NEW_TYPE_CAPABILITIES.webdav;
+
+/** 由后端分配直链的驱动不显示连接, 路径, 域名, 冲突与扫描标签 */
+const URL_BACKEND_HIDDEN_TABS: readonly string[] = [
+  'connection',
+  'path',
+  'urls',
+  'conflict',
+  'scan',
+];
 
 const TAB_ICON_CLASS = 'size-4 shrink-0';
 
@@ -385,7 +397,11 @@ export default function AdminPolicyEditPage() {
 
   // 标签写入 ?tab=: 刷新与深链保持当前分组; 默认标签不落 URL, 扫描补录仅编辑模式可见
   const [searchParams, setSearchParams] = useSearchParams();
-  const visibleTabs = isEdit ? POLICY_TABS : POLICY_TABS.filter((item) => item.id !== 'scan');
+  const formURLFromBackend = NEW_TYPE_TRAITS[form?.type ?? '']?.urlFromBackend ?? false;
+  const availableTabs = isEdit ? POLICY_TABS : POLICY_TABS.filter((item) => item.id !== 'scan');
+  const visibleTabs = formURLFromBackend
+    ? availableTabs.filter((item) => !URL_BACKEND_HIDDEN_TABS.includes(item.id))
+    : availableTabs;
   const requestedTab = searchParams.get('tab');
   const tab: PolicyTabId = visibleTabs.find((item) => item.id === requestedTab)?.id ?? 'basic';
 
@@ -463,7 +479,7 @@ export default function AdminPolicyEditPage() {
 
   useEffect(() => {
     const template = debouncedTemplate.trim();
-    if (template === '' || !PATH_VARIABLE_RE.test(template)) {
+    if (formURLFromBackend || template === '' || !PATH_VARIABLE_RE.test(template)) {
       // 模板非法时清空上一次结果, 避免对照表展示过期路径
       resetPreview();
       return;
@@ -475,7 +491,7 @@ export default function AdminPolicyEditPage() {
       sha512: PREVIEW_SHA512,
       ext: 'png',
     });
-  }, [debouncedTemplate, runPreview, resetPreview]);
+  }, [debouncedTemplate, formURLFromBackend, runPreview, resetPreview]);
 
   /* ---------------------------------------------------------------- 校验 */
 
@@ -483,37 +499,44 @@ export default function AdminPolicyEditPage() {
     const next: Record<string, string> = {};
     if (form === null) return next;
 
-    const template = form.pathTemplate.trim();
-    if (template === '') next.pathTemplate = t('adminPolicies.edit.error.templateRequired');
-    else if (!PATH_VARIABLE_RE.test(template))
-      next.pathTemplate = t('adminPolicies.edit.error.templateVariable');
-    else if (template.startsWith('/') || template.includes('//') || template.includes('..')) {
-      next.pathTemplate = t('adminPolicies.edit.error.templateInvalid');
-    }
+    if (!formURLFromBackend) {
+      const template = form.pathTemplate.trim();
+      if (template === '') next.pathTemplate = t('adminPolicies.edit.error.templateRequired');
+      else if (!PATH_VARIABLE_RE.test(template))
+        next.pathTemplate = t('adminPolicies.edit.error.templateVariable');
+      else if (template.startsWith('/') || template.includes('//') || template.includes('..')) {
+        next.pathTemplate = t('adminPolicies.edit.error.templateInvalid');
+      }
 
-    if (SEQ_RE.test(template) && form.conflictPolicy !== 'rename') {
-      next.conflictPolicy = t('adminPolicies.edit.error.seqRequiresRename');
+      if (SEQ_RE.test(template) && form.conflictPolicy !== 'rename') {
+        next.conflictPolicy = t('adminPolicies.edit.error.seqRequiresRename');
+      }
+
+      if (form.endpoint.trim() === '') {
+        next.endpoint = t('adminPolicies.edit.error.endpointRequired');
+      }
     }
 
     if (form.name.trim() === '') next.name = t('adminPolicies.edit.error.nameRequired');
-    if (form.endpoint.trim() === '') next.endpoint = t('adminPolicies.edit.error.endpointRequired');
     if (form.sort.trim() !== '' && !INTEGER_RE.test(form.sort.trim())) {
       next.sort = t('adminPolicies.edit.error.sortInvalid');
     }
 
-    form.urls.forEach((row, index) => {
-      if (row.alias.trim() === '')
-        next[`urls.${index}.alias`] = t('adminPolicies.edit.error.urlAliasRequired');
-      if (row.url.trim() === '')
-        next[`urls.${index}.url`] = t('adminPolicies.edit.error.urlRequired');
-      else if (!URL_RE.test(row.url.trim()))
-        next[`urls.${index}.url`] = t('adminPolicies.edit.error.urlInvalid');
-    });
+    if (!formURLFromBackend) {
+      form.urls.forEach((row, index) => {
+        if (row.alias.trim() === '')
+          next[`urls.${index}.alias`] = t('adminPolicies.edit.error.urlAliasRequired');
+        if (row.url.trim() === '')
+          next[`urls.${index}.url`] = t('adminPolicies.edit.error.urlRequired');
+        else if (!URL_RE.test(row.url.trim()))
+          next[`urls.${index}.url`] = t('adminPolicies.edit.error.urlInvalid');
+      });
 
-    if (form.urls.length === 0) next.urls = t('adminPolicies.edit.error.urlsRequired');
+      if (form.urls.length === 0) next.urls = t('adminPolicies.edit.error.urlsRequired');
+    }
 
     return next;
-  }, [form, t]);
+  }, [form, formURLFromBackend, t]);
 
   const sequenceTemplate = form !== null && SEQ_RE.test(form.pathTemplate.trim());
 
@@ -556,23 +579,36 @@ export default function AdminPolicyEditPage() {
     if (form.username.trim() !== '') secrets.username = form.username.trim();
     if (form.password !== '') secrets.password = form.password;
 
-    const body: AdminPolicyWriteRequest = {
-      name: form.name.trim(),
-      type: form.type,
-      enabled: form.enabled,
-      path_template: form.pathTemplate.trim(),
-      conflict_policy: form.conflictPolicy,
-      reuse_released_seq: form.reuseReleasedSeq,
-      config: { endpoint: form.endpoint.trim() },
-      urls: form.urls.map((row, index) => ({
-        alias: row.alias.trim(),
-        url: row.url.trim(),
-        is_default: index === 0,
-        sort: index + 1,
-      })),
-      sort: form.sort.trim() === '' ? 0 : Number(form.sort.trim()),
-    };
-    if (Object.keys(secrets).length > 0) body.secrets = secrets;
+    const sort = form.sort.trim() === '' ? 0 : Number(form.sort.trim());
+    const body: AdminPolicyWriteRequest = formURLFromBackend
+      ? {
+          name: form.name.trim(),
+          type: form.type,
+          enabled: form.enabled,
+          path_template: DEFAULT_PATH_TEMPLATE,
+          conflict_policy: DEFAULT_CONFLICT_POLICY,
+          reuse_released_seq: false,
+          config: {},
+          urls: [],
+          sort,
+        }
+      : {
+          name: form.name.trim(),
+          type: form.type,
+          enabled: form.enabled,
+          path_template: form.pathTemplate.trim(),
+          conflict_policy: form.conflictPolicy,
+          reuse_released_seq: form.reuseReleasedSeq,
+          config: { endpoint: form.endpoint.trim() },
+          urls: form.urls.map((row, index) => ({
+            alias: row.alias.trim(),
+            url: row.url.trim(),
+            is_default: index === 0,
+            sort: index + 1,
+          })),
+          sort,
+        };
+    if (!formURLFromBackend && Object.keys(secrets).length > 0) body.secrets = secrets;
     saveMutation.mutate(body);
   };
 
@@ -612,7 +648,7 @@ export default function AdminPolicyEditPage() {
 
   const policy = policyQuery.data ?? null;
   const capabilities =
-    policy?.capabilities ?? NEW_TYPE_CAPABILITIES[form?.type ?? ''] ?? DEFAULT_NEW_CAPABILITIES;
+    policy?.capabilities ?? NEW_TYPE_TRAITS[form?.type ?? '']?.capabilities ?? [];
   const canStat = capabilities.includes('stat');
 
   const updateForm = useCallback((patch: Partial<FormState>) => {
@@ -762,12 +798,12 @@ export default function AdminPolicyEditPage() {
     return (
       form?.urls.map((row, index) => ({
         key: row.key,
-        alias: row.alias.trim() === '' ? '—' : row.alias.trim(),
+        alias: row.alias.trim() === '' ? t('common.defaultAlias') : row.alias.trim(),
         url: `${row.url.trim().replace(/\/+$/, '')}/${relPath}`,
         is_default: index === 0,
       })) ?? []
     );
-  }, [form?.urls, preview?.rel_path]);
+  }, [form?.urls, preview?.rel_path, t]);
 
   // 冲突策略示例只使用列表首项 (默认域名)
   const defaultDomainUrl = form?.urls[0]?.url.trim().replace(/\/+$/, '') ?? '';
@@ -837,7 +873,13 @@ export default function AdminPolicyEditPage() {
             : t('adminPolicies.edit.titleEdit', { name: form.name })
         }
         description={
-          isNew ? t('adminPolicies.edit.descriptionNew') : t('adminPolicies.edit.descriptionEdit')
+          isNew
+            ? formURLFromBackend
+              ? t('adminPolicies.edit.descriptionNewUrlBackend')
+              : t('adminPolicies.edit.descriptionNew')
+            : formURLFromBackend
+              ? t('adminPolicies.edit.descriptionEditUrlBackend')
+              : t('adminPolicies.edit.descriptionEdit')
         }
         actions={
           <>
@@ -964,6 +1006,11 @@ export default function AdminPolicyEditPage() {
                   {t('adminPolicies.edit.field.enabledHint')}
                 </p>
               </div>
+              {formURLFromBackend && (
+                <p className="text-muted-foreground text-sm">
+                  {t('adminPolicies.edit.field.urlBackendHint')}
+                </p>
+              )}
             </div>
           </PolicySection>
         </TabsContent>
@@ -1570,7 +1617,7 @@ export default function AdminPolicyEditPage() {
       </Tabs>
 
       {/* 对照表 (保存结果): 仅基本信息 / 分发域名显示; 魔法路径已有实时预览 */}
-      {(isEdit || savedOnce) && REFERENCE_TABS.includes(tab) && (
+      {(isEdit || savedOnce) && REFERENCE_TABS.includes(tab) && !formURLFromBackend && (
         <PolicySection
           className="mt-8"
           title={t('adminPolicies.edit.section.reference')}

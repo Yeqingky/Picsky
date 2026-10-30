@@ -188,3 +188,31 @@ func TestJoinURLAndNormalize(t *testing.T) {
 		t.Errorf("NormalizeURLBase = %q, %v", got, err)
 	}
 }
+
+func TestObjectPathFromURL(t *testing.T) {
+	cases := []struct {
+		url  string
+		want string
+		ok   bool
+	}{
+		{"https://img.example.com/a/b/c.png", "a/b/c.png", true},
+		{"https://img.example.com//a//b.png?x=1", "a/b.png", true},
+		{"https://img.example.com/a%20b/c.png", "a b/c.png", true},
+		{"https://img.example.com/", "", false},
+		{"https://img.example.com/a/../b.png", "", false},
+		{"ftp://img.example.com/a.png", "", false},
+		{"img.example.com/a.png", "", false},
+	}
+	for _, testCase := range cases {
+		got, err := ObjectPathFromURL(testCase.url)
+		if testCase.ok {
+			if err != nil || got != testCase.want {
+				t.Errorf("ObjectPathFromURL(%q) = %q, %v, 期望 %q", testCase.url, got, err, testCase.want)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("ObjectPathFromURL(%q) 应返回错误, 实际 %q", testCase.url, got)
+		}
+	}
+}

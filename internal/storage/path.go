@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -486,6 +487,38 @@ func NormalizeObjectKey(prefix, relPath string) string {
 // JoinURL 拼接分发域名与相对路径, 规范化尾部斜杠.
 func JoinURL(base, relPath string) string {
 	return strings.TrimRight(strings.TrimSpace(base), "/") + "/" + strings.TrimLeft(strings.TrimSpace(relPath), "/")
+}
+
+// ObjectPathFromURL 从后端返回的绝对直链中提取对象路径 (不含首尾斜杠).
+func ObjectPathFromURL(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", fmt.Errorf("直链格式非法: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("直链必须以 http:// 或 https:// 开头")
+	}
+	if parsed.Host == "" {
+		return "", errors.New("直链缺少主机名")
+	}
+	escaped := parsed.EscapedPath()
+	value, err := url.PathUnescape(escaped)
+	if err != nil {
+		return "", fmt.Errorf("直链路径转义非法: %w", err)
+	}
+	objectKey := NormalizeObjectKey("", value)
+	if objectKey == "" {
+		return "", errors.New("直链缺少路径")
+	}
+	for _, segment := range strings.Split(objectKey, "/") {
+		if segment == "." || segment == ".." {
+			return "", errors.New("直链路径不允许包含 . 或 .. 段")
+		}
+	}
+	if len(objectKey) > maxPathLen {
+		return "", fmt.Errorf("直链路径过长: %d 字符", len(objectKey))
+	}
+	return objectKey, nil
 }
 
 // NormalizeURLBase 规范化分发域名: 必须是 http(s) 且去掉尾部斜杠.

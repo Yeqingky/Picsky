@@ -178,7 +178,7 @@ export interface Base64UploadRequest {
 /* ------------------------------------------------------------------ 图片 */
 
 export type DeleteReason =
-  'last_reference' | 'no_capability' | 'setting_disabled' | 'shared' | 'queued' | 'backend_error';
+  'last_reference' | 'setting_disabled' | 'shared' | 'queued' | 'backend_error';
 
 export interface ImageRecord {
   id: number;
@@ -379,6 +379,8 @@ export interface AdminPolicy {
   urls: AdminPolicyUrl[];
   sort: number;
   capabilities: string[];
+  /** true 表示驱动上传后由后端分配直链, 不配置分发域名 */
+  url_from_backend: boolean;
   created_at: string;
   updated_at: string;
 }

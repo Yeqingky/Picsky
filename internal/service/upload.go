@@ -207,9 +207,13 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if err != nil {
 		return nil, err
 	}
-	defaultURL, err := u.policies.DefaultURL(policy.ID)
-	if err != nil {
-		return nil, err
+	// 由后端分配直链的驱动不需要分发域名; 其他驱动必须配置默认域名.
+	defaultURL := ""
+	if len(urls) > 0 {
+		defaultURL, err = u.policies.DefaultURL(policy.ID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	caps := adapter.Capabilities()
 
@@ -219,7 +223,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 		Order("id ASC").First(&existing).Error
 	switch {
 	case err == nil:
-		return u.reuseRecord(req, policy, urls, defaultURL, &existing)
+		return u.reuseRecord(req, policy, urls, &existing)
 	case errors.Is(err, gorm.ErrRecordNotFound):
 	default:
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
@@ -245,7 +249,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 			Order("id ASC").First(&concurrentExisting).Error
 		switch {
 		case err == nil:
-			return u.reuseRecord(req, policy, urls, defaultURL, &concurrentExisting)
+			return u.reuseRecord(req, policy, urls, &concurrentExisting)
 		case errors.Is(err, gorm.ErrRecordNotFound):
 		default:
 			return nil, apperr.ErrInternal.WithMessage(err.Error())
@@ -286,7 +290,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 			break
 		}
 		if conflictRecord != nil && conflictRecord.SHA256 == sums.SHA256 {
-			return u.reuseRecord(req, policy, urls, defaultURL, conflictRecord)
+			return u.reuseRecord(req, policy, urls, conflictRecord)
 		}
 		if conflictRecord == nil {
 			// 对象已存在但记录尚不可见: 可能是并发上传相同内容, 先按内容再确认一次.
@@ -295,7 +299,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 				return nil, err
 			}
 			if contentRecord != nil {
-				return u.reuseRecord(req, policy, urls, defaultURL, contentRecord)
+				return u.reuseRecord(req, policy, urls, contentRecord)
 			}
 		}
 
@@ -363,9 +367,16 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if err != nil {
 		return nil, apperr.ErrInternal.WithMessage("读取缓冲内容失败: " + err.Error())
 	}
-	if err := adapter.Put(ctx, objectKey, body, sums.Size, detected.MIME); err != nil {
+	putResult, err := adapter.Put(ctx, objectKey, body, sums.Size, detected.MIME)
+	if err != nil {
 		return nil, apperr.ErrBackend.WithMessage(err.Error())
 	}
+	recordURL, objectPath, err := resolveRecordURL(defaultURL, relPath, putResult)
+	if err != nil {
+		return nil, apperr.ErrBackend.WithMessage(err.Error())
+	}
+	relPath = objectPath
+	objectKey = objectPath
 
 	now := nowUTC()
 	record := model.Image{
@@ -383,7 +394,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 		Ext:              detected.Ext,
 		MIME:             detected.MIME,
 		OriginalFilename: imgdetect.SanitizeFilenameBase(req.Spooled.Filename) + "." + detected.Ext,
-		URL:              storage.JoinURL(defaultURL, relPath),
+		URL:              recordURL,
 		Source:           sourceOrDefault(req.Source),
 		ClientIP:         truncate(req.ClientIP, 45),
 		CreatedAt:        now,
@@ -498,7 +509,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 }
 
 // reuseRecord 复用已有对象: 自己的记录幂等返回, 他人的记录新建免费记录.
-func (u *Upload) reuseRecord(req UploadRequest, policy *model.StoragePolicy, urls []model.PolicyURL, defaultURL string, existing *model.Image) (*UploadResult, error) {
+func (u *Upload) reuseRecord(req UploadRequest, policy *model.StoragePolicy, urls []model.PolicyURL, existing *model.Image) (*UploadResult, error) {
 	user := req.Principal.User
 	if existing.UserID == user.ID {
 		u.audit.Recordf(Entry{
@@ -539,7 +550,7 @@ func (u *Upload) reuseRecord(req UploadRequest, policy *model.StoragePolicy, url
 		Width:            existing.Width,
 		Height:           existing.Height,
 		OriginalFilename: imgdetect.SanitizeFilenameBase(req.Spooled.Filename) + "." + existing.Ext,
-		URL:              storage.JoinURL(defaultURL, existing.RelPath),
+		URL:              existing.URL,
 		QuotaCharged:     false,
 		Source:           sourceOrDefault(req.Source),
 		ClientIP:         truncate(req.ClientIP, 45),
@@ -769,6 +780,22 @@ func sourceOrDefault(source string) string {
 	default:
 		return model.SourceWeb
 	}
+}
+
+// resolveRecordURL 按驱动写入结果确定记录直链与实际对象路径.
+// 后端分配直链时直接使用该 URL 并把其路径作为对象键, 否则按分发域名与相对路径拼接.
+func resolveRecordURL(defaultURL, relPath string, result storage.PutResult) (string, string, error) {
+	if result.URL == "" {
+		if defaultURL == "" {
+			return "", "", errors.New("存储后端未返回直链")
+		}
+		return storage.JoinURL(defaultURL, relPath), relPath, nil
+	}
+	objectPath, err := storage.ObjectPathFromURL(result.URL)
+	if err != nil {
+		return "", "", fmt.Errorf("存储后端返回的直链无效: %w", err)
+	}
+	return result.URL, objectPath, nil
 }
 
 func isHex(value string) bool {

@@ -81,6 +81,7 @@ type PolicyView struct {
 	DriverLabel    string            `json:"driver_label"`
 	ConfigFields   []storage.Field   `json:"config_fields"`
 	SecretFields   []storage.Field   `json:"secret_fields"`
+	URLFromBackend bool              `json:"url_from_backend"`
 }
 
 // ConfigMap 解码非敏感配置.
@@ -192,6 +193,7 @@ func (p *Policies) View(policy *model.StoragePolicy) (*PolicyView, error) {
 		DriverLabel:    spec.Label,
 		ConfigFields:   spec.ConfigFields,
 		SecretFields:   spec.SecretFields,
+		URLFromBackend: spec.URLFromBackend,
 	}
 	if view.URLs == nil {
 		view.URLs = []model.PolicyURL{}
@@ -295,6 +297,28 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 	if !ok {
 		return apperr.ErrInvalidRequest.WithMessage("未知存储后端类型: " + in.Type)
 	}
+	if !spec.Has(storage.CapUpload) {
+		return apperr.ErrInvalidRequest.WithMessage("存储后端未声明上传能力")
+	}
+	if spec.URLFromBackend {
+		// 后端自行分配直链: 分发域名不参与 URL 拼接, 只填策略名也能创建.
+		if strings.TrimSpace(in.PathTemplate) == "" {
+			template := ""
+			if p.settings != nil {
+				template = strings.TrimSpace(p.settings.String("default_path_template"))
+			}
+			if template == "" {
+				template = "{md5:2}/{md5}.{ext}"
+			}
+			in.PathTemplate = template
+		}
+		if in.ConflictPolicy == "" {
+			in.ConflictPolicy = model.ConflictRename
+		}
+		if len(in.URLs) > 0 {
+			return apperr.ErrInvalidRequest.WithMessage("该后端由服务端返回直链, 不支持分发域名")
+		}
+	}
 	if err := storage.ValidateTemplate(in.PathTemplate); err != nil {
 		return apperr.ErrInvalidRequest.WithMessage(err.Error())
 	}
@@ -311,7 +335,7 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 			return apperr.ErrInvalidRequest.WithMessage("缺少必填后端配置: " + field.Label)
 		}
 	}
-	if len(in.URLs) == 0 {
+	if !spec.URLFromBackend && len(in.URLs) == 0 {
 		return apperr.ErrInvalidRequest.WithMessage("至少配置一个分发域名")
 	}
 	defaultCount := 0
@@ -335,7 +359,7 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 			defaultCount++
 		}
 	}
-	if defaultCount != 1 {
+	if !spec.URLFromBackend && defaultCount != 1 {
 		return apperr.ErrInvalidRequest.WithMessage("必须恰好有一个默认分发域名")
 	}
 	_ = policy

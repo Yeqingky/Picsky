@@ -17,7 +17,6 @@ import (
 // 删除响应中的原因取值.
 const (
 	DeleteReasonLastReference = "last_reference"
-	DeleteReasonNoCapability  = "no_capability"
 	DeleteReasonSettingOff    = "setting_disabled"
 	DeleteReasonShared        = "shared"
 	DeleteReasonQueued        = "queued"
@@ -243,6 +242,16 @@ func (i *Images) BatchDelete(principal *Principal, ids []int64, ip, userAgent st
 
 // deleteRecord 执行单条删除流程.
 func (i *Images) deleteRecord(principal *Principal, record *model.Image, ip, userAgent string) (*DeleteResult, error) {
+	// 后端不支持删除时不允许删除记录, 避免留下无法清理的外部对象.
+	policy, err := i.policies.Get(record.PolicyID)
+	if err != nil {
+		return nil, err
+	}
+	spec, ok := storage.SpecOf(policy.Type)
+	if !ok || !spec.Has(storage.CapDelete) {
+		return nil, apperr.ErrForbidden.WithMessage("该存储策略不支持删除")
+	}
+
 	now := nowUTC()
 	deleted := false
 
@@ -302,20 +311,10 @@ func (i *Images) deleteRecord(principal *Principal, record *model.Image, ip, use
 	case !i.settings.Bool("delete_object_on_last_reference", true):
 		result.Reason = DeleteReasonSettingOff
 	default:
-		policy, err := i.policies.Get(record.PolicyID)
-		if err != nil {
-			result.Reason = DeleteReasonBackendError
-			i.log.Warn("读取策略失败, 保留外部对象", "policy_id", record.PolicyID, "error", err)
-			break
-		}
 		adapter, err := i.policies.Adapter(policy)
 		if err != nil {
 			result.Reason = DeleteReasonBackendError
 			i.log.Warn("初始化存储后端失败, 保留外部对象", "policy_id", record.PolicyID, "error", err)
-			break
-		}
-		if !adapter.Capabilities().Has(storage.CapDelete) {
-			result.Reason = DeleteReasonNoCapability
 			break
 		}
 		ctx, cancel := contextWithTimeout(30 * time.Second)

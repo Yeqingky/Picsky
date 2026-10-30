@@ -222,6 +222,9 @@ export default function GalleryPage() {
         .filter((record): record is ImageRecord => Boolean(record)),
     [selectedIds, records],
   );
+  const supportsBatchDelete =
+    selectedRecords.length === selectedIds.length &&
+    selectedRecords.every((record) => record.policy_capabilities.includes('delete'));
 
   const total =
     view === 'masonry' ? (infinite.data?.pages[0]?.total ?? 0) : (listQuery.data?.total ?? 0);
@@ -244,20 +247,11 @@ export default function GalleryPage() {
   }, []);
 
   const handleBatchDelete = async () => {
-    const capabilitiesKnown = selectedRecords.length === selectedIds.length;
-    const supportsDelete =
-      capabilitiesKnown &&
-      selectedRecords.every((record) => record.policy_capabilities.includes('delete'));
+    if (!supportsBatchDelete) return;
     const ok = await confirm({
       title: t('gallery.selection.delete'),
-      description: supportsDelete
-        ? t('common.confirm.batchDeleteImages', { count: selectedIds.length })
-        : t('common.confirm.batchDelete', { count: selectedIds.length }),
+      description: t('common.confirm.batchDeleteImages', { count: selectedIds.length }),
       danger: true,
-      hint:
-        capabilitiesKnown && !supportsDelete
-          ? t('common.confirm.batchObjectDeleteUnsupported')
-          : undefined,
     });
     if (ok) batchDelete.mutate(selectedIds);
   };
@@ -458,7 +452,7 @@ export default function GalleryPage() {
 
       <GalleryBatchBar
         records={selectedRecords}
-        canDelete={canDelete}
+        canDelete={canDelete && supportsBatchDelete}
         deleting={batchDelete.isPending}
         onClear={() => setSelectedIds([])}
         onExit={() => {

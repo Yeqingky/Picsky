@@ -44,7 +44,7 @@ func newAdapter(t *testing.T) (storage.Adapter, string) {
 func TestWebDAVCapabilities(t *testing.T) {
 	adapter, _ := newAdapter(t)
 	caps := adapter.Capabilities()
-	for _, capability := range []storage.Capability{storage.CapDelete, storage.CapOverwrite, storage.CapStat, storage.CapList, storage.CapRead, storage.CapMkdir} {
+	for _, capability := range []storage.Capability{storage.CapUpload, storage.CapDelete, storage.CapOverwrite, storage.CapStat, storage.CapList, storage.CapRead, storage.CapMkdir} {
 		if !caps.Has(capability) {
 			t.Errorf("WebDAV 驱动缺少能力: %v", capability)
 		}
@@ -60,7 +60,7 @@ func TestWebDAVPutStatReadListDelete(t *testing.T) {
 	key := "image/0f/0f1e2d3c.png"
 	content := []byte("picsky-test-content")
 
-	if err := adapter.Put(ctx, key, bytes.NewReader(content), int64(len(content)), "image/png"); err != nil {
+	if _, err := adapter.Put(ctx, key, bytes.NewReader(content), int64(len(content)), "image/png"); err != nil {
 		t.Fatalf("Put 失败: %v", err)
 	}
 	onDisk := filepath.Join(root, filepath.FromSlash(key))
@@ -129,7 +129,7 @@ func TestWebDAVPutCreatesParentDirectories(t *testing.T) {
 	adapter, root := newAdapter(t)
 	ctx := context.Background()
 	key := "a/b/c/deep.png"
-	if err := adapter.Put(ctx, key, strings.NewReader("x"), 1, "image/png"); err != nil {
+	if _, err := adapter.Put(ctx, key, strings.NewReader("x"), 1, "image/png"); err != nil {
 		t.Fatalf("Put 失败: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "a", "b", "c", "deep.png")); err != nil {
@@ -167,10 +167,10 @@ func TestWebDAVRejectsTraversalKeys(t *testing.T) {
 	adapter, _ := newAdapter(t)
 	ctx := context.Background()
 
-	if err := adapter.Put(ctx, "../escape.txt", strings.NewReader("x"), 1, "text/plain"); err == nil {
+	if _, err := adapter.Put(ctx, "../escape.txt", strings.NewReader("x"), 1, "text/plain"); err == nil {
 		t.Error("对象键包含 .. 时应拒绝")
 	}
-	if err := adapter.Put(ctx, "a/../b.txt", strings.NewReader("x"), 1, "text/plain"); err == nil {
+	if _, err := adapter.Put(ctx, "a/../b.txt", strings.NewReader("x"), 1, "text/plain"); err == nil {
 		t.Error("对象键包含 .. 段时应拒绝")
 	}
 	if _, err := adapter.List(ctx, "../"); err == nil {
@@ -198,7 +198,7 @@ func TestWebDAVErrorDoesNotExposeResponseBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("实例化 WebDAV 驱动失败: %v", err)
 	}
-	err = adapter.Put(context.Background(), "image.png", strings.NewReader("image"), 5, "image/png")
+	_, err = adapter.Put(context.Background(), "image.png", strings.NewReader("image"), 5, "image/png")
 	if err == nil {
 		t.Fatal("后端 502 应返回错误")
 	}

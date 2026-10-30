@@ -71,7 +71,6 @@ export const gallery = {
     objectRetained: '仅删除 Picsky 记录, 外部文件保留 ({{reason}})',
     reason: {
       last_reference: '引用归零且后端支持删除',
-      no_capability: '后端不支持删除',
       setting_disabled: '系统设置关闭了对象删除',
       shared: '仍有其他用户的记录引用',
       queued: '对象删除已进入维护队列',

@@ -27,7 +27,7 @@ func init() {
 	storage.Register(storage.Spec{
 		Type:         driverType,
 		Label:        "WebDAV",
-		Capabilities: []string{"delete", "overwrite", "stat", "list", "read", "mkdir"},
+		Capabilities: []string{"upload", "delete", "overwrite", "stat", "list", "read", "mkdir"},
 		ConfigFields: []storage.Field{
 			{Name: "endpoint", Label: "服务地址", Required: true, Placeholder: "https://example.com/dav"},
 		},
@@ -77,7 +77,7 @@ func newAdapter(opts storage.Options) (storage.Adapter, error) {
 func (a *adapter) Type() string { return driverType }
 
 func (a *adapter) Capabilities() storage.Capability {
-	return storage.CapDelete | storage.CapOverwrite | storage.CapStat | storage.CapList | storage.CapRead | storage.CapMkdir
+	return storage.CapUpload | storage.CapDelete | storage.CapOverwrite | storage.CapStat | storage.CapList | storage.CapRead | storage.CapMkdir
 }
 
 // url 拼出对象键对应的绝对地址, 逐段转义.
@@ -116,12 +116,12 @@ func (a *adapter) do(ctx context.Context, method, target string, body io.Reader,
 }
 
 // Put 写入对象: 先创建父目录, 再上传.
-func (a *adapter) Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
+func (a *adapter) Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) (storage.PutResult, error) {
 	if err := storage.ValidateObjectKey(key); err != nil {
-		return err
+		return storage.PutResult{}, err
 	}
 	if err := a.mkdirAll(ctx, parentOf(key)); err != nil {
-		return err
+		return storage.PutResult{}, err
 	}
 	headers := map[string]string{}
 	if contentType != "" {
@@ -129,7 +129,7 @@ func (a *adapter) Put(ctx context.Context, key string, body io.Reader, size int6
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, a.url(key), body)
 	if err != nil {
-		return err
+		return storage.PutResult{}, err
 	}
 	if size >= 0 {
 		req.ContentLength = size
@@ -142,13 +142,13 @@ func (a *adapter) Put(ctx context.Context, key string, body io.Reader, size int6
 	}
 	resp, err := a.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("上传对象失败: %w", err)
+		return storage.PutResult{}, fmt.Errorf("上传对象失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return nil
+		return storage.PutResult{}, nil
 	}
-	return statusError("上传对象", resp)
+	return storage.PutResult{}, statusError("上传对象", resp)
 }
 
 // Stat 查询对象: 先试 HEAD, 不支持时退化为 PROPFIND depth 0.
@@ -277,7 +277,7 @@ func (a *adapter) Test(ctx context.Context, prefix string) error {
 	}
 	key := storage.NormalizeObjectKey(prefix, "picsky-probe-"+suffix+".txt")
 	content := []byte("picsky connectivity test")
-	if err := a.Put(ctx, key, bytes.NewReader(content), int64(len(content)), "text/plain"); err != nil {
+	if _, err := a.Put(ctx, key, bytes.NewReader(content), int64(len(content)), "text/plain"); err != nil {
 		return err
 	}
 	return a.Delete(ctx, key)

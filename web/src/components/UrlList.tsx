@@ -29,7 +29,7 @@ export function UrlList({
       {urls.map((item) => (
         <div key={`${item.alias}-${item.url}`} className="flex min-w-0 items-center gap-2">
           <Badge variant={item.is_default ? 'default' : 'outline'} className="shrink-0">
-            {item.alias || '—'}
+            {item.alias || t('common.defaultAlias')}
           </Badge>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -39,7 +39,9 @@ export function UrlList({
           </Tooltip>
           <CopyButton
             value={renderCopyText(copyFormat, { url: item.url, filename })}
-            tooltip={t('common.action.copyAlias', { alias: item.alias || '—' })}
+            tooltip={t('common.action.copyAlias', {
+              alias: item.alias || t('common.defaultAlias'),
+            })}
           />
         </div>
       ))}
