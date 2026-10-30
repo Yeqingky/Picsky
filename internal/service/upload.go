@@ -199,6 +199,11 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if err != nil {
 		return nil, err
 	}
+	if spec, ok := storage.SpecOf(policy.Type); ok {
+		if err := checkPolicyFileSizeLimit(spec.MaxFileSize, sums.Size); err != nil {
+			return nil, err
+		}
+	}
 	adapter, err := u.policies.Adapter(policy)
 	if err != nil {
 		return nil, err
@@ -579,6 +584,18 @@ func (u *Upload) reuseRecord(req UploadRequest, policy *model.StoragePolicy, url
 		UserAgent: req.UserAgent,
 	})
 	return &UploadResult{Record: &record, URLs: urls, Dedup: true, QuotaCharged: false, Status: 200}, nil
+}
+
+// checkPolicyFileSizeLimit 校验驱动声明的单对象体积上限; limit <= 0 表示不限.
+// 调用方先校验用户组单文件上限, 因此这里只在策略上限更严格时触发.
+func checkPolicyFileSizeLimit(limit, size int64) error {
+	if limit <= 0 || size <= limit {
+		return nil
+	}
+	megabytes := strconv.FormatFloat(float64(limit)/float64(1<<20), 'f', -1, 64)
+	return apperr.ErrFileTooLarge.
+		WithMessage("此存储策略最大支持" + megabytes + "MB").
+		WithDetails(map[string]any{"size": size, "limit": limit, "scope": "policy"})
 }
 
 // UploadLimit 计算读取上传输入时的字节上限: 组上限 (或系统上限) 与硬上限取较小值.

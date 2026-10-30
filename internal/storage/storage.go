@@ -111,7 +111,9 @@ type Spec struct {
 	// URLFromBackend 表示驱动在后端分配最终直链, 策略不配置分发域名,
 	// 上传后以驱动返回的 URL 与路径作为记录直链与相对路径.
 	URLFromBackend bool `json:"url_from_backend"`
-	caps           Capability
+	// MaxFileSize 是驱动可接受的单对象最大字节数; 0 表示不额外限制.
+	MaxFileSize int64 `json:"max_file_size_bytes"`
+	caps        Capability
 }
 
 // Has 判断驱动是否声明某能力.

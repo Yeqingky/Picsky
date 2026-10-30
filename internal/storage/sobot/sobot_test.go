@@ -29,6 +29,9 @@ func TestDriverSpec(t *testing.T) {
 	if len(spec.ConfigFields) != 0 || len(spec.SecretFields) != 0 {
 		t.Error("Sobot 驱动不应有配置项")
 	}
+	if spec.MaxFileSize != 50<<20 {
+		t.Errorf("Sobot 单文件上限 = %d, 期望 %d", spec.MaxFileSize, 50<<20)
+	}
 	if spec.Has(storage.CapDelete) {
 		t.Error("Sobot 驱动不应声明删除能力")
 	}

@@ -28,6 +28,9 @@ const (
 	uploadType     = "ticket"
 	requestOrigin  = "https://stemcellcn.sobot.com"
 	requestReferer = requestOrigin + "/ticketclient-v7/index.html?sysNum=" + tenantBNO + "&uid=" + uploaderUID
+
+	// maxFileSize 是 Sobot 接口允许的单文件上限: 50 MiB.
+	maxFileSize = 50 << 20
 )
 
 // maxResponseBytes 限制响应体读取, 防止异常后端拖垮进程.
@@ -51,6 +54,7 @@ func init() {
 		ConfigFields:   []storage.Field{},
 		SecretFields:   []storage.Field{},
 		URLFromBackend: true,
+		MaxFileSize:    maxFileSize,
 	}, newAdapter)
 }
 
