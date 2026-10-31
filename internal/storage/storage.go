@@ -169,12 +169,6 @@ type ScanChecker interface {
 	CheckScan(ctx context.Context) error
 }
 
-// ScanRootProvider 是可选接口, 返回驱动配置的扫描根目录.
-// 非空时扫描只列举该目录, 并清理策略内不在该目录下的本地记录.
-type ScanRootProvider interface {
-	ScanRoot() string
-}
-
 // Factory 由驱动实现, 用于实例化 Adapter.
 type Factory func(opts Options) (Adapter, error)
 

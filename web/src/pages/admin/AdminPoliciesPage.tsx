@@ -202,7 +202,10 @@ export default function AdminPoliciesPage() {
         header: t('adminPolicies.list.col.actions'),
         className: 'w-[150px]',
         cell: (row) => {
-          const scannable = row.capabilities.includes('list') && row.capabilities.includes('read');
+          const scannable =
+            !row.url_from_backend &&
+            row.capabilities.includes('list') &&
+            row.capabilities.includes('read');
           const scanning = scanMutation.isPending && scanMutation.variables === row.id;
           const toggling = toggleMutation.isPending && toggleMutation.variables?.id === row.id;
           const loginRequired = row.type === 'cloudreve' && !row.login_ready;
@@ -240,7 +243,7 @@ export default function AdminPoliciesPage() {
                       variant="ghost"
                       size="icon-sm"
                       aria-label={t('adminPolicies.list.scan')}
-                      disabled={!scannable || scanning || loginRequired}
+                      disabled={!scannable || scanning}
                       onClick={() => scanPolicy(row.id)}
                     >
                       <ScanSearch className="size-4" />

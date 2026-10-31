@@ -274,7 +274,6 @@ export const adminPolicies = {
       taskFailed: '扫描任务 #{{id}} 失败: {{error}}',
       failed: '扫描失败',
       failedTitle: '失败明细 ({{count}})',
-      removed: '已移除 {{count}} 条目录外记录.',
       q21: '扫描补录的路径会参与 {seq} 的最大序号计算; 非图片文件只占用路径, 不进图库, 也不计配额 (kind=file).',
     },
 

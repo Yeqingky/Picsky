@@ -955,7 +955,6 @@ type ScanResult struct {
 	Images  int           `json:"images"`
 	Files   int           `json:"files"`
 	Skipped int           `json:"skipped"`
-	Removed int           `json:"removed"`
 	Failed  []ScanFailure `json:"failed"`
 }
 
@@ -971,14 +970,12 @@ func (p *Policies) scanSource(policyID int64, subPath *string) (storage.Adapter,
 	if err != nil {
 		return nil, "", err
 	}
-	if policy.Type == "cloudreve" {
-		secrets, err := p.SecretsMap(policy)
-		if err != nil {
-			return nil, "", apperr.ErrInternal.WithMessage(err.Error())
-		}
-		if strings.TrimSpace(secrets["refresh_token"]) == "" {
-			return nil, "", apperr.ErrInvalidRequest.WithMessage("Cloudreve 策略需要先在策略编辑页完成登录才能扫描补录")
-		}
+	spec, ok := storage.SpecOf(policy.Type)
+	if !ok {
+		return nil, "", apperr.ErrInvalidRequest.WithMessage("未知存储后端类型: " + policy.Type)
+	}
+	if spec.URLFromBackend {
+		return nil, "", apperr.ErrInvalidRequest.WithMessage("由后端下发直链的存储策略不支持扫描补录")
 	}
 	adapter, err := p.Adapter(policy)
 	if err != nil {
@@ -987,10 +984,6 @@ func (p *Policies) scanSource(policyID int64, subPath *string) (storage.Adapter,
 	caps := adapter.Capabilities()
 	if !caps.Has(storage.CapList) || !caps.Has(storage.CapRead) {
 		return nil, "", apperr.ErrInvalidRequest.WithMessage("该存储后端不支持列举与读取能力, 无法扫描补录")
-	}
-	spec, _ := storage.SpecOf(policy.Type)
-	if spec.URLFromBackend && !caps.Has(storage.CapStat) {
-		return nil, "", apperr.ErrInvalidRequest.WithMessage("该存储后端需要对象查询能力才能扫描补录")
 	}
 	prefix := ""
 	if subPath != nil && strings.TrimSpace(*subPath) != "" {
@@ -1064,14 +1057,12 @@ func (p *Policies) ScanListed(ctx context.Context, policyID, ownerID int64, keys
 		return nil, apperr.ErrInvalidRequest.WithMessage("该存储后端不支持读取能力, 无法扫描补录")
 	}
 	spec, _ := storage.SpecOf(policy.Type)
-	defaultURL := ""
-	if !spec.URLFromBackend {
-		defaultURL, err = p.DefaultURL(policy.ID)
-		if err != nil {
-			return nil, err
-		}
-	} else if !caps.Has(storage.CapStat) {
-		return nil, apperr.ErrInvalidRequest.WithMessage("该存储后端需要对象查询能力才能扫描补录")
+	if spec.URLFromBackend {
+		return nil, apperr.ErrInvalidRequest.WithMessage("由后端下发直链的存储策略不支持扫描补录")
+	}
+	defaultURL, err := p.DefaultURL(policy.ID)
+	if err != nil {
+		return nil, err
 	}
 
 	result := &ScanResult{Failed: []ScanFailure{}}
@@ -1102,11 +1093,6 @@ func (p *Policies) ScanListed(ctx context.Context, policyID, ownerID int64, keys
 	}
 
 	if !dryRun {
-		removed, err := p.pruneOutsideRoot(policy, adapter)
-		if err != nil {
-			return nil, err
-		}
-		result.Removed = removed
 		if strings.Contains(policy.PathTemplate, "{seq}") {
 			if err := reconcilePolicySequence(p.db, policy); err != nil {
 				return nil, err
@@ -1121,88 +1107,15 @@ func (p *Policies) ScanListed(ctx context.Context, policyID, ownerID int64, keys
 			Action:     "policy_scan",
 			TargetType: "policy",
 			TargetID:   &policy.ID,
-			Detail:     map[string]any{"images": result.Images, "files": result.Files, "skipped": result.Skipped, "removed": result.Removed, "failed": len(result.Failed)},
+			Detail:     map[string]any{"images": result.Images, "files": result.Files, "skipped": result.Skipped, "failed": len(result.Failed)},
 		})
 	}
 	return result, nil
 }
 
-// pruneOutsideRoot 删除策略内不在扫描根目录下的本地记录; 外部对象保留.
-func (p *Policies) pruneOutsideRoot(policy *model.StoragePolicy, adapter storage.Adapter) (int, error) {
-	provider, ok := adapter.(storage.ScanRootProvider)
-	if !ok {
-		return 0, nil
-	}
-	root := strings.Trim(provider.ScanRoot(), "/")
-	if root == "" {
-		return 0, nil
-	}
-	prefix := root + "/"
-	var rows []struct {
-		ID           int64
-		UserID       int64
-		Size         int64
-		QuotaCharged bool
-	}
-	if err := p.db.Model(&model.Image{}).
-		Select("id", "user_id", "size", "quota_charged").
-		Where("policy_id = ? AND substr(object_key, 1, ?) <> ?", policy.ID, len(prefix), prefix).
-		Find(&rows).Error; err != nil {
-		return 0, apperr.ErrInternal.WithMessage(err.Error())
-	}
-	if len(rows) == 0 {
-		return 0, nil
-	}
-
-	type usage struct {
-		images int64
-		bytes  int64
-	}
-	refunds := map[int64]*usage{}
-	ids := make([]int64, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row.ID)
-		if !row.QuotaCharged {
-			continue
-		}
-		entry := refunds[row.UserID]
-		if entry == nil {
-			entry = &usage{}
-			refunds[row.UserID] = entry
-		}
-		entry.images++
-		entry.bytes += row.Size
-	}
-	now := nowUTC()
-	if err := p.db.Transaction(func(tx *gorm.DB) error {
-		for userID, entry := range refunds {
-			if err := refundQuota(tx, userID, entry.images, entry.bytes, now); err != nil {
-				return err
-			}
-		}
-		return tx.Where("id IN ?", ids).Delete(&model.Image{}).Error
-	}); err != nil {
-		return 0, apperr.ErrInternal.WithMessage("清理目录外索引失败: " + err.Error())
-	}
-	p.log.Info("扫描清理目录外索引", "policy_id", policy.ID, "removed", len(ids))
-	return len(ids), nil
-}
-
 // scanObject 读取单个外部对象并入库; 返回入库记录.
 func (p *Policies) scanObject(ctx context.Context, adapter storage.Adapter, policy *model.StoragePolicy, key, defaultURL string, ownerID int64) (*model.Image, error) {
-	recordURL := ""
-	if defaultURL == "" {
-		info, err := adapter.Stat(ctx, key)
-		if err != nil {
-			return nil, fmt.Errorf("查询对象直链失败: %w", err)
-		}
-		recordURL = strings.TrimSpace(info.URL)
-		if recordURL == "" {
-			return nil, errors.New("存储后端未返回直链")
-		}
-	} else {
-		recordURL = storage.JoinURL(defaultURL, key)
-	}
+	recordURL := storage.JoinURL(defaultURL, key)
 	reader, err := adapter.Read(ctx, key)
 	if err != nil {
 		return nil, err
@@ -1289,10 +1202,7 @@ func (p *Policies) enqueueInitialScan(policy *model.StoragePolicy, ownerID int64
 		return
 	}
 	spec, ok := storage.SpecOf(policy.Type)
-	if !ok || !spec.Has(storage.CapList) || !spec.Has(storage.CapRead) {
-		return
-	}
-	if spec.URLFromBackend && !spec.Has(storage.CapStat) {
+	if !ok || spec.URLFromBackend || !spec.Has(storage.CapList) || !spec.Has(storage.CapRead) {
 		return
 	}
 	payload := map[string]any{"policy_id": policy.ID, "user_id": ownerID}

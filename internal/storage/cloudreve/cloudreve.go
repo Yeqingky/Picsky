@@ -20,11 +20,8 @@ import (
 )
 
 const (
-	driverType          = "cloudreve"
-	apiPrefix           = "/api/v4"
-	scanPageSize        = 100
-	scanRequestInterval = 200 * time.Millisecond
-	maxListObjects      = 200000
+	driverType = "cloudreve"
+	apiPrefix  = "/api/v4"
 )
 
 // authClient 用于登录, 2FA 与刷新令牌等短请求.
@@ -47,7 +44,7 @@ func init() {
 	storage.Register(storage.Spec{
 		Type:         driverType,
 		Label:        "Cloudreve",
-		Capabilities: []string{"upload", "stat", "list", "read"},
+		Capabilities: []string{"upload", "stat"},
 		ConfigFields: []storage.Field{
 			{Name: "endpoint", Label: "服务地址", Required: true, Placeholder: "https://cloudreve.example.com"},
 			{Name: "directory", Label: "目录", Placeholder: "/picsky"},
@@ -76,11 +73,6 @@ type adapter struct {
 	mu         sync.Mutex
 	token      string
 	tokenUntil time.Time
-
-	paceMu      sync.Mutex
-	lastPace    time.Time
-	linksMu     sync.Mutex
-	directLinks map[string]string
 }
 
 func newAdapter(opts storage.Options) (storage.Adapter, error) {
@@ -117,7 +109,6 @@ func newAdapter(opts storage.Options) (storage.Adapter, error) {
 		refreshToken: refreshToken,
 		autoLogin:    strings.EqualFold(strings.TrimSpace(opts.Config["auto_login"]), "true"),
 		directory:    directory,
-		directLinks:  map[string]string{},
 		client: &http.Client{
 			Timeout: 5 * time.Minute,
 		},
@@ -152,12 +143,9 @@ func apiBaseFromEndpoint(raw string) (string, error) {
 
 func (a *adapter) Type() string { return driverType }
 
-// ScanRoot 返回配置的目录; 扫描默认只覆盖该目录.
-func (a *adapter) ScanRoot() string { return a.directory }
-
-// Capabilities 声明上传, 查询, 列举与读取能力.
+// Capabilities 声明上传与对象查询能力; 扫描补录不适用于后端下发直链的驱动.
 func (a *adapter) Capabilities() storage.Capability {
-	return storage.CapUpload | storage.CapStat | storage.CapList | storage.CapRead
+	return storage.CapUpload | storage.CapStat
 }
 
 // Put 创建上传会话并分片上传 Cloudreve 文件, 最后创建公开直链.
@@ -404,36 +392,18 @@ func (a *adapter) createDirectLink(ctx context.Context, fileURI string) (string,
 // cloudreveFile 是列举与文件信息接口的公共字段.
 type cloudreveFile struct {
 	Type      int    `json:"type"`
-	Name      string `json:"name"`
 	Size      int64  `json:"size"`
 	UpdatedAt string `json:"updated_at"`
-	Path      string `json:"path"`
 }
 
-// Stat 查询 Cloudreve 文件并读取或创建直链.
+// Stat 查询 Cloudreve 文件信息与直链; 不存在时返回 ErrNotFound.
 func (a *adapter) Stat(ctx context.Context, key string) (storage.ObjectInfo, error) {
 	if err := storage.ValidateObjectKey(key); err != nil {
 		return storage.ObjectInfo{}, err
 	}
-	fileURI := a.fileURI(key)
-	info, link, err := a.fileInfo(ctx, fileURI)
+	info, link, err := a.fileInfo(ctx, a.fileURI(key))
 	if err != nil {
 		return storage.ObjectInfo{}, err
-	}
-	if link == "" {
-		link = a.cachedLink(key)
-	} else {
-		a.cacheLink(key, link)
-	}
-	if info.Type != 1 && link == "" {
-		if err := a.pace(ctx); err != nil {
-			return storage.ObjectInfo{}, err
-		}
-		link, err = a.createDirectLink(ctx, fileURI)
-		if err != nil {
-			return storage.ObjectInfo{}, err
-		}
-		a.cacheLink(key, link)
 	}
 	return storage.ObjectInfo{
 		Key:     strings.Trim(key, "/"),
@@ -448,151 +418,18 @@ func (a *adapter) Delete(context.Context, string) error {
 	return storage.ErrNotSupported
 }
 
-// List 递归列举 Cloudreve 目录, 分页请求之间保持间隔.
-func (a *adapter) List(ctx context.Context, prefix string) ([]storage.ObjectInfo, error) {
-	if err := storage.ValidatePrefix(prefix); err != nil {
-		return nil, err
-	}
-	prefix = strings.Trim(strings.TrimSpace(prefix), "/")
-	if prefix == "" {
-		prefix = a.directory
-	} else {
-		prefix = storage.WithPrefix(a.directory, prefix)
-	}
-	rootURI := a.fileURI(prefix)
-	if prefix == "" {
-		rootURI += "/"
-	}
-	folders := []string{rootURI}
-	seenFolders := map[string]struct{}{folders[0]: {}}
-	objects := make([]storage.ObjectInfo, 0, 64)
-	for len(folders) > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		folder := folders[0]
-		folders = folders[1:]
-		files, err := a.listFolder(ctx, folder)
-		if err != nil {
-			return nil, err
-		}
-		for _, file := range files {
-			filePath, err := a.relativePath(file.Path, folder, file.Name)
-			if err != nil {
-				return nil, err
-			}
-			if file.Type == 1 {
-				folderURI := file.Path
-				if strings.TrimSpace(folderURI) == "" {
-					folderURI = strings.TrimRight(folder, "/") + "/" + url.PathEscape(file.Name)
-				}
-				if _, seen := seenFolders[folderURI]; !seen {
-					seenFolders[folderURI] = struct{}{}
-					folders = append(folders, folderURI)
-				}
-				continue
-			}
-			objects = append(objects, storage.ObjectInfo{
-				Key:     filePath,
-				Size:    file.Size,
-				ModTime: parseCloudreveTime(file.UpdatedAt),
-			})
-			if len(objects) > maxListObjects {
-				return nil, fmt.Errorf("列举对象超过上限 %d, 请缩小扫描范围", maxListObjects)
-			}
-		}
-	}
-	return objects, nil
+// List 不适用于后端下发直链的驱动.
+func (a *adapter) List(context.Context, string) ([]storage.ObjectInfo, error) {
+	return nil, storage.ErrNotSupported
 }
 
-// Read 下载对象内容; 优先使用 Stat 缓存的直链.
-func (a *adapter) Read(ctx context.Context, key string) (io.ReadCloser, error) {
-	if err := storage.ValidateObjectKey(key); err != nil {
-		return nil, err
-	}
-	if link := a.cachedLink(key); link != "" {
-		reader, err := a.download(ctx, link)
-		if err == nil {
-			return reader, nil
-		}
-		// 直链可能已失效, 继续尝试临时下载地址.
-	}
-	link, err := a.fileDownloadURL(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	return a.download(ctx, link)
-}
-
-// listFolder 读取一个目录的全部文件; 同时兼容游标与偏移分页.
-func (a *adapter) listFolder(ctx context.Context, folderURI string) ([]cloudreveFile, error) {
-	page := 0
-	token := ""
-	result := make([]cloudreveFile, 0, scanPageSize)
-	for {
-		if err := a.pace(ctx); err != nil {
-			return nil, err
-		}
-		query := url.Values{}
-		query.Set("uri", folderURI)
-		query.Set("page", strconv.Itoa(page))
-		query.Set("page_size", strconv.Itoa(scanPageSize))
-		if token != "" {
-			query.Set("next_page_token", token)
-		}
-		resp, err := a.authorizedRequest(ctx, http.MethodGet, a.apiBase+"/file?"+query.Encode(), nil, -1, "")
-		if err != nil {
-			return nil, fmt.Errorf("列举 Cloudreve 目录失败: %w", err)
-		}
-		envelope, err := parseResponse(resp, "列举文件")
-		if err != nil {
-			return nil, err
-		}
-		var data struct {
-			Files      []cloudreveFile `json:"files"`
-			Pagination struct {
-				NextToken  string `json:"next_token"`
-				IsCursor   bool   `json:"is_cursor"`
-				TotalItems int    `json:"total_items"`
-			} `json:"pagination"`
-		}
-		if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
-			return nil, errors.New("列举 Cloudreve 目录失败: 响应缺少文件列表")
-		}
-		if err := json.Unmarshal(envelope.Data, &data); err != nil {
-			return nil, fmt.Errorf("解析 Cloudreve 文件列表失败: %w", err)
-		}
-		result = append(result, data.Files...)
-		if len(result) > maxListObjects {
-			return nil, fmt.Errorf("列举对象超过上限 %d, 请缩小扫描范围", maxListObjects)
-		}
-		nextToken := strings.TrimSpace(data.Pagination.NextToken)
-		if nextToken != "" {
-			if nextToken == token {
-				return nil, errors.New("Cloudreve 文件列表分页令牌重复")
-			}
-			token = nextToken
-			continue
-		}
-		if data.Pagination.IsCursor {
-			break
-		}
-		if data.Pagination.TotalItems > 0 && len(result) >= data.Pagination.TotalItems {
-			break
-		}
-		if len(data.Files) < scanPageSize {
-			break
-		}
-		page++
-	}
-	return result, nil
+// Read 不适用于后端下发直链的驱动.
+func (a *adapter) Read(context.Context, string) (io.ReadCloser, error) {
+	return nil, storage.ErrNotSupported
 }
 
 // fileInfo 查询 Cloudreve 文件详情与直链.
 func (a *adapter) fileInfo(ctx context.Context, fileURI string) (*cloudreveFile, string, error) {
-	if err := a.pace(ctx); err != nil {
-		return nil, "", err
-	}
 	query := url.Values{}
 	query.Set("uri", fileURI)
 	query.Set("extended", "true")
@@ -628,124 +465,6 @@ func (a *adapter) fileInfo(ctx context.Context, fileURI string) (*cloudreveFile,
 		}
 	}
 	return &data.cloudreveFile, link, nil
-}
-
-// fileDownloadURL 获取文件的临时下载地址.
-func (a *adapter) fileDownloadURL(ctx context.Context, key string) (string, error) {
-	if err := a.pace(ctx); err != nil {
-		return "", err
-	}
-	payload, err := json.Marshal(map[string]any{
-		"uris":                 []string{a.fileURI(key)},
-		"use_primary_site_url": true,
-	})
-	if err != nil {
-		return "", err
-	}
-	resp, err := a.authorizedRequest(ctx, http.MethodPost, a.apiBase+"/file/url", bytes.NewReader(payload), int64(len(payload)), "application/json")
-	if err != nil {
-		return "", fmt.Errorf("获取 Cloudreve 下载地址失败: %w", err)
-	}
-	envelope, err := parseResponse(resp, "获取下载地址")
-	if err != nil {
-		return "", err
-	}
-	var data struct {
-		URLs []struct {
-			URL string `json:"url"`
-		} `json:"urls"`
-	}
-	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
-		return "", errors.New("获取 Cloudreve 下载地址失败: 响应为空")
-	}
-	if err := json.Unmarshal(envelope.Data, &data); err != nil {
-		return "", fmt.Errorf("解析 Cloudreve 下载地址失败: %w", err)
-	}
-	if len(data.URLs) == 0 || strings.TrimSpace(data.URLs[0].URL) == "" {
-		return "", errors.New("获取 Cloudreve 下载地址失败: 下载地址为空")
-	}
-	link := strings.TrimSpace(data.URLs[0].URL)
-	if err := validateLink(link); err != nil {
-		return "", fmt.Errorf("Cloudreve 下载地址无效: %w", err)
-	}
-	return link, nil
-}
-
-// download 读取直链内容.
-func (a *adapter) download(ctx context.Context, target string) (io.ReadCloser, error) {
-	if err := a.pace(ctx); err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("下载 Cloudreve 文件失败: %w", err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-		resp.Body.Close()
-		return nil, fmt.Errorf("下载 Cloudreve 文件失败: HTTP %d: %s", resp.StatusCode, snippet(data))
-	}
-	return resp.Body, nil
-}
-
-// relativePath 把 Cloudreve 文件 URI 转为相对对象键.
-func (a *adapter) relativePath(raw, folder, name string) (string, error) {
-	if strings.TrimSpace(raw) == "" {
-		raw = strings.TrimRight(folder, "/") + "/" + url.PathEscape(name)
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("解析 Cloudreve 文件路径失败: %w", err)
-	}
-	if parsed.Scheme != "cloudreve" || parsed.Host != "my" {
-		return "", fmt.Errorf("Cloudreve 文件路径格式不支持: %s", raw)
-	}
-	key := strings.Trim(parsed.Path, "/")
-	if key == "" {
-		return "", fmt.Errorf("Cloudreve 文件路径为空: %s", raw)
-	}
-	return key, nil
-}
-
-// cachedLink 读取已缓存的直链.
-func (a *adapter) cachedLink(key string) string {
-	a.linksMu.Lock()
-	defer a.linksMu.Unlock()
-	return a.directLinks[key]
-}
-
-// cacheLink 缓存直链, 供扫描后续读取复用.
-func (a *adapter) cacheLink(key, link string) {
-	if strings.TrimSpace(link) == "" {
-		return
-	}
-	a.linksMu.Lock()
-	defer a.linksMu.Unlock()
-	a.directLinks[key] = link
-}
-
-// pace 在扫描相关请求之间保持最小间隔, 避免触发后端速率限制.
-func (a *adapter) pace(ctx context.Context) error {
-	a.paceMu.Lock()
-	defer a.paceMu.Unlock()
-	if !a.lastPace.IsZero() {
-		wait := scanRequestInterval - time.Since(a.lastPace)
-		if wait > 0 {
-			timer := time.NewTimer(wait)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return ctx.Err()
-			case <-timer.C:
-			}
-		}
-	}
-	a.lastPace = time.Now()
-	return nil
 }
 
 // Test 登录并上传一张探测图片; 后端不支持删除, 探测对象会保留.

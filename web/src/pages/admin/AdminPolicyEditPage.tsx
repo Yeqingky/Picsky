@@ -108,12 +108,12 @@ const DEFAULT_HINT_KEYS: Record<string, string> = {
 /** 由后端分配直链的驱动不显示路径, 域名, 冲突与扫描标签 */
 const URL_BACKEND_HIDDEN_TABS: readonly string[] = ['path', 'urls', 'conflict', 'scan'];
 
-/** Cloudreve 需要连接配置, 魔法路径与扫描, 但仍由后端分配直链 */
+/** Cloudreve 需要连接配置与魔法路径, 但仍由后端分配直链 */
 const TYPE_HIDDEN_TABS: Record<string, readonly string[]> = {
   sobot: ['connection', ...URL_BACKEND_HIDDEN_TABS],
   celine: ['connection', ...URL_BACKEND_HIDDEN_TABS],
   metaso: ['connection', ...URL_BACKEND_HIDDEN_TABS],
-  cloudreve: ['urls', 'conflict'],
+  cloudreve: ['urls', 'conflict', 'scan'],
 };
 
 const TAB_ICON_CLASS = 'size-4 shrink-0';
@@ -874,7 +874,6 @@ export default function AdminPolicyEditPage() {
   const capabilities =
     policy?.capabilities ?? NEW_TYPE_TRAITS[form?.type ?? '']?.capabilities ?? [];
   const canStat = capabilities.includes('stat');
-  const scanLoginRequired = !form || (form.type === 'cloudreve' && !form.cloudreveLoggedIn);
 
   const updateForm = useCallback((patch: Partial<FormState>) => {
     setForm((current) => (current === null ? current : { ...current, ...patch }));
@@ -2028,10 +2027,10 @@ export default function AdminPolicyEditPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={scanLoginRequired || scanMutation.isPending || scanTaskActive}
+                  disabled={scanMutation.isPending || scanTaskActive}
                   onClick={() => {
                     if (!isEdit) return;
-                    const trimmed = form?.type === 'cloudreve' ? '' : scanPath.trim();
+                    const trimmed = scanPath.trim();
                     scanMutation.mutate({
                       targetId: numericId,
                       body: {
@@ -2051,20 +2050,18 @@ export default function AdminPolicyEditPage() {
               }
             >
               <div className="flex flex-col gap-4">
-                {form?.type !== 'cloudreve' && (
-                  <FormField
+                <FormField
+                  id="policy-scan-path"
+                  label={t('adminPolicies.edit.field.scanPath')}
+                  hint={t('adminPolicies.edit.field.scanPathOptional')}
+                >
+                  <Input
                     id="policy-scan-path"
-                    label={t('adminPolicies.edit.field.scanPath')}
-                    hint={t('adminPolicies.edit.field.scanPathOptional')}
-                  >
-                    <Input
-                      id="policy-scan-path"
-                      value={scanPath}
-                      onChange={(event) => setScanPath(event.target.value)}
-                      className="font-mono"
-                    />
-                  </FormField>
-                )}
+                    value={scanPath}
+                    onChange={(event) => setScanPath(event.target.value)}
+                    className="font-mono"
+                  />
+                </FormField>
                 <SwitchRow
                   id="policy-scan-dry-run"
                   label={t('adminPolicies.edit.field.dryRun')}
@@ -2116,13 +2113,6 @@ export default function AdminPolicyEditPage() {
                           <p className="text-sm">
                             {t('adminPolicies.edit.scan.done', { id: scanTask.id })}
                           </p>
-                          {scanResult !== null && (scanResult.removed ?? 0) > 0 && (
-                            <p className="mt-2 text-sm">
-                              {t('adminPolicies.edit.scan.removed', {
-                                count: scanResult.removed,
-                              })}
-                            </p>
-                          )}
                           {scanResult !== null && scanResult.failed.length > 0 && (
                             <div className="mt-2 flex flex-col gap-1">
                               <p className="text-sm font-semibold">

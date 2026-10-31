@@ -464,7 +464,6 @@ export interface PolicyScanResult {
   images: number;
   files: number;
   skipped: number;
-  removed?: number;
   failed: { path: string; error: string }[];
 }
 

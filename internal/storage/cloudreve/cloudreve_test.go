@@ -33,11 +33,11 @@ func TestDriverSpec(t *testing.T) {
 	if spec.DefaultPathTemplate != "{md5:2}/{md5}.{ext}" {
 		t.Errorf("Cloudreve 默认路径 = %q", spec.DefaultPathTemplate)
 	}
-	if !spec.Has(storage.CapUpload) || !spec.Has(storage.CapList) || !spec.Has(storage.CapRead) || !spec.Has(storage.CapStat) {
+	if !spec.Has(storage.CapUpload) || !spec.Has(storage.CapStat) {
 		t.Errorf("Cloudreve 驱动能力声明不完整: %v", spec.Capabilities)
 	}
-	if spec.Has(storage.CapDelete) {
-		t.Error("Cloudreve 驱动不应声明删除能力")
+	if spec.Has(storage.CapList) || spec.Has(storage.CapRead) || spec.Has(storage.CapDelete) {
+		t.Errorf("Cloudreve 不应声明扫描或删除能力: %v", spec.Capabilities)
 	}
 	if len(spec.ConfigFields) != 3 {
 		t.Fatalf("配置字段数量 = %d, 期望 3", len(spec.ConfigFields))
@@ -603,76 +603,7 @@ func TestTestUploadsProbePNG(t *testing.T) {
 	}
 }
 
-func TestListRecursesAndPaginates(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v4/session/token":
-			writeEnvelope(t, w, 0, loginPayload(testToken))
-		case "/api/v4/file":
-			if r.URL.Query().Get("page_size") != "100" {
-				t.Errorf("page_size = %q", r.URL.Query().Get("page_size"))
-			}
-			switch r.URL.Query().Get("uri") {
-			case "cloudreve://my/picsky":
-				if r.URL.Query().Get("next_page_token") == "next" {
-					writeEnvelope(t, w, 0, map[string]any{
-						"files": []map[string]any{
-							{"type": 0, "name": "b.png", "size": 2, "path": "cloudreve://my/picsky/b.png"},
-						},
-						"pagination": map[string]any{"is_cursor": true},
-					})
-					return
-				}
-				writeEnvelope(t, w, 0, map[string]any{
-					"files": []map[string]any{
-						{"type": 1, "name": "sub", "path": "cloudreve://my/picsky/sub"},
-						{"type": 0, "name": "a.png", "size": 1, "path": "cloudreve://my/picsky/a.png"},
-					},
-					"pagination": map[string]any{"is_cursor": true, "next_token": "next"},
-				})
-			case "cloudreve://my/picsky/sub":
-				writeEnvelope(t, w, 0, map[string]any{
-					"files": []map[string]any{
-						{"type": 0, "name": "c.png", "size": 3, "path": "cloudreve://my/picsky/sub/c.png"},
-					},
-					"pagination": map[string]any{"is_cursor": true},
-				})
-			default:
-				t.Errorf("未预期的列举 URI: %s", r.URL.Query().Get("uri"))
-				http.NotFound(w, r)
-			}
-		default:
-			t.Errorf("未预期的请求: %s", r.URL.Path)
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	adapter := newTestAdapter(t, server.URL)
-	objects, err := adapter.List(context.Background(), "picsky")
-	if err != nil {
-		t.Fatalf("List 失败: %v", err)
-	}
-	keys := map[string]int64{}
-	for _, object := range objects {
-		keys[object.Key] = object.Size
-	}
-	for key, size := range map[string]int64{
-		"picsky/a.png":     1,
-		"picsky/b.png":     2,
-		"picsky/sub/c.png": 3,
-	} {
-		if keys[key] != size {
-			t.Errorf("对象 %s 大小 = %d, 期望 %d", key, keys[key], size)
-		}
-	}
-	if len(objects) != 3 {
-		t.Errorf("列举对象数 = %d, 期望 3", len(objects))
-	}
-}
-
-func TestStatAndReadUseDirectLinks(t *testing.T) {
-	var downloadCalls, tempURLCalls int
+func TestStatReturnsDirectLink(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v4/session/token":
@@ -683,22 +614,14 @@ func TestStatAndReadUseDirectLinks(t *testing.T) {
 			}
 			writeEnvelope(t, w, 0, map[string]any{
 				"type":       0,
-				"name":       "foo.png",
 				"size":       5,
 				"updated_at": time.Now().Format(time.RFC3339),
-				"path":       "cloudreve://my/picsky/foo.png",
 				"extended_info": map[string]any{
 					"direct_links": []map[string]string{
 						{"url": serverURL(r) + "/f/a/foo.png"},
 					},
 				},
 			})
-		case "/f/a/foo.png":
-			downloadCalls++
-			_, _ = io.WriteString(w, "hello")
-		case "/api/v4/file/url":
-			tempURLCalls++
-			http.Error(w, "should not be called", http.StatusInternalServerError)
 		default:
 			t.Errorf("未预期的请求: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -714,64 +637,18 @@ func TestStatAndReadUseDirectLinks(t *testing.T) {
 	if info.URL != server.URL+"/f/a/foo.png" || info.Size != 5 {
 		t.Errorf("对象信息 = %+v", info)
 	}
-	reader, err := adapter.Read(context.Background(), "picsky/foo.png")
-	if err != nil {
-		t.Fatalf("Read 失败: %v", err)
-	}
-	data, err := io.ReadAll(reader)
-	reader.Close()
-	if err != nil || string(data) != "hello" {
-		t.Errorf("读取内容 = %q, 错误 %v", data, err)
-	}
-	if downloadCalls != 1 || tempURLCalls != 0 {
-		t.Errorf("下载次数 = %d, 临时地址次数 = %d", downloadCalls, tempURLCalls)
-	}
-}
-
-func TestReadFallsBackToTemporaryURL(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v4/session/token":
-			writeEnvelope(t, w, 0, loginPayload(testToken))
-		case "/api/v4/file/url":
-			var body struct {
-				URIs []string `json:"uris"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Errorf("解析下载地址请求失败: %v", err)
-				return
-			}
-			if len(body.URIs) != 1 || body.URIs[0] != "cloudreve://my/picsky/foo.png" {
-				t.Errorf("下载地址 URI = %v", body.URIs)
-			}
-			writeEnvelope(t, w, 0, map[string]any{
-				"urls": []map[string]string{{"url": serverURL(r) + "/download/foo.png"}},
-			})
-		case "/download/foo.png":
-			_, _ = io.WriteString(w, "content")
-		default:
-			t.Errorf("未预期的请求: %s", r.URL.Path)
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	adapter := newTestAdapter(t, server.URL)
-	reader, err := adapter.Read(context.Background(), "picsky/foo.png")
-	if err != nil {
-		t.Fatalf("Read 失败: %v", err)
-	}
-	defer reader.Close()
-	data, err := io.ReadAll(reader)
-	if err != nil || string(data) != "content" {
-		t.Errorf("读取内容 = %q, 错误 %v", data, err)
-	}
 }
 
 func TestUnsupportedOperations(t *testing.T) {
 	adapter := &adapter{}
 	if err := adapter.Delete(context.Background(), "foo.png"); err != storage.ErrNotSupported {
 		t.Errorf("Delete 错误 = %v", err)
+	}
+	if _, err := adapter.List(context.Background(), "picsky"); err != storage.ErrNotSupported {
+		t.Errorf("List 错误 = %v", err)
+	}
+	if _, err := adapter.Read(context.Background(), "picsky/foo.png"); err != storage.ErrNotSupported {
+		t.Errorf("Read 错误 = %v", err)
 	}
 }
 
