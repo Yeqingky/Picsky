@@ -27,6 +27,7 @@ import (
 	// 注册存储驱动.
 	_ "github.com/yeqingky/Picsky/internal/storage/celine"
 	_ "github.com/yeqingky/Picsky/internal/storage/cloudreve"
+	_ "github.com/yeqingky/Picsky/internal/storage/colorful"
 	_ "github.com/yeqingky/Picsky/internal/storage/metaso"
 	_ "github.com/yeqingky/Picsky/internal/storage/oneimg"
 	_ "github.com/yeqingky/Picsky/internal/storage/sobot"

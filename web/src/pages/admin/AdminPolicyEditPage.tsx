@@ -82,7 +82,15 @@ import type { PolicyTransferResult } from './policyTransfer';
  * 可选后端类型: 只列出已注册且管理界面支持的驱动 (docs/storage-policy.md 第 3 节),
  * 未注册的类型提交会被后端以 400 拒绝.
  */
-const TYPE_OPTIONS = ['webdav', 'sobot', 'celine', 'metaso', 'oneimg', 'cloudreve'] as const;
+const TYPE_OPTIONS = [
+  'webdav',
+  'sobot',
+  'celine',
+  'metaso',
+  'oneimg',
+  'cloudreve',
+  'colorful',
+] as const;
 
 const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
 
@@ -100,6 +108,7 @@ const NEW_TYPE_TRAITS: Record<
   metaso: { capabilities: ['upload'], urlFromBackend: true },
   oneimg: { capabilities: ['upload'], urlFromBackend: true, urlPrefixOverride: true },
   cloudreve: { capabilities: ['upload'], urlFromBackend: true },
+  colorful: { capabilities: ['upload'], urlFromBackend: true },
 };
 
 /** 新建策略选择后端后自动填入的提示文字 (普通用户可见的简单限制) */
@@ -108,6 +117,7 @@ const DEFAULT_HINT_KEYS: Record<string, string> = {
   celine: 'adminPolicies.edit.defaultHint.celine',
   metaso: 'adminPolicies.edit.defaultHint.metaso',
   oneimg: 'adminPolicies.edit.defaultHint.oneimg',
+  colorful: 'adminPolicies.edit.defaultHint.colorful',
 };
 
 /** 由后端分配直链的驱动不显示路径, 域名, 冲突与扫描标签 */
@@ -120,6 +130,7 @@ const TYPE_HIDDEN_TABS: Record<string, readonly string[]> = {
   metaso: ['connection', ...URL_BACKEND_HIDDEN_TABS],
   oneimg: ['path', 'conflict', 'scan'],
   cloudreve: ['urls', 'conflict', 'scan'],
+  colorful: [...URL_BACKEND_HIDDEN_TABS],
 };
 
 const TAB_ICON_CLASS = 'size-4 shrink-0';
@@ -717,7 +728,7 @@ export default function AdminPolicyEditPage() {
     } = {};
     if (isOneImg) {
       if (form.token.trim() !== '') secrets.token = form.token.trim();
-    } else if (!isCloudreve) {
+    } else if (!isCloudreve && form.type !== 'colorful') {
       if (form.username.trim() !== '') secrets.username = form.username.trim();
       if (form.password !== '') secrets.password = form.password;
     } else if (form.autoLogin) {
@@ -764,7 +775,9 @@ export default function AdminPolicyEditPage() {
                   endpoint: form.endpoint.trim(),
                   ...(form.bucketId !== '' ? { bucket_id: form.bucketId } : {}),
                 }
-              : {},
+              : form.type === 'colorful'
+                ? { endpoint: form.endpoint.trim() }
+                : {},
           urls: formURLPrefixOverride ? urlRows : [],
         }
       : {
@@ -1223,6 +1236,7 @@ export default function AdminPolicyEditPage() {
 
   const isCloudreve = form.type === 'cloudreve';
   const isOneImg = form.type === 'oneimg';
+  const isColorful = form.type === 'colorful';
 
   const credentialFields = (
     <>
@@ -1491,7 +1505,9 @@ export default function AdminPolicyEditPage() {
                     ? t('adminPolicies.edit.field.cloudreveEndpointHint')
                     : isOneImg
                       ? t('adminPolicies.edit.field.oneimgEndpointHint')
-                      : t('adminPolicies.edit.field.endpointHint')
+                      : isColorful
+                        ? t('adminPolicies.edit.field.colorfulEndpointHint')
+                        : t('adminPolicies.edit.field.endpointHint')
                 }
               >
                 <Input
@@ -1510,7 +1526,9 @@ export default function AdminPolicyEditPage() {
                       ? t('adminPolicies.edit.field.cloudreveEndpointPlaceholder')
                       : isOneImg
                         ? t('adminPolicies.edit.field.oneimgEndpointPlaceholder')
-                        : t('adminPolicies.edit.field.endpointPlaceholder')
+                        : isColorful
+                          ? t('adminPolicies.edit.field.colorfulEndpointPlaceholder')
+                          : t('adminPolicies.edit.field.endpointPlaceholder')
                   }
                   aria-invalid={errorFor('endpoint') !== undefined}
                   required
@@ -1674,7 +1692,7 @@ export default function AdminPolicyEditPage() {
                   </Select>
                 </FormField>
               )}
-              {!isCloudreve && !isOneImg && credentialFields}
+              {!isCloudreve && !isOneImg && form.type !== 'colorful' && credentialFields}
               {isCloudreve && (
                 <FormField
                   id="policy-refresh-token"
