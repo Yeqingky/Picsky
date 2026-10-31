@@ -13,6 +13,7 @@ import { PageHeader } from '../../components/PageHeader';
 import { EmptyState, ErrorState } from '../../components/States';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
+import { Switch } from '../../components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { formatDateTime } from '../../utils/format';
 
@@ -75,6 +76,14 @@ export default function AdminPoliciesPage() {
   const { mutate: removePolicy } = removeMutation;
   const { mutate: scanPolicy } = scanMutation;
   const { mutate: reorderPolicies } = reorderMutation;
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
+      adminPoliciesApi.update(id, { enabled }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'policies'] });
+    },
+  });
+  const { mutate: togglePolicy } = toggleMutation;
 
   const handleReorder = useCallback(
     (ids: (string | number)[]) => {
@@ -119,21 +128,6 @@ export default function AdminPoliciesPage() {
         ),
       },
       {
-        id: 'enabled',
-        header: t('adminPolicies.list.col.enabled'),
-        className: 'w-[110px]',
-        sortable: true,
-        sortValue: (row) => Number(row.enabled),
-        cell: (row) =>
-          row.enabled ? (
-            <Badge className="border-transparent bg-success/10 text-success">
-              {t('common.status.enabled')}
-            </Badge>
-          ) : (
-            <Badge variant="secondary">{t('common.status.disabled')}</Badge>
-          ),
-      },
-      {
         id: 'conflict_policy',
         header: t('adminPolicies.list.col.conflict'),
         className: 'w-[150px]',
@@ -162,7 +156,7 @@ export default function AdminPoliciesPage() {
           }
           const urls = row.urls;
           if (urls.length === 0) {
-            return <span className="text-muted-foreground text-sm">—</span>;
+            return <span className="text-muted-foreground text-sm">-</span>;
           }
           const defaultUrl = urls.find((item) => item.is_default) ?? urls[0];
           return (
@@ -181,20 +175,6 @@ export default function AdminPoliciesPage() {
         },
       },
       {
-        id: 'capabilities',
-        header: t('adminPolicies.list.col.capabilities'),
-        className: 'w-[230px]',
-        cell: (row) => (
-          <div className="flex flex-wrap items-center gap-1">
-            {row.capabilities.map((capability) => (
-              <Badge key={capability} variant="outline">
-                {t(`adminPolicies.capability.${capability}`, { defaultValue: capability })}
-              </Badge>
-            ))}
-          </div>
-        ),
-      },
-      {
         id: 'updated_at',
         header: t('adminPolicies.list.col.updatedAt'),
         className: 'w-[180px]',
@@ -205,12 +185,32 @@ export default function AdminPoliciesPage() {
       {
         id: 'actions',
         header: t('adminPolicies.list.col.actions'),
-        className: 'w-[120px]',
+        className: 'w-[150px]',
         cell: (row) => {
           const scannable = row.capabilities.includes('list') && row.capabilities.includes('read');
           const scanning = scanMutation.isPending && scanMutation.variables === row.id;
+          const toggling = toggleMutation.isPending && toggleMutation.variables?.id === row.id;
           return (
             <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Switch
+                      checked={row.enabled}
+                      disabled={toggling}
+                      onCheckedChange={(checked) => togglePolicy({ id: row.id, enabled: checked })}
+                      aria-label={
+                        row.enabled
+                          ? t('adminPolicies.list.disable')
+                          : t('adminPolicies.list.enable')
+                      }
+                    />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {row.enabled ? t('adminPolicies.list.disable') : t('adminPolicies.list.enable')}
+                </TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="inline-flex">
@@ -277,6 +277,9 @@ export default function AdminPoliciesPage() {
       scanMutation.isPending,
       scanMutation.variables,
       scanPolicy,
+      toggleMutation.isPending,
+      toggleMutation.variables,
+      togglePolicy,
     ],
   );
 

@@ -1,7 +1,7 @@
 /** 仪表盘 (/) 文案: 个人概览, 只聚合已有接口数据 */
 export const dashboard = {
   greeting: '你好, {{name}}',
-  description: '图片、外链与账号状态, 都在这里。',
+  description: '图片, 外链与账号状态, 都在这里.',
   uploadNow: '立刻上传',
   galleryShortcut: '图片 {{total}}',
   usage: {
@@ -30,9 +30,9 @@ export const dashboard = {
     title: '最近上传',
     viewAll: '查看全部',
     emptyTitle: '还没有上传记录',
-    emptyDescription: '上传第一张图片后, 这里会显示最近记录。',
+    emptyDescription: '上传第一张图片后, 这里会显示最近记录.',
     emptyAction: '去上传',
-    meta: '{{time}} · {{size}}',
+    meta: '{{time}} - {{size}}',
   },
   account: {
     title: '账户信息',

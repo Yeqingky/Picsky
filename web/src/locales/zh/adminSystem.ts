@@ -2,7 +2,7 @@
 export const adminSystem = {
   settings: {
     title: '系统设置',
-    description: '站点信息、注册与人机验证、邮件发送、上传限制与维护策略',
+    description: '站点信息, 注册与人机验证, 邮件发送, 上传限制与维护策略',
     saved: '设置已保存',
     resetDone: '已恢复到最近保存的设置',
     invalidForm: '请先修正表单中标红的字段',
@@ -85,14 +85,14 @@ export const adminSystem = {
 
   tasks: {
     title: '维护队列',
-    description: '对象删除、日志清理等异步任务; 失败任务保留在队列中, 可手动重试或删除',
+    description: '对象删除, 日志清理等异步任务; 失败任务保留在队列中, 可手动重试或删除',
     runSuccess: '任务 #{{id}} 已提交执行',
     deleteSuccess: '任务 #{{id}} 已删除',
     deleteTitle: '删除任务',
     deleteDescription:
-      '确定删除任务 #{{id}}? 删除后该任务不再保留, 未完成的对象清理也不会再自动执行。',
+      '确定删除任务 #{{id}}? 删除后该任务不再保留, 未完成的对象清理也不会再自动执行.',
     emptyTitle: '暂无维护任务',
-    emptyDescription: '对象删除、策略扫描与每日维护任务会自动出现在这里',
+    emptyDescription: '对象删除, 策略扫描与每日维护任务会自动出现在这里',
     detailTitle: '任务详情 #{{id}}',
     payloadEmpty: '无',
     lastErrorEmpty: '无',
@@ -117,7 +117,7 @@ export const adminSystem = {
 
   logs: {
     title: '操作日志',
-    description: '审计记录: 动作、操作者、目标与来源地址',
+    description: '审计记录: 动作, 操作者, 目标与来源地址',
     unauthenticated: '未认证',
     actionPlaceholder: '按动作筛选, 例如 image.delete',
     userIdPlaceholder: '用户 ID',

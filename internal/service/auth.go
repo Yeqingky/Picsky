@@ -632,7 +632,7 @@ func (a *Auth) IssueSession(userID int64) (string, error) {
 	return a.signSessionToken(userID, user.SessionVersion, time.Now().Add(SessionTTL)), nil
 }
 
-// ParseSession 校验会话签名、有效期与当前服务端版本并返回用户 ID.
+// ParseSession 校验会话签名, 有效期与当前服务端版本并返回用户 ID.
 func (a *Auth) ParseSession(token string) (int64, error) {
 	userID, sessionVersion, err := a.parseSessionToken(token)
 	if err != nil {

@@ -13,6 +13,7 @@ import {
   Info,
   Play,
   Plus,
+  RotateCcw,
   Save,
   ScanSearch,
   Server,
@@ -78,7 +79,7 @@ import type { PolicyTransferResult } from './policyTransfer';
 
 /**
  * 可选后端类型: 只列出已注册且管理界面支持的驱动 (docs/storage-policy.md 第 3 节),
- * 未注册的类型提交会被后端以 400 拒绝。
+ * 未注册的类型提交会被后端以 400 拒绝.
  */
 const TYPE_OPTIONS = ['webdav', 'sobot', 'celine', 'metaso'] as const;
 
@@ -93,6 +94,13 @@ const NEW_TYPE_TRAITS: Record<string, { capabilities: string[]; urlFromBackend: 
   sobot: { capabilities: ['upload'], urlFromBackend: true },
   celine: { capabilities: ['upload'], urlFromBackend: true },
   metaso: { capabilities: ['upload'], urlFromBackend: true },
+};
+
+/** 新建策略选择后端后自动填入的提示文字 (普通用户可见的简单限制) */
+const DEFAULT_HINT_KEYS: Record<string, string> = {
+  sobot: 'adminPolicies.edit.defaultHint.sobot',
+  celine: 'adminPolicies.edit.defaultHint.celine',
+  metaso: 'adminPolicies.edit.defaultHint.metaso',
 };
 
 /** 由后端分配直链的驱动不显示连接, 路径, 域名, 冲突与扫描标签 */
@@ -220,7 +228,7 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
   };
 }
 
-/** 后端错误 → 可展示文本 (ApiError 由 axios 拦截器转换) */
+/** 后端错误 -> 可展示文本 (ApiError 由 axios 拦截器转换) */
 function errorText(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message !== '') return error.message;
   return fallback;
@@ -289,6 +297,7 @@ function PolicySection({
 function FormField({
   id,
   label,
+  labelAction,
   error,
   hint,
   className,
@@ -296,6 +305,7 @@ function FormField({
 }: {
   id: string;
   label: string;
+  labelAction?: ReactNode;
   error?: string;
   hint?: string;
   className?: string;
@@ -303,13 +313,43 @@ function FormField({
 }) {
   return (
     <div className={cn('flex min-w-0 flex-col gap-2', className)}>
-      <Label htmlFor={id}>{label}</Label>
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={id}>{label}</Label>
+        {labelAction}
+      </div>
       {children}
       {error !== undefined ? (
         <p className="text-destructive text-sm">{error}</p>
       ) : hint !== undefined ? (
         <p className="text-muted-foreground text-sm">{hint}</p>
       ) : null}
+    </div>
+  );
+}
+
+/** 开关字段: 标签与说明在左, 开关固定右侧 */
+function SwitchRow({
+  id,
+  label,
+  hint,
+  checked,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <Label htmlFor={id} className="font-normal">
+          {label}
+        </Label>
+        <p className="text-muted-foreground mt-2 text-xs">{hint}</p>
+      </div>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} className="shrink-0" />
     </div>
   );
 }
@@ -399,6 +439,9 @@ export default function AdminPolicyEditPage() {
   // 标签写入 ?tab=: 刷新与深链保持当前分组; 默认标签不落 URL, 扫描补录仅编辑模式可见
   const [searchParams, setSearchParams] = useSearchParams();
   const formURLFromBackend = NEW_TYPE_TRAITS[form?.type ?? '']?.urlFromBackend ?? false;
+  const urlBackendHint = formURLFromBackend
+    ? t(`adminPolicies.edit.field.urlBackendHint.${form?.type ?? ''}`, { defaultValue: '' })
+    : '';
   const availableTabs = isEdit ? POLICY_TABS : POLICY_TABS.filter((item) => item.id !== 'scan');
   const visibleTabs = formURLFromBackend
     ? availableTabs.filter((item) => !URL_BACKEND_HIDDEN_TABS.includes(item.id))
@@ -654,6 +697,29 @@ export default function AdminPolicyEditPage() {
   const updateForm = useCallback((patch: Partial<FormState>) => {
     setForm((current) => (current === null ? current : { ...current, ...patch }));
   }, []);
+  const driverDefaultHint = (type: string) => {
+    const key = DEFAULT_HINT_KEYS[type];
+    return key === undefined ? '' : t(key);
+  };
+  const resetHint = () => {
+    setForm((current) =>
+      current === null ? current : { ...current, hint: driverDefaultHint(current.type) },
+    );
+  };
+  /** 新建策略切换后端: 仅在提示为空或仍是已知默认值时替换, 不覆盖自定义内容 */
+  const handleTypeChange = (nextType: string) => {
+    setForm((current) => {
+      if (current === null) return current;
+      const hint = current.hint.trim();
+      const defaultHints = Object.keys(DEFAULT_HINT_KEYS).map((key) => driverDefaultHint(key));
+      const replaceHint = hint === '' || defaultHints.includes(hint);
+      return {
+        ...current,
+        type: nextType,
+        hint: replaceHint ? driverDefaultHint(nextType) : current.hint,
+      };
+    });
+  };
   const moveUrl = useCallback((sourceKey: string, targetKey: string) => {
     setForm((current) =>
       current === null
@@ -786,7 +852,7 @@ export default function AdminPolicyEditPage() {
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {`${label} — ${t('adminPolicies.edit.variable.insert', { variable })}`}
+          {`${label} - ${t('adminPolicies.edit.variable.insert', { variable })}`}
         </TooltipContent>
       </Tooltip>
     );
@@ -813,10 +879,7 @@ export default function AdminPolicyEditPage() {
   if (invalidId) {
     return (
       <div>
-        <PageHeader
-          title={t('adminPolicies.list.title')}
-          description={t('adminPolicies.edit.descriptionEdit')}
-        />
+        <PageHeader title={t('adminPolicies.list.title')} />
         <ErrorState
           message={t('adminPolicies.edit.invalidId')}
           onRetry={() => navigate('/admin/policies')}
@@ -828,10 +891,7 @@ export default function AdminPolicyEditPage() {
   if (isEdit && policyQuery.isError) {
     return (
       <div>
-        <PageHeader
-          title={t('adminPolicies.list.title')}
-          description={t('adminPolicies.edit.descriptionEdit')}
-        />
+        <PageHeader title={t('adminPolicies.list.title')} />
         <ErrorState
           message={errorText(policyQuery.error, t('adminPolicies.edit.loadFailed'))}
           onRetry={() => {
@@ -847,9 +907,7 @@ export default function AdminPolicyEditPage() {
       <div>
         <PageHeader
           title={isNew ? t('adminPolicies.edit.titleNew') : t('adminPolicies.list.title')}
-          description={
-            isNew ? t('adminPolicies.edit.descriptionNew') : t('adminPolicies.edit.descriptionEdit')
-          }
+          description={isNew ? t('adminPolicies.edit.descriptionNew') : undefined}
           actions={
             <>
               <Skeleton className="h-9 w-20 rounded-lg" />
@@ -877,9 +935,7 @@ export default function AdminPolicyEditPage() {
             ? formURLFromBackend
               ? t('adminPolicies.edit.descriptionNewUrlBackend')
               : t('adminPolicies.edit.descriptionNew')
-            : formURLFromBackend
-              ? t('adminPolicies.edit.descriptionEditUrlBackend')
-              : t('adminPolicies.edit.descriptionEdit')
+            : undefined
         }
         actions={
           <>
@@ -928,7 +984,22 @@ export default function AdminPolicyEditPage() {
           className="group-data-horizontal/tabs:h-auto border-border w-full flex-wrap justify-start rounded-none border-b p-0 pb-[5px]"
         >
           {visibleTabs.map((item) => (
-            <TabsTrigger key={item.id} value={item.id} className="h-9 flex-none gap-2 px-3">
+            <TabsTrigger
+              key={item.id}
+              value={item.id}
+              className="data-[pointer-focus=true]:focus-visible:border-transparent data-[pointer-focus=true]:focus-visible:ring-0 data-[pointer-focus=true]:focus-visible:outline-none h-9 flex-none gap-2 px-3"
+              onPointerDown={(event) => {
+                // Radix 在 mousedown 中主动 focus, 刷新后首次点击会被判定为 focus-visible;
+                // 仅对指针操作隐藏焦点环, 键盘导航仍然保留.
+                event.currentTarget.setAttribute('data-pointer-focus', 'true');
+              }}
+              onKeyDown={(event) => {
+                event.currentTarget.removeAttribute('data-pointer-focus');
+              }}
+              onBlur={(event) => {
+                event.currentTarget.removeAttribute('data-pointer-focus');
+              }}
+            >
               {item.icon}
               {t(`adminPolicies.edit.section.${item.labelKey}`)}
             </TabsTrigger>
@@ -936,7 +1007,7 @@ export default function AdminPolicyEditPage() {
         </TabsList>
 
         <TabsContent value="basic" className={TAB_PANEL_CLASS}>
-          <PolicySection hint={t('adminPolicies.edit.section.basicHint')}>
+          <PolicySection>
             <div className="flex flex-col gap-5">
               <FormField
                 id="policy-name"
@@ -953,9 +1024,52 @@ export default function AdminPolicyEditPage() {
                   required
                 />
               </FormField>
+              <div className="flex flex-col gap-2">
+                <FormField
+                  id="policy-type"
+                  label={
+                    isEdit
+                      ? t('adminPolicies.edit.field.typeEdit')
+                      : t('adminPolicies.edit.field.type')
+                  }
+                  className="sm:w-[240px]"
+                >
+                  <Select value={form.type} onValueChange={handleTypeChange} disabled={isEdit}>
+                    <SelectTrigger id="policy-type" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TYPE_OPTIONS.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {t(`adminPolicies.type.${option}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormField>
+                {urlBackendHint !== '' && (
+                  <p className="text-muted-foreground text-sm">{urlBackendHint}</p>
+                )}
+              </div>
               <FormField
                 id="policy-hint"
                 label={t('adminPolicies.edit.field.hint')}
+                labelAction={
+                  DEFAULT_HINT_KEYS[form.type] === undefined ? undefined : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={resetHint}
+                      disabled={form.hint.trim() === driverDefaultHint(form.type)}
+                      title={t('adminPolicies.edit.field.hintResetHint')}
+                    >
+                      <RotateCcw className="size-3.5" />
+                      {t('adminPolicies.edit.field.hintReset')}
+                    </Button>
+                  )
+                }
                 hint={t('adminPolicies.edit.field.hintHint')}
                 error={errorFor('hint')}
                 className="sm:max-w-xl"
@@ -969,49 +1083,17 @@ export default function AdminPolicyEditPage() {
                   aria-invalid={errorFor('hint') !== undefined}
                 />
               </FormField>
-              <FormField
-                id="policy-type"
-                label={t('adminPolicies.edit.field.type')}
-                hint={isEdit ? t('adminPolicies.edit.field.typeReadonly') : undefined}
-                className="sm:w-[240px]"
-              >
-                <Select
-                  value={form.type}
-                  onValueChange={(value) => updateForm({ type: value })}
-                  disabled={isEdit}
-                >
-                  <SelectTrigger id="policy-type" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TYPE_OPTIONS.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {t(`adminPolicies.type.${option}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FormField>
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="policy-enabled"
-                    checked={form.enabled}
-                    onCheckedChange={(checked) => updateForm({ enabled: checked })}
-                  />
-                  <Label htmlFor="policy-enabled" className="font-normal">
-                    {t('adminPolicies.edit.field.enabled')}
-                  </Label>
-                </div>
-                <p className="text-muted-foreground pl-10 text-xs">
-                  {t('adminPolicies.edit.field.enabledHint')}
+              <Separator />
+              <div className="flex flex-wrap items-center gap-1">
+                <p className="text-muted-foreground mr-2 text-sm">
+                  {t('adminPolicies.edit.field.capabilities')}
                 </p>
+                {capabilities.map((capability) => (
+                  <Badge key={capability} variant="outline">
+                    {t(`adminPolicies.capability.${capability}`, { defaultValue: capability })}
+                  </Badge>
+                ))}
               </div>
-              {formURLFromBackend && (
-                <p className="text-muted-foreground text-sm">
-                  {t('adminPolicies.edit.field.urlBackendHint')}
-                </p>
-              )}
             </div>
           </PolicySection>
         </TabsContent>
@@ -1148,21 +1230,13 @@ export default function AdminPolicyEditPage() {
                 {t('adminPolicies.edit.variable.note')}
               </p>
 
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="policy-reuse-released-seq"
-                    checked={form.reuseReleasedSeq}
-                    onCheckedChange={(checked) => updateForm({ reuseReleasedSeq: checked })}
-                  />
-                  <Label htmlFor="policy-reuse-released-seq" className="font-normal">
-                    {t('adminPolicies.edit.field.reuseReleasedSeq')}
-                  </Label>
-                </div>
-                <p className="text-muted-foreground pl-10 text-xs">
-                  {t('adminPolicies.edit.field.reuseReleasedSeqHint')}
-                </p>
-              </div>
+              <SwitchRow
+                id="policy-reuse-released-seq"
+                label={t('adminPolicies.edit.field.reuseReleasedSeq')}
+                hint={t('adminPolicies.edit.field.reuseReleasedSeqHint')}
+                checked={form.reuseReleasedSeq}
+                onCheckedChange={(checked) => updateForm({ reuseReleasedSeq: checked })}
+              />
 
               <Separator />
               <div className="flex items-center justify-between gap-2">
@@ -1527,15 +1601,13 @@ export default function AdminPolicyEditPage() {
                     className="font-mono"
                   />
                 </FormField>
-                <div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <Switch checked={dryRun} onCheckedChange={setDryRun} />
-                    {t('adminPolicies.edit.field.dryRun')}
-                  </label>
-                  <p className="text-muted-foreground text-xs">
-                    {t('adminPolicies.edit.field.dryRunHint')}
-                  </p>
-                </div>
+                <SwitchRow
+                  id="policy-scan-dry-run"
+                  label={t('adminPolicies.edit.field.dryRun')}
+                  hint={t('adminPolicies.edit.field.dryRunHint')}
+                  checked={dryRun}
+                  onCheckedChange={setDryRun}
+                />
                 <p className="text-muted-foreground text-xs">{t('adminPolicies.edit.scan.q21')}</p>
                 {scanMutation.isError && (
                   <Alert variant="destructive">
@@ -1592,7 +1664,7 @@ export default function AdminPolicyEditPage() {
                                   key={`${item.path}-${item.error}`}
                                   className="font-mono text-xs break-all"
                                 >
-                                  {item.path} — {item.error}
+                                  {item.path} - {item.error}
                                 </p>
                               ))}
                             </div>
@@ -1642,18 +1714,6 @@ export default function AdminPolicyEditPage() {
                 />
               </div>
             )}
-            <div className="flex flex-wrap items-center gap-1">
-              <p className="text-muted-foreground mr-2 text-sm">
-                {t('adminPolicies.edit.reference.capabilities')}
-              </p>
-              {capabilities.map((capability) => (
-                <Badge key={capability} variant="outline">
-                  {t(`adminPolicies.capability.${capability}`, {
-                    defaultValue: capability,
-                  })}
-                </Badge>
-              ))}
-            </div>
           </div>
         </PolicySection>
       )}

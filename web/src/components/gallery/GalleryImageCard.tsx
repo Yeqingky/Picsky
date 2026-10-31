@@ -63,7 +63,7 @@ export function GalleryImageCard({
         <p className="truncate text-xs text-white">{record.original_filename}</p>
         <p className="text-[11px] text-white/75">
           {formatBytes(record.size)}
-          {record.width && record.height ? ` · ${record.width}×${record.height}` : ''}
+          {record.width && record.height ? ` - ${record.width}x${record.height}` : ''}
         </p>
       </div>
     </div>

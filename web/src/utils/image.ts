@@ -1,8 +1,8 @@
 import { PLACEHOLDER_PALETTE } from './constants';
 
 /**
- * 占位色: 由 sha256 前 8 位十六进制映射到固定色板, 同一图片恒定 (docs/webui.md 4.2)。
- * 缺失哈希时退化为色板首位, 不产生随机闪烁。
+ * 占位色: 由 sha256 前 8 位十六进制映射到固定色板, 同一图片恒定 (docs/webui.md 4.2).
+ * 缺失哈希时退化为色板首位, 不产生随机闪烁.
  */
 export function placeholderColor(hash: string | null | undefined, mode: 'light' | 'dark'): string {
   const palette = PLACEHOLDER_PALETTE[mode];
@@ -22,11 +22,11 @@ export function displayHeight(
   return Math.round((targetWidth * height) / width);
 }
 
-/** 宽高比字符串, 例如 "1920 × 1080" */
+/** 宽高比字符串, 例如 "1920 x 1080" */
 export function dimensions(
   width: number | null | undefined,
   height: number | null | undefined,
 ): string {
   if (!width || !height) return '未知';
-  return `${width} × ${height}`;
+  return `${width} x ${height}`;
 }

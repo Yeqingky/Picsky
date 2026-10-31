@@ -1,6 +1,6 @@
 /**
- * Picsky REST API 类型定义 (/api/v1)。
- * 事实来源: docs/api.md, docs/permissions.md, docs/database.md, docs/storage-policy.md。
+ * Picsky REST API 类型定义 (/api/v1).
+ * 事实来源: docs/api.md, docs/permissions.md, docs/database.md, docs/storage-policy.md.
  */
 
 /** 失败响应体: {"code","message","details"} */

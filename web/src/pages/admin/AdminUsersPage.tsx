@@ -220,7 +220,7 @@ export default function AdminUsersPage() {
       className: 'min-w-[120px]',
       sortable: true,
       sortValue: (row) => row.nickname,
-      cell: (row) => row.nickname || '—',
+      cell: (row) => row.nickname || '-',
     },
     {
       id: 'email',
@@ -292,7 +292,7 @@ export default function AdminUsersPage() {
       header: t('admin.users.column.usage'),
       className: 'w-[200px]',
       cell: (row) =>
-        `${formatNumber(row.used_images)} ${t('common.quota.modeCount')} · ${formatBytes(row.used_bytes)}`,
+        `${formatNumber(row.used_images)} ${t('common.quota.modeCount')} - ${formatBytes(row.used_bytes)}`,
     },
     {
       id: 'default_policy_id',
@@ -787,7 +787,7 @@ function GroupDialog({
       <DialogContent aria-describedby={undefined} className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {t('admin.users.groupTitle')} · {user.username}
+            {t('admin.users.groupTitle')} - {user.username}
           </DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
@@ -865,7 +865,7 @@ function PasswordDialog({
       <DialogContent aria-describedby={undefined} className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {t('admin.users.passwordTitle')} · {user.username}
+            {t('admin.users.passwordTitle')} - {user.username}
           </DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
@@ -939,7 +939,7 @@ function QuotaDialog({
       <DialogContent aria-describedby={undefined} className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {t('admin.users.quotaTitle')} · {user.username}
+            {t('admin.users.quotaTitle')} - {user.username}
           </DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
@@ -1026,7 +1026,7 @@ function PolicyDialog({
       <DialogContent aria-describedby={undefined} className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {t('admin.users.policyTitle')} · {user.username}
+            {t('admin.users.policyTitle')} - {user.username}
           </DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">

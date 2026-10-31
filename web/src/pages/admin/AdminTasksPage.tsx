@@ -252,7 +252,7 @@ export default function AdminTasksPage() {
         className: 'w-[180px]',
         sortable: true,
         sortValue: (row) => row.finished_at,
-        cell: (row) => (row.finished_at ? formatDateTime(row.finished_at) : '—'),
+        cell: (row) => (row.finished_at ? formatDateTime(row.finished_at) : '-'),
       },
       {
         id: 'actions',
@@ -482,7 +482,7 @@ export default function AdminTasksPage() {
               />
               <DetailRow
                 label={t('adminSystem.tasks.column.finishedAt')}
-                value={detail.finished_at ? formatDateTime(detail.finished_at) : '—'}
+                value={detail.finished_at ? formatDateTime(detail.finished_at) : '-'}
               />
 
               <div>

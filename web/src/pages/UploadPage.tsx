@@ -491,7 +491,7 @@ export default function UploadPage() {
             {(policies ?? []).map((policy) => (
               <SelectItem key={policy.id} value={String(policy.id)}>
                 {policy.name}
-                {policy.is_default ? ` · ${t('upload.policy.defaultHint')}` : ''}
+                {policy.is_default ? ` - ${t('upload.policy.defaultHint')}` : ''}
               </SelectItem>
             ))}
           </SelectContent>

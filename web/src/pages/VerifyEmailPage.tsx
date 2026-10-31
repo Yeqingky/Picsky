@@ -8,8 +8,8 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
 
 /**
- * 邮箱验证落地页 (公开): 消费邮件里的 ?token= 并提交 POST /auth/verify-email。
- * 邮箱验证开启时, 注册与个人设置页发出的链接都指向本路由。
+ * 邮箱验证落地页 (公开): 消费邮件里的 ?token= 并提交 POST /auth/verify-email.
+ * 邮箱验证开启时, 注册与个人设置页发出的链接都指向本路由.
  */
 export default function VerifyEmailPage() {
   const { t } = useTranslation();

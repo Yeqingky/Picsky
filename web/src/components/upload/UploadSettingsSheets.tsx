@@ -24,7 +24,7 @@ import { Switch } from '../ui/switch';
 
 const FORMAT_OPTIONS: readonly UploadOutputFormat[] = ['jpg', 'jpeg', 'webp', 'avif'];
 
-/** 页头“压缩”按钮: 右侧抽屉展示压缩参数 (docs/webui.md 第 6 节) */
+/** 页头"压缩"按钮: 右侧抽屉展示压缩参数 (docs/webui.md 第 6 节) */
 export function CompressionSettingsButton() {
   const { t } = useTranslation();
   const settings = useUploadSettings();
@@ -161,7 +161,7 @@ export function CompressionSettingsButton() {
   );
 }
 
-/** 页头“设置”按钮: 自动上传与压缩失败处理 */
+/** 页头"设置"按钮: 自动上传与压缩失败处理 */
 export function UploadSettingsButton() {
   const { t } = useTranslation();
   const settings = useUploadSettings();

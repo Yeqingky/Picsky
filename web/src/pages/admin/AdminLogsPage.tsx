@@ -110,7 +110,7 @@ export default function AdminLogsPage() {
               {t('adminSystem.logs.unauthenticated')}
             </span>
           ) : (
-            (row.username ?? '—')
+            (row.username ?? '-')
           ),
       },
       {
@@ -135,7 +135,7 @@ export default function AdminLogsPage() {
         className: 'w-[100px]',
         sortable: true,
         sortValue: (row) => row.target_id,
-        cell: (row) => (row.target_id === null ? '—' : String(row.target_id)),
+        cell: (row) => (row.target_id === null ? '-' : String(row.target_id)),
       },
       {
         id: 'ip',
@@ -143,7 +143,7 @@ export default function AdminLogsPage() {
         className: 'w-[150px]',
         sortable: true,
         sortValue: (row) => row.ip,
-        cell: (row) => <span className="font-mono text-xs">{row.ip ?? '—'}</span>,
+        cell: (row) => <span className="font-mono text-xs">{row.ip ?? '-'}</span>,
       },
       {
         id: 'detail',
@@ -348,20 +348,20 @@ export default function AdminLogsPage() {
                     ? t('adminSystem.logs.unauthenticated')
                     : detail.username
                       ? `${detail.username} (#${detail.user_id})`
-                      : '—'
+                      : '-'
                 }
               />
               <DetailRow label={t('adminSystem.logs.column.action')} value={detail.action} />
               <DetailRow
                 label={t('adminSystem.logs.column.targetType')}
-                value={detail.target_type ?? '—'}
+                value={detail.target_type ?? '-'}
               />
               <DetailRow
                 label={t('adminSystem.logs.column.targetId')}
-                value={detail.target_id === null ? '—' : String(detail.target_id)}
+                value={detail.target_id === null ? '-' : String(detail.target_id)}
               />
-              <DetailRow label={t('adminSystem.logs.column.ip')} value={detail.ip ?? '—'} />
-              <DetailRow label={t('adminSystem.logs.userAgent')} value={detail.user_agent ?? '—'} />
+              <DetailRow label={t('adminSystem.logs.column.ip')} value={detail.ip ?? '-'} />
+              <DetailRow label={t('adminSystem.logs.userAgent')} value={detail.user_agent ?? '-'} />
 
               <div>
                 <h3 className="mb-1.5 text-sm font-medium">

@@ -14,7 +14,7 @@ import (
 	"github.com/yeqingky/Picsky/internal/service"
 )
 
-// Multipart 字段按单值长度、字段名和值总量及字段数量共同限界.
+// Multipart 字段按单值长度, 字段名和值总量及字段数量共同限界.
 const (
 	maxFormFieldLength     = 4096
 	maxFormFieldTotalBytes = 64 << 10

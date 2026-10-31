@@ -1338,7 +1338,7 @@ func TestUploadCheckDoesNotExposeOtherUsersRecord(t *testing.T) {
 		t.Errorf("跨用户记录应视为当前用户不存在: %s", string(check.Body))
 	}
 	if _, exists := result["record"]; exists {
-		t.Errorf("响应不得包含其他用户的记录 ID、URL 或大小: %s", string(check.Body))
+		t.Errorf("响应不得包含其他用户的记录 ID, URL 或大小: %s", string(check.Body))
 	}
 }
 

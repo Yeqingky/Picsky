@@ -17,7 +17,7 @@ export interface MasonryGridProps<T> {
   className?: string;
 }
 
-/** Tailwind 断点 → 列数 (与 MASONRY.columns 对齐) */
+/** Tailwind 断点 -> 列数 (与 MASONRY.columns 对齐) */
 const BREAKPOINTS: readonly (readonly [string, number])[] = [
   ['(min-width: 1280px)', MASONRY.columns.xl],
   ['(min-width: 1024px)', MASONRY.columns.lg],
@@ -48,9 +48,9 @@ export function useMasonryColumns(): number {
 }
 
 /**
- * 自研瀑布流容器 (docs/webui.md 4.1): CSS grid 行跨度法。
- * grid-auto-rows: 8px, 卡片间距 12px, span = ceil((高度 + 间距) / (8 + 间距))。
- * 卡片高度由记录宽高与列宽预先计算, 图片未加载即可定位, 滚动零跳动。
+ * 自研瀑布流容器 (docs/webui.md 4.1): CSS grid 行跨度法.
+ * grid-auto-rows: 8px, 卡片间距 12px, span = ceil((高度 + 间距) / (8 + 间距)).
+ * 卡片高度由记录宽高与列宽预先计算, 图片未加载即可定位, 滚动零跳动.
  */
 function MasonryGridInner<T>({
   items,

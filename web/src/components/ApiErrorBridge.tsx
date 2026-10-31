@@ -8,7 +8,7 @@ import { AUTH_QUERY_KEY } from '../hooks/useAuth';
 
 /**
  * 把 axios 拦截器的全局错误与 401 会话失效接到 sonner 与路由:
- * 未认证时清空会话缓存并跳转登录页 (公开页除外)。
+ * 未认证时清空会话缓存并跳转登录页 (公开页除外).
  */
 export function ApiErrorBridge() {
   const navigate = useNavigate();

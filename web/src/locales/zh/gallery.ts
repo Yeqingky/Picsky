@@ -29,14 +29,14 @@ export const gallery = {
     clear: '清空选择',
   },
   more: {
-    loading: '正在加载更多…',
+    loading: '正在加载更多...',
     end: '没有更多了',
     retry: '加载更多失败, 点击重试',
     appended: '追加加载中',
   },
   empty: {
     title: '暂无图片',
-    description: '上传图片后即可在这里看到记录。',
+    description: '上传图片后即可在这里看到记录.',
   },
   detail: {
     title: '图片详情',

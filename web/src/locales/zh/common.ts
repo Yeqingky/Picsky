@@ -1,18 +1,18 @@
 /** 通用文案: 动作, 状态, 表格, 确认框, 配额, 副本格式等 */
 export const common = {
   appName: 'Picsky',
-  loading: '加载中…',
+  loading: '加载中...',
   defaultAlias: '默认',
 
   action: {
     save: '保存',
-    saving: '保存中…',
+    saving: '保存中...',
     cancel: '取消',
     delete: '删除',
-    deleting: '删除中…',
+    deleting: '删除中...',
     edit: '编辑',
     create: '新建',
-    creating: '新建中…',
+    creating: '新建中...',
     refresh: '刷新',
     close: '关闭',
     confirm: '确定',
@@ -75,12 +75,12 @@ export const common = {
   confirm: {
     title: '确认操作',
     dangerTitle: '危险操作确认',
-    irreversible: '此操作不可撤销, 请确认后继续。',
+    irreversible: '此操作不可撤销, 请确认后继续.',
     deleteImageObject: '确定删除该图片?',
     batchDeleteImages: '确定删除选中的 {{count}} 张图片?',
     deleteKey: '吊销后使用该密钥的客户端将立即失效, 确定继续?',
-    deletePolicy: '删除策略后无法恢复, 引用该策略的记录不会被删除。确定继续?',
-    deleteGroup: '删除用户组后无法恢复, 组内用户需重新分配。确定继续?',
+    deletePolicy: '删除策略后无法恢复, 引用该策略的记录不会被删除. 确定继续?',
+    deleteGroup: '删除用户组后无法恢复, 组内用户需重新分配. 确定继续?',
     deleteUser: '删除用户会级联删除其图片记录, 确定继续?',
   },
 
@@ -191,11 +191,11 @@ export const common = {
 
   status403: {
     title: '403 无权限',
-    description: '当前账号没有访问该页面的权限, 如需授权请联系管理员。',
+    description: '当前账号没有访问该页面的权限, 如需授权请联系管理员.',
   },
 
   status404: {
     title: '404 页面不存在',
-    description: '你访问的地址不存在或已被移除。',
+    description: '你访问的地址不存在或已被移除.',
   },
 };

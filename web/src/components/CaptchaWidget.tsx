@@ -61,9 +61,9 @@ export interface CaptchaWidgetProps {
 }
 
 /**
- * 人机验证控件 (只接入官方脚本, 不实现本地验证码)。
+ * 人机验证控件 (只接入官方脚本, 不实现本地验证码).
  * - turnstile: site_key 为 Cloudflare Turnstile site key;
- * - cap: site_key 为 Cap 的 API endpoint (widget 的 data-cap-api-endpoint)。
+ * - cap: site_key 为 Cap 的 API endpoint (widget 的 data-cap-api-endpoint).
  */
 export function CaptchaWidget({ config, onToken, resetSignal = 0 }: CaptchaWidgetProps) {
   const { resolvedMode } = useThemeMode();

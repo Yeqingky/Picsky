@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { SKELETON_DELAY_MS, SKELETON_MIN_MS } from '../utils/constants';
 
 /**
- * 局部刷新骨架: 延迟 200ms 才显示, 且展示时长不短于 300ms (docs/webui.md 第 3 节)。
- * 路由级首屏应直接使用 loading, 不经此 Hook。
+ * 局部刷新骨架: 延迟 200ms 才显示, 且展示时长不短于 300ms (docs/webui.md 第 3 节).
+ * 路由级首屏应直接使用 loading, 不经此 Hook.
  */
 export function useDelayedLoading(
   loading: boolean,

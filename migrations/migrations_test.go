@@ -137,7 +137,7 @@ func TestAccountStateMigrationRestrictsLegacyAndPendingUsers(t *testing.T) {
 		}
 	}
 	if legacy.Status != model.UserStatusBanned || legacy.GroupID != groups[1].ID || legacy.RestoreGroupID == nil || *legacy.RestoreGroupID != groups[0].ID || legacy.SessionVersion != 5 {
-		t.Errorf("旧禁用账号应封禁、移入只读组并吊销旧会话: %+v", legacy)
+		t.Errorf("旧禁用账号应封禁, 移入只读组并吊销旧会话: %+v", legacy)
 	}
 	if pending.Status != model.UserStatusUnverified || pending.GroupID != groups[1].ID || pending.RestoreGroupID == nil || *pending.RestoreGroupID != groups[0].ID || pending.SessionVersion != 4 {
 		t.Errorf("待验证账号应移入只读组并保留原组: %+v", pending)

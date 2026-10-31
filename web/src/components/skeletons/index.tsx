@@ -8,7 +8,7 @@ import { MasonryGrid } from '../MasonryGrid';
 /**
  * 统一骨架基元 (docs/webui.md 第 3 节):
  * - 全部走 ui/skeleton 的扫光动画 (reduced-motion 兜底见 index.css);
- * - 容器统一 aria-busy="true"。
+ * - 容器统一 aria-busy="true".
  */
 export function SkeletonSurface({
   children,
@@ -82,7 +82,7 @@ export function PageHeaderSkeleton({ actions = 0 }: { actions?: number }) {
   );
 }
 
-/** 路由分块加载的通用骨架: 页面操作、筛选器、表格与分页 */
+/** 路由分块加载的通用骨架: 页面操作, 筛选器, 表格与分页 */
 export function PageSkeleton({ blocks = 3 }: { blocks?: number }) {
   const { t } = useTranslation();
   return (
@@ -144,7 +144,7 @@ function ProfileSectionSkeleton({
   );
 }
 
-/** 仪表盘首屏: 配额与统计卡、最近上传和账户信息 */
+/** 仪表盘首屏: 配额与统计卡, 最近上传和账户信息 */
 export function DashboardSkeleton() {
   const { t } = useTranslation();
   return (
@@ -220,7 +220,7 @@ export function DashboardSkeleton() {
   );
 }
 
-/** 个人设置首屏: 账户信息、密码、两步验证与偏好卡片 */
+/** 个人设置首屏: 账户信息, 密码, 两步验证与偏好卡片 */
 export function ProfileSkeleton() {
   const { t } = useTranslation();
   return (
@@ -296,7 +296,7 @@ export function ProfileSkeleton() {
   );
 }
 
-/** 存储策略编辑首屏: 操作栏、标签页与基础设置表单 */
+/** 存储策略编辑首屏: 操作栏, 标签页与基础设置表单 */
 export function PolicyEditorSkeleton({ tabs = 5 }: { tabs?: number }) {
   const { t } = useTranslation();
   return (
@@ -406,7 +406,7 @@ export function ChartSkeleton({
   );
 }
 
-/** 仪表盘最近上传行: 文件名、时间/大小与格式徽标 */
+/** 仪表盘最近上传行: 文件名, 时间/大小与格式徽标 */
 export function RecentUploadsSkeleton({ rows = 5 }: { rows?: number }) {
   const { t } = useTranslation();
   return (
@@ -426,7 +426,7 @@ export function RecentUploadsSkeleton({ rows = 5 }: { rows?: number }) {
   );
 }
 
-/** 登录、注册与找回密码表单骨架; AuthLayout 提供站点标题与外层卡片 */
+/** 登录, 注册与找回密码表单骨架; AuthLayout 提供站点标题与外层卡片 */
 export function AuthCardSkeleton({
   fields = 2,
   captcha = false,

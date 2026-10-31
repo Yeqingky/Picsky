@@ -59,7 +59,7 @@ export function setErrorNotifier(notifier: ErrorNotifier | null): void {
 
 /**
  * 这些端点上的 401 属于业务结果 (凭据错误 / 会话探测), 不触发全局跳转登录:
- * 登录与注册的凭据校验, 会话探测本身, 以及需要再次输入密码的敏感操作。
+ * 登录与注册的凭据校验, 会话探测本身, 以及需要再次输入密码的敏感操作.
  */
 const SILENT_401_PATHS = [
   '/auth/login',

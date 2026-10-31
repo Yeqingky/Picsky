@@ -29,7 +29,7 @@ const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
 
 /** 1024 进制字节数格式化 */
 export function formatBytes(bytes: number | null | undefined, fractionDigits = 2): string {
-  if (bytes === null || bytes === undefined || Number.isNaN(bytes)) return '—';
+  if (bytes === null || bytes === undefined || Number.isNaN(bytes)) return '-';
   if (bytes < 1024) return `${bytes} B`;
   let value = bytes;
   let unit = 0;
@@ -42,20 +42,20 @@ export function formatBytes(bytes: number | null | undefined, fractionDigits = 2
 }
 
 export function formatNumber(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
   return new Intl.NumberFormat('zh-CN').format(value);
 }
 
 /** RFC3339 (UTC) -> 本地时区展示 */
 export function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '—';
+  if (!value) return '-';
   const date = dayjs(value);
   if (!date.isValid()) return value;
   return datetimeFormatter.format(date.toDate());
 }
 
 export function formatDate(value: string | null | undefined): string {
-  if (!value) return '—';
+  if (!value) return '-';
   const date = dayjs(value);
   if (!date.isValid()) return value;
   return dateFormatter.format(date.toDate());
@@ -63,7 +63,7 @@ export function formatDate(value: string | null | undefined): string {
 
 /** 相对时间, 例如 "3 天前" */
 export function formatRelative(value: string | null | undefined): string {
-  if (!value) return '—';
+  if (!value) return '-';
   const date = dayjs(value);
   if (!date.isValid()) return value;
   return date.fromNow();
@@ -71,7 +71,7 @@ export function formatRelative(value: string | null | undefined): string {
 
 /** 毫秒 -> "1.23 s" */
 export function formatDuration(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined) return '—';
+  if (ms === null || ms === undefined) return '-';
   if (ms < 1000) return `${Math.round(ms)} ms`;
   return `${(ms / 1000).toFixed(2)} s`;
 }

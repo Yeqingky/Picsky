@@ -2,8 +2,8 @@ import { PERMISSION_NAMES } from '../api/types';
 import type { PermissionName } from '../api/types';
 
 /**
- * 权限位名称 (docs/permissions.md 第 2 节) 与 i18n key 的映射。
- * i18n key 统一落在 `permissions.<name>`。
+ * 权限位名称 (docs/permissions.md 第 2 节) 与 i18n key 的映射.
+ * i18n key 统一落在 `permissions.<name>`.
  */
 export const PERMISSION_BITS: Record<PermissionName, number> = {
   upload: 0,

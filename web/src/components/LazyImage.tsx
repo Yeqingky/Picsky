@@ -25,8 +25,8 @@ export interface LazyImageProps {
 }
 
 /**
- * 统一图片组件 (docs/webui.md 4.2): 占位色 + onload 后淡入 + 失败重试。
- * 不做模糊到清晰, 不代理图片内容, 浏览器直连分发域名。
+ * 统一图片组件 (docs/webui.md 4.2): 占位色 + onload 后淡入 + 失败重试.
+ * 不做模糊到清晰, 不代理图片内容, 浏览器直连分发域名.
  */
 export function LazyImage({
   src,

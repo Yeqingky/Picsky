@@ -11,7 +11,7 @@ export function UrlList({
   urls,
   filename,
   copyFormat = 'direct',
-  emptyText = '—',
+  emptyText = '-',
 }: {
   urls: readonly UploadUrlAlias[];
   filename?: string;

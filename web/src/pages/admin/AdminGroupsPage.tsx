@@ -160,7 +160,7 @@ export default function AdminGroupsPage() {
       id: 'description',
       header: t('admin.groups.column.description'),
       className: 'min-w-[180px]',
-      cell: (row) => <span className="text-sm">{row.description || '—'}</span>,
+      cell: (row) => <span className="text-sm">{row.description || '-'}</span>,
     },
     {
       id: 'permissions',
@@ -175,7 +175,7 @@ export default function AdminGroupsPage() {
           </TooltipTrigger>
           <TooltipContent>
             {row.permissions.map((permission) => t(`permissions.name.${permission}`)).join(', ') ||
-              '—'}
+              '-'}
           </TooltipContent>
         </Tooltip>
       ),
@@ -723,7 +723,7 @@ function GroupPoliciesDialog({
       <DialogContent className="sm:max-w-lg" aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>
-            {t('admin.groups.policiesTitle')} · {group.name}
+            {t('admin.groups.policiesTitle')} - {group.name}
           </DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3">

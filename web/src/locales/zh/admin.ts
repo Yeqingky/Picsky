@@ -70,10 +70,10 @@ export const admin = {
     policyInherit: '继承用户组默认策略',
     policyInheritShort: '继承组默认',
     confirm: {
-      ban: '确定封禁用户 {{username}}? 封禁后该账号将无法登录。',
+      ban: '确定封禁用户 {{username}}? 封禁后该账号将无法登录.',
       verify: '确定将用户 {{username}} 标记为已验证并启用?',
       unban: '确定解除用户 {{username}} 的封禁?',
-      delete: '确定删除用户 {{username}}? 删除会级联删除其图片记录。',
+      delete: '确定删除用户 {{username}}? 删除会级联删除其图片记录.',
     },
     feedback: {
       created: '用户 {{username}} 已创建',
@@ -138,7 +138,7 @@ export const admin = {
       delete: '删除',
     },
     confirm: {
-      delete: '确定删除用户组 {{name}}? 删除后无法恢复, 组内用户需重新分配。',
+      delete: '确定删除用户组 {{name}}? 删除后无法恢复, 组内用户需重新分配.',
     },
     feedback: {
       created: '用户组已创建',

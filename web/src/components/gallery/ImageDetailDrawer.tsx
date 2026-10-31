@@ -255,7 +255,7 @@ export function ImageDetailDrawer({
                   <FieldRow label={t('gallery.detail.mime')}>{data.mime}</FieldRow>
                   <FieldRow label={t('gallery.detail.uploader')}>
                     {data.user_email === '' ? (
-                      '—'
+                      '-'
                     ) : onFilterUser ? (
                       <button
                         type="button"
@@ -271,7 +271,7 @@ export function ImageDetailDrawer({
                   <FieldRow label={t('gallery.detail.source')}>
                     {t(`common.source.${data.source}`, { defaultValue: data.source })}
                   </FieldRow>
-                  <FieldRow label={t('gallery.detail.clientIp')}>{data.client_ip ?? '—'}</FieldRow>
+                  <FieldRow label={t('gallery.detail.clientIp')}>{data.client_ip ?? '-'}</FieldRow>
                   <FieldRow label={t('gallery.detail.createdAt')}>
                     {formatDateTime(data.created_at)}
                   </FieldRow>

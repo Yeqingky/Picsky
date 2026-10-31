@@ -58,7 +58,7 @@ function UsageRing({ percent, label }: { percent: number | null; label: string }
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="font-heading text-xl font-semibold">
-          {percent === null ? '—' : `${Math.round(value)}%`}
+          {percent === null ? '-' : `${Math.round(value)}%`}
         </span>
         <span className="text-muted-foreground mt-0.5 text-xs">{label}</span>
       </div>
@@ -126,7 +126,7 @@ export default function DashboardPage() {
   const limit = quota.limit;
   const percent = limit !== null && limit > 0 ? Math.min(100, (quota.used / limit) * 100) : null;
   const remaining = limit === null ? null : Math.max(0, limit - quota.used);
-  const storedImages = imagesQuery.data ? formatNumber(imagesQuery.data.total) : '—';
+  const storedImages = imagesQuery.data ? formatNumber(imagesQuery.data.total) : '-';
 
   // 未设置存储限额时展示已存储的图片数量 (docs/webui.md 第 5 节)
   const usageValue = remaining === null ? storedImages : formatQuota(remaining);
@@ -139,7 +139,7 @@ export default function DashboardPage() {
       ? ''
       : t('dashboard.usage.detail', { used: formatQuota(quota.used), total: formatQuota(limit) });
   const usageDetail =
-    limit === null ? occupied : isByteQuota ? quotaDetail : `${quotaDetail} · ${occupied}`;
+    limit === null ? occupied : isByteQuota ? quotaDetail : `${quotaDetail} - ${occupied}`;
 
   const policies = policiesQuery.data ?? [];
   const activeKeys = keysQuery.data?.filter((key) => key.revoked_at === null).length;
@@ -170,7 +170,7 @@ export default function DashboardPage() {
       key: 'policies',
       icon: <Server />,
       label: t('dashboard.stats.policiesLabel'),
-      value: policiesQuery.data ? formatNumber(policies.length) : '—',
+      value: policiesQuery.data ? formatNumber(policies.length) : '-',
     },
     ...(canManageKeys
       ? [
@@ -178,7 +178,7 @@ export default function DashboardPage() {
             key: 'keys',
             icon: <KeyRound />,
             label: t('dashboard.stats.keysLabel'),
-            value: activeKeys === undefined ? '—' : formatNumber(activeKeys),
+            value: activeKeys === undefined ? '-' : formatNumber(activeKeys),
           },
         ]
       : []),
@@ -211,7 +211,7 @@ export default function DashboardPage() {
               <Link to="/gallery">
                 <Images className="size-4" />
                 {t('dashboard.galleryShortcut', {
-                  total: imagesQuery.data ? formatNumber(imagesQuery.data.total) : '—',
+                  total: imagesQuery.data ? formatNumber(imagesQuery.data.total) : '-',
                 })}
               </Link>
             </Button>
