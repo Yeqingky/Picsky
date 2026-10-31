@@ -80,7 +80,7 @@ import type { PolicyTransferResult } from './policyTransfer';
  * 可选后端类型: 只列出已注册且管理界面支持的驱动 (docs/storage-policy.md 第 3 节),
  * 未注册的类型提交会被后端以 400 拒绝。
  */
-const TYPE_OPTIONS = ['webdav', 'sobot', 'celine'] as const;
+const TYPE_OPTIONS = ['webdav', 'sobot', 'celine', 'metaso'] as const;
 
 const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
 
@@ -92,6 +92,7 @@ const NEW_TYPE_TRAITS: Record<string, { capabilities: string[]; urlFromBackend: 
   },
   sobot: { capabilities: ['upload'], urlFromBackend: true },
   celine: { capabilities: ['upload'], urlFromBackend: true },
+  metaso: { capabilities: ['upload'], urlFromBackend: true },
 };
 
 /** 由后端分配直链的驱动不显示连接, 路径, 域名, 冲突与扫描标签 */

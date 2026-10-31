@@ -30,6 +30,7 @@ export const adminPolicies = {
     webdav: 'WebDAV',
     sobot: 'Sobot',
     celine: '思琳中国',
+    metaso: '秘塔',
     s3: 'S3 兼容',
     aliyun_oss: '阿里云 OSS',
     tencent_cos: '腾讯云 COS',
@@ -63,7 +64,8 @@ export const adminPolicies = {
     descriptionNew: '新建时预填系统设置中的默认魔法路径与默认冲突策略; 后端类型创建后不可修改。',
     descriptionEdit:
       '修改分发域名或魔法路径后, 可在基本信息 / 分发域名标签下用对照表核对对象键与域名路径是否指向同一对象。',
-    descriptionNewUrlBackend: '选择 Sobot 或思琳中国后只需填写策略名称; 后端类型创建后不可修改。',
+    descriptionNewUrlBackend:
+      '选择 Sobot, 思琳中国或秘塔后只需填写策略名称; 后端类型创建后不可修改。',
     descriptionEditUrlBackend: '该后端由服务端返回图片直链; 修改策略名称或启用状态后保存即可。',
     back: '返回列表',
     loadFailed: '存储策略加载失败',
