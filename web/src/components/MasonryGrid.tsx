@@ -88,8 +88,11 @@ function MasonryGridInner<T>({
           return (
             <div
               key={getKey(item)}
-              className="min-w-0 [contain:layout_paint_style]"
-              style={{ gridRowEnd: `span ${rowSpan(height)}` }}
+              className="min-w-0 [contain:layout_paint_style] [content-visibility:auto]"
+              style={{
+                gridRowEnd: `span ${rowSpan(height)}`,
+                containIntrinsicBlockSize: `auto ${Math.round(height)}px`,
+              }}
             >
               {renderItem(item, { columnWidth, height })}
             </div>
