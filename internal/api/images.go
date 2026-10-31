@@ -166,6 +166,7 @@ func (s *Server) userPolicies(c *gin.Context) {
 			"id":         policy.ID,
 			"name":       policy.Name,
 			"type":       policy.Type,
+			"hint":       policy.Hint,
 			"urls":       urlItems,
 			"is_default": policy.ID == defaultPolicyID,
 		}

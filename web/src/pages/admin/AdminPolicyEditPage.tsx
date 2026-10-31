@@ -166,6 +166,7 @@ interface UrlRow {
 
 interface FormState {
   name: string;
+  hint: string;
   type: string;
   enabled: boolean;
   endpoint: string;
@@ -206,6 +207,7 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
 
   return {
     name: policy.name,
+    hint: policy.hint,
     type: policy.type,
     enabled: policy.enabled,
     endpoint: typeof policy.config.endpoint === 'string' ? policy.config.endpoint : '',
@@ -446,6 +448,7 @@ export default function AdminPolicyEditPage() {
     const rawConflict = payload?.default_conflict_policy;
     setForm({
       name: '',
+      hint: '',
       type: TYPE_OPTIONS[0],
       enabled: true,
       endpoint: '',
@@ -516,6 +519,9 @@ export default function AdminPolicyEditPage() {
     }
 
     if (form.name.trim() === '') next.name = t('adminPolicies.edit.error.nameRequired');
+    if ([...form.hint.trim()].length > 500) {
+      next.hint = t('adminPolicies.edit.error.hintTooLong');
+    }
 
     if (!formURLFromBackend) {
       form.urls.forEach((row, index) => {
@@ -577,6 +583,7 @@ export default function AdminPolicyEditPage() {
     const body: AdminPolicyWriteRequest = formURLFromBackend
       ? {
           name: form.name.trim(),
+          hint: form.hint.trim(),
           type: form.type,
           enabled: form.enabled,
           path_template: DEFAULT_PATH_TEMPLATE,
@@ -587,6 +594,7 @@ export default function AdminPolicyEditPage() {
         }
       : {
           name: form.name.trim(),
+          hint: form.hint.trim(),
           type: form.type,
           enabled: form.enabled,
           path_template: form.pathTemplate.trim(),
@@ -661,6 +669,7 @@ export default function AdminPolicyEditPage() {
         : JSON.stringify(
             buildPolicyTransferPayload({
               name: form.name,
+              hint: form.hint,
               type: form.type,
               enabled: form.enabled,
               endpoint: form.endpoint,
@@ -705,6 +714,7 @@ export default function AdminPolicyEditPage() {
       if (current === null) return current;
       const next: FormState = { ...current };
       if (patch.name !== undefined) next.name = patch.name;
+      if (patch.hint !== undefined) next.hint = patch.hint;
       if (nextType !== undefined) next.type = nextType;
       if (patch.enabled !== undefined) next.enabled = patch.enabled;
       if (patch.endpoint !== undefined) next.endpoint = patch.endpoint;
@@ -941,6 +951,22 @@ export default function AdminPolicyEditPage() {
                   placeholder={t('adminPolicies.edit.field.namePlaceholder')}
                   aria-invalid={errorFor('name') !== undefined}
                   required
+                />
+              </FormField>
+              <FormField
+                id="policy-hint"
+                label={t('adminPolicies.edit.field.hint')}
+                hint={t('adminPolicies.edit.field.hintHint')}
+                error={errorFor('hint')}
+                className="sm:max-w-xl"
+              >
+                <Textarea
+                  id="policy-hint"
+                  value={form.hint}
+                  onChange={(event) => updateForm({ hint: event.target.value })}
+                  rows={3}
+                  maxLength={500}
+                  aria-invalid={errorFor('hint') !== undefined}
                 />
               </FormField>
               <FormField

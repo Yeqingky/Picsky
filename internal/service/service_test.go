@@ -594,6 +594,48 @@ func TestPolicyReorder(t *testing.T) {
 	}
 }
 
+func TestPolicyHint(t *testing.T) {
+	f := newFixture(t)
+	policy := f.createPolicy("提示策略", "{md5}.{ext}", model.ConflictRename)
+
+	hint := "上传前请确认图片符合规范"
+	if _, err := f.svc.Policies.Update(policy.ID, service.PolicyInput{Hint: &hint}, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("更新提示文字失败: %v", err)
+	}
+	updated, err := f.svc.Policies.Get(policy.ID)
+	if err != nil {
+		t.Fatalf("读取策略失败: %v", err)
+	}
+	if updated.Hint != hint {
+		t.Errorf("提示文字 = %q, 期望 %q", updated.Hint, hint)
+	}
+	if updated.Name != policy.Name {
+		t.Errorf("仅更新提示文字时不应改动策略名称: %q", updated.Name)
+	}
+	if updated.Sort != policy.Sort {
+		t.Errorf("仅更新提示文字时不应改动排序: %d", updated.Sort)
+	}
+
+	empty := ""
+	if _, err := f.svc.Policies.Update(policy.ID, service.PolicyInput{Hint: &empty}, f.admin, "127.0.0.1", "test-agent"); err != nil {
+		t.Fatalf("清空提示文字失败: %v", err)
+	}
+	cleared, err := f.svc.Policies.Get(policy.ID)
+	if err != nil {
+		t.Fatalf("读取策略失败: %v", err)
+	}
+	if cleared.Hint != "" {
+		t.Errorf("提示文字应被清空, 实际 %q", cleared.Hint)
+	}
+
+	tooLong := strings.Repeat("提", 501)
+	_, err = f.svc.Policies.Update(policy.ID, service.PolicyInput{Hint: &tooLong}, f.admin, "127.0.0.1", "test-agent")
+	var apiErr *apperr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != "invalid_request" {
+		t.Errorf("超长提示文字应返回 invalid_request, 实际 %v", err)
+	}
+}
+
 func TestQuotaEnforcement(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)

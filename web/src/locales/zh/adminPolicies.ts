@@ -94,6 +94,8 @@ export const adminPolicies = {
     field: {
       name: '策略名称',
       namePlaceholder: '例如 主站 WebDAV',
+      hint: '提示文字',
+      hintHint: '显示在上传页存储策略选择器左侧; 留空则不显示。',
       type: '后端类型',
       typeReadonly: '后端类型创建后不可修改。',
       enabled: '启用策略',
@@ -122,6 +124,7 @@ export const adminPolicies = {
 
     error: {
       nameRequired: '请填写策略名称',
+      hintTooLong: '提示文字不能超过 500 个字符',
       endpointRequired: '请填写服务地址',
       templateRequired: '请填写路径模板',
       templateVariable:

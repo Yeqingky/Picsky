@@ -1644,6 +1644,9 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 	if len(policyList) != 1 {
 		t.Errorf("可用策略列表不正确: %v", policyList)
 	}
+	if hint, ok := policyList[0]["hint"]; !ok || hint != "" {
+		t.Errorf("可用策略应包含 hint 字段: %v", policyList[0])
+	}
 
 	aliceUpload := s.upload("/api/v1/upload", "alice.png", pngContent(t, 9), nil, map[string]string{}, []*http.Cookie{aliceCookie})
 	if aliceUpload.Status != http.StatusCreated {

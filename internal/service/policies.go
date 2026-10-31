@@ -59,6 +59,7 @@ type URLInput struct {
 // PolicyInput 是策略创建/更新入参.
 type PolicyInput struct {
 	Name             string            `json:"name"`
+	Hint             *string           `json:"hint"`
 	Type             string            `json:"type"`
 	Enabled          *bool             `json:"enabled"`
 	PathTemplate     string            `json:"path_template"`
@@ -67,7 +68,7 @@ type PolicyInput struct {
 	Config           map[string]string `json:"config"`
 	Secrets          map[string]string `json:"secrets"`
 	URLs             []URLInput        `json:"urls"`
-	Sort             int               `json:"sort"`
+	Sort             *int              `json:"sort"`
 }
 
 // PolicyOrderInput 是策略排序入参: 按 ids 顺序写入新的展示顺序.
@@ -304,6 +305,9 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 	if len([]rune(in.Name)) > 64 {
 		return apperr.ErrInvalidRequest.WithMessage("策略名称过长")
 	}
+	if in.Hint != nil && len([]rune(strings.TrimSpace(*in.Hint))) > 500 {
+		return apperr.ErrInvalidRequest.WithMessage("提示文字不能超过 500 个字符")
+	}
 	spec, ok := storage.SpecOf(in.Type)
 	if !ok {
 		return apperr.ErrInvalidRequest.WithMessage("未知存储后端类型: " + in.Type)
@@ -407,7 +411,14 @@ func (p *Policies) Create(in PolicyInput, actor *Principal, ip, userAgent string
 	if in.ReuseReleasedSeq != nil {
 		reuseReleased = *in.ReuseReleasedSeq
 	}
-	sortOrder := in.Sort
+	hint := ""
+	if in.Hint != nil {
+		hint = strings.TrimSpace(*in.Hint)
+	}
+	sortOrder := 0
+	if in.Sort != nil {
+		sortOrder = *in.Sort
+	}
 	if sortOrder == 0 {
 		// 未显式指定顺序时追加到末尾, 避免新策略抢占列表首项.
 		if err := p.db.Model(&model.StoragePolicy{}).
@@ -424,6 +435,7 @@ func (p *Policies) Create(in PolicyInput, actor *Principal, ip, userAgent string
 		PathTemplate:     in.PathTemplate,
 		ConflictPolicy:   in.ConflictPolicy,
 		ReuseReleasedSeq: reuseReleased,
+		Hint:             hint,
 		Config:           string(configJSON),
 		Secrets:          secrets,
 		Sort:             sortOrder,
@@ -587,16 +599,25 @@ func (p *Policies) Update(id int64, in PolicyInput, actor *Principal, ip, userAg
 	if in.ReuseReleasedSeq != nil {
 		reuseReleased = *in.ReuseReleasedSeq
 	}
+	hint := policy.Hint
+	if in.Hint != nil {
+		hint = strings.TrimSpace(*in.Hint)
+	}
+	sortOrder := policy.Sort
+	if in.Sort != nil {
+		sortOrder = *in.Sort
+	}
 	updates := map[string]any{
 		"name":               in.Name,
 		"type":               in.Type,
 		"enabled":            enabled,
+		"hint":               hint,
 		"path_template":      in.PathTemplate,
 		"conflict_policy":    in.ConflictPolicy,
 		"reuse_released_seq": reuseReleased,
 		"config":             string(configJSON),
 		"secrets":            secrets,
-		"sort":               in.Sort,
+		"sort":               sortOrder,
 		"updated_at":         nowUTC(),
 	}
 	if err := p.db.Transaction(func(tx *gorm.DB) error {

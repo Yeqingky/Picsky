@@ -11,6 +11,7 @@ export interface PolicyTransferUrl {
 
 export interface PolicyTransferSource {
   name: string;
+  hint: string;
   type: string;
   enabled: boolean;
   endpoint: string;
@@ -24,6 +25,7 @@ export interface PolicyTransferSource {
 
 export interface PolicyTransferPayload {
   name: string;
+  hint: string;
   type: string;
   enabled: boolean;
   path_template: string;
@@ -37,6 +39,7 @@ export interface PolicyTransferPayload {
 /** 导入结果只包含 JSON 中出现的字段, 其余字段保留表单当前值 */
 export interface PolicyTransferResult {
   name?: string;
+  hint?: string;
   type?: string;
   enabled?: boolean;
   endpoint?: string;
@@ -91,6 +94,7 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
 
   const payload: PolicyTransferPayload = {
     name: source.name,
+    hint: source.hint,
     type: source.type,
     enabled: source.enabled,
     path_template: source.pathTemplate,
@@ -137,6 +141,12 @@ export function parsePolicyTransfer(
   const name = readString(root, 'name', 'name');
   if (name !== undefined) {
     result.name = name;
+    recognized += 1;
+  }
+
+  const hint = readString(root, 'hint', 'hint');
+  if (hint !== undefined) {
+    result.hint = hint;
     recognized += 1;
   }
 

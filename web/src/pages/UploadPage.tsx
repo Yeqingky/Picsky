@@ -14,6 +14,7 @@ import { compressImage } from '../lib/imageCompression';
 import { isAnimatedImage } from '../utils/imageAnimation';
 import { CopyFormatToggle } from '../components/CopyFormatToggle';
 import { PageHeader } from '../components/PageHeader';
+import { PolicyHint } from '../components/upload/PolicyHint';
 import { UploadFileRow } from '../components/upload/UploadFileRow';
 import {
   createUploadItem,
@@ -473,6 +474,9 @@ export default function UploadPage() {
         {policyUnavailable && (
           <p className="text-muted-foreground text-xs">{t('upload.policy.none')}</p>
         )}
+        {selectedPolicy?.hint ? (
+          <PolicyHint key={selectedPolicy.id} text={selectedPolicy.hint} />
+        ) : null}
         <Select
           value={policyId === null ? undefined : String(policyId)}
           onValueChange={(value) => {

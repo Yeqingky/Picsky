@@ -241,6 +241,8 @@ export interface PolicySummary {
   id: number;
   name: string;
   type: string;
+  /** 策略提示文字; 空表示不显示提示 */
+  hint: string;
   urls: UploadUrlAlias[];
   /** 驱动支持的图片格式; 空表示不额外限制 */
   formats: string[];
@@ -359,6 +361,8 @@ export interface AdminPolicyUrl {
 export interface AdminPolicy {
   id: number;
   name: string;
+  /** 上传页存储策略选择器旁的提示文字 */
+  hint: string;
   type: string;
   enabled: boolean;
   path_template: string;
@@ -389,6 +393,7 @@ export interface AdminPolicy {
 
 export interface AdminPolicyWriteRequest {
   name: string;
+  hint?: string;
   type: string;
   enabled: boolean;
   path_template: string;

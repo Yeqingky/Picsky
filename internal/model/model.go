@@ -83,6 +83,7 @@ type StoragePolicy struct {
 	PathTemplate     string    `gorm:"size:255;not null" json:"path_template"`
 	ConflictPolicy   string    `gorm:"size:16;not null;default:'rename'" json:"conflict_policy"`
 	ReuseReleasedSeq bool      `gorm:"not null;default:false" json:"reuse_released_seq"`
+	Hint             string    `gorm:"type:text;not null;default:''" json:"hint"`
 	Config           string    `gorm:"type:text;not null;default:'{}'" json:"config"`
 	Secrets          string    `gorm:"type:text" json:"-"`
 	Sort             int       `gorm:"not null;default:0" json:"sort"`
