@@ -150,7 +150,6 @@ const TEMPLATE_VARIABLES = [
 const PATH_VARIABLE_RE = /\{(?:md5|sha256|sha512)(?::\d+)?\}|\{seq\}/;
 const SEQ_RE = /\{seq\}/;
 const URL_RE = /^https?:\/\//i;
-const INTEGER_RE = /^-?\d+$/;
 
 const DEFAULT_PATH_TEMPLATE = '{md5:2}/{md5}.{ext}';
 const DEFAULT_CONFLICT_POLICY: ConflictPolicy = 'rename';
@@ -169,7 +168,6 @@ interface FormState {
   name: string;
   type: string;
   enabled: boolean;
-  sort: string;
   endpoint: string;
   username: string;
   password: string;
@@ -210,7 +208,6 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     name: policy.name,
     type: policy.type,
     enabled: policy.enabled,
-    sort: String(policy.sort),
     endpoint: typeof policy.config.endpoint === 'string' ? policy.config.endpoint : '',
     username: policy.secrets?.username ?? '',
     password: policy.secrets?.password ?? '',
@@ -451,7 +448,6 @@ export default function AdminPolicyEditPage() {
       name: '',
       type: TYPE_OPTIONS[0],
       enabled: true,
-      sort: '0',
       endpoint: '',
       username: '',
       password: '',
@@ -520,9 +516,6 @@ export default function AdminPolicyEditPage() {
     }
 
     if (form.name.trim() === '') next.name = t('adminPolicies.edit.error.nameRequired');
-    if (form.sort.trim() !== '' && !INTEGER_RE.test(form.sort.trim())) {
-      next.sort = t('adminPolicies.edit.error.sortInvalid');
-    }
 
     if (!formURLFromBackend) {
       form.urls.forEach((row, index) => {
@@ -581,7 +574,6 @@ export default function AdminPolicyEditPage() {
     if (form.username.trim() !== '') secrets.username = form.username.trim();
     if (form.password !== '') secrets.password = form.password;
 
-    const sort = form.sort.trim() === '' ? 0 : Number(form.sort.trim());
     const body: AdminPolicyWriteRequest = formURLFromBackend
       ? {
           name: form.name.trim(),
@@ -592,7 +584,6 @@ export default function AdminPolicyEditPage() {
           reuse_released_seq: false,
           config: {},
           urls: [],
-          sort,
         }
       : {
           name: form.name.trim(),
@@ -608,7 +599,6 @@ export default function AdminPolicyEditPage() {
             is_default: index === 0,
             sort: index + 1,
           })),
-          sort,
         };
     if (!formURLFromBackend && Object.keys(secrets).length > 0) body.secrets = secrets;
     saveMutation.mutate(body);
@@ -673,7 +663,6 @@ export default function AdminPolicyEditPage() {
               name: form.name,
               type: form.type,
               enabled: form.enabled,
-              sort: form.sort,
               endpoint: form.endpoint,
               username: form.username,
               password: form.password,
@@ -718,7 +707,6 @@ export default function AdminPolicyEditPage() {
       if (patch.name !== undefined) next.name = patch.name;
       if (nextType !== undefined) next.type = nextType;
       if (patch.enabled !== undefined) next.enabled = patch.enabled;
-      if (patch.sort !== undefined) next.sort = patch.sort;
       if (patch.endpoint !== undefined) next.endpoint = patch.endpoint;
       if (patch.username !== undefined) next.username = patch.username;
       if (patch.password !== undefined) next.password = patch.password;
@@ -977,21 +965,6 @@ export default function AdminPolicyEditPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </FormField>
-              <FormField
-                id="policy-sort"
-                label={t('adminPolicies.edit.field.sort')}
-                error={errorFor('sort')}
-                hint={t('adminPolicies.edit.field.sortHint')}
-                className="sm:w-[160px]"
-              >
-                <Input
-                  id="policy-sort"
-                  value={form.sort}
-                  onChange={(event) => updateForm({ sort: event.target.value })}
-                  inputMode="numeric"
-                  aria-invalid={errorFor('sort') !== undefined}
-                />
               </FormField>
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-2">

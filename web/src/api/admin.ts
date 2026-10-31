@@ -70,6 +70,9 @@ export const adminPoliciesApi = {
   update: (id: number, body: Partial<AdminPolicyWriteRequest>) =>
     api.patch<AdminPolicy>(`/admin/policies/${id}`, body).then((r) => r.data),
 
+  /** 按给定顺序重排全部策略 (拖拽排序) */
+  reorder: (ids: number[]) => api.patch<void>('/admin/policies', { ids }).then(() => undefined),
+
   remove: (id: number) => api.delete<void>(`/admin/policies/${id}`).then(() => undefined),
 
   test: (id: number) =>

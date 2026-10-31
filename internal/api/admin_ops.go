@@ -52,6 +52,21 @@ func (s *Server) adminCreatePolicy(c *gin.Context) {
 	c.JSON(http.StatusCreated, view)
 }
 
+// adminReorderPolicies 按给定 ID 顺序重排策略.
+func (s *Server) adminReorderPolicies(c *gin.Context) {
+	principal := middleware.Principal(c)
+	var payload service.PolicyOrderInput
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	if err := s.svc.Policies.Reorder(payload.IDs, principal, clientIP(c), userAgent(c)); err != nil {
+		s.fail(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // adminUpdatePolicy 更新策略.
 func (s *Server) adminUpdatePolicy(c *gin.Context) {
 	principal := middleware.Principal(c)

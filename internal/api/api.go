@@ -103,6 +103,7 @@ func (s *Server) Register(router *gin.Engine) {
 	policies := admin.Group("/policies", middleware.Require(model.PermManagePolicies))
 	policies.GET("", s.adminListPolicies)
 	policies.POST("", s.adminCreatePolicy)
+	policies.PATCH("", s.adminReorderPolicies)
 	policies.POST("/preview", s.adminPreviewPolicy)
 	policies.GET("/drivers", s.adminPolicyDrivers)
 	policies.PATCH("/:id", s.adminUpdatePolicy)

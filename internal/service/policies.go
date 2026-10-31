@@ -70,6 +70,11 @@ type PolicyInput struct {
 	Sort             int               `json:"sort"`
 }
 
+// PolicyOrderInput 是策略排序入参: 按 ids 顺序写入新的展示顺序.
+type PolicyOrderInput struct {
+	IDs []int64 `json:"ids"`
+}
+
 // PolicyView 是策略的管理视图.
 type PolicyView struct {
 	*model.StoragePolicy
@@ -402,6 +407,16 @@ func (p *Policies) Create(in PolicyInput, actor *Principal, ip, userAgent string
 	if in.ReuseReleasedSeq != nil {
 		reuseReleased = *in.ReuseReleasedSeq
 	}
+	sortOrder := in.Sort
+	if sortOrder == 0 {
+		// 未显式指定顺序时追加到末尾, 避免新策略抢占列表首项.
+		if err := p.db.Model(&model.StoragePolicy{}).
+			Select("COALESCE(MAX(sort), 0)").
+			Scan(&sortOrder).Error; err != nil {
+			return nil, apperr.ErrInternal.WithMessage(err.Error())
+		}
+		sortOrder++
+	}
 	policy := model.StoragePolicy{
 		Name:             in.Name,
 		Type:             in.Type,
@@ -411,7 +426,7 @@ func (p *Policies) Create(in PolicyInput, actor *Principal, ip, userAgent string
 		ReuseReleasedSeq: reuseReleased,
 		Config:           string(configJSON),
 		Secrets:          secrets,
-		Sort:             in.Sort,
+		Sort:             sortOrder,
 		CreatedAt:        nowUTC(),
 		UpdatedAt:        nowUTC(),
 	}
@@ -440,6 +455,58 @@ func (p *Policies) Create(in PolicyInput, actor *Principal, ip, userAgent string
 
 	p.enqueueInitialScan(&policy, ownerID(actor))
 	return &policy, nil
+}
+
+// Reorder 按给定顺序重排策略; ids 必须非空, 不重复且全部存在.
+func (p *Policies) Reorder(ids []int64, actor *Principal, ip, userAgent string) error {
+	if len(ids) == 0 {
+		return apperr.ErrInvalidRequest.WithMessage("策略顺序不能为空")
+	}
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			return apperr.ErrInvalidRequest.WithMessage("策略顺序包含无效的 ID")
+		}
+		if _, exists := seen[id]; exists {
+			return apperr.ErrInvalidRequest.WithMessage("策略顺序不能包含重复项")
+		}
+		seen[id] = struct{}{}
+	}
+	var existing int64
+	if err := p.db.Model(&model.StoragePolicy{}).Where("id IN ?", ids).Count(&existing).Error; err != nil {
+		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if existing != int64(len(ids)) {
+		return apperr.ErrInvalidRequest.WithMessage("策略顺序包含不存在的策略")
+	}
+
+	now := nowUTC()
+	if err := p.db.Transaction(func(tx *gorm.DB) error {
+		for index, id := range ids {
+			if err := tx.Model(&model.StoragePolicy{}).
+				Where("id = ?", id).
+				Updates(map[string]any{"sort": index + 1, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return apperr.ErrInternal.WithMessage("更新策略顺序失败: " + err.Error())
+	}
+
+	var actorID *int64
+	if actor != nil {
+		actorID = &actor.User.ID
+	}
+	p.audit.Recordf(Entry{
+		UserID:     actorID,
+		Action:     "policy_reorder",
+		TargetType: "policy",
+		Detail:     map[string]any{"ids": ids},
+		IP:         ip,
+		UserAgent:  userAgent,
+	})
+	return nil
 }
 
 // Update 更新策略.

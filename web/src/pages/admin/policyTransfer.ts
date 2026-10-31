@@ -13,7 +13,6 @@ export interface PolicyTransferSource {
   name: string;
   type: string;
   enabled: boolean;
-  sort: string;
   endpoint: string;
   username: string;
   password: string;
@@ -27,7 +26,6 @@ export interface PolicyTransferPayload {
   name: string;
   type: string;
   enabled: boolean;
-  sort: number;
   path_template: string;
   conflict_policy: ConflictPolicy;
   reuse_released_seq: boolean;
@@ -41,7 +39,6 @@ export interface PolicyTransferResult {
   name?: string;
   type?: string;
   enabled?: boolean;
-  sort?: string;
   endpoint?: string;
   username?: string;
   password?: string;
@@ -66,7 +63,6 @@ export class PolicyTransferError extends Error {
 }
 
 const CONFLICT_VALUES: readonly ConflictPolicy[] = ['rename', 'skip'];
-const INTEGER_RE = /^-?\d+$/;
 
 /** 边界解析: JSON 解析结果按字段路径转对象, 非对象直接报字段错误 */
 function asObject(value: unknown, path: string): Record<string, unknown> {
@@ -87,18 +83,6 @@ function readString(
   return value;
 }
 
-function readSort(value: unknown, path: string): string {
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  if (typeof value === 'string' && INTEGER_RE.test(value.trim())) return value.trim();
-  throw new PolicyTransferError('field', path);
-}
-
-function normalizeSort(raw: string): number {
-  const trimmed = raw.trim();
-  if (trimmed === '' || !INTEGER_RE.test(trimmed)) return 0;
-  return Number(trimmed);
-}
-
 /** 当前表单 -> 可复制的 JSON (与管理接口写请求字段一致, 凭据为明文) */
 export function buildPolicyTransferPayload(source: PolicyTransferSource): PolicyTransferPayload {
   const secrets: { username?: string; password?: string } = {};
@@ -109,7 +93,6 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
     name: source.name,
     type: source.type,
     enabled: source.enabled,
-    sort: normalizeSort(source.sort),
     path_template: source.pathTemplate,
     conflict_policy: source.conflictPolicy,
     reuse_released_seq: source.reuseReleasedSeq,
@@ -173,7 +156,7 @@ export function parsePolicyTransfer(
   }
 
   if (root.sort !== undefined) {
-    result.sort = readSort(root.sort, 'sort');
+    // 历史导出可能包含顶层排序; 管理界面已改为拖拽排序, 导入时忽略.
     recognized += 1;
   }
 

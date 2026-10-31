@@ -1380,6 +1380,67 @@ func TestUploadWebDAVFailureDoesNotExposeResponseBody(t *testing.T) {
 	}
 }
 
+func TestAdminReorderPolicies(t *testing.T) {
+	s := newServer(t)
+	cookie, firstID := s.bootstrap()
+
+	create := func(name string) int64 {
+		t.Helper()
+		created := s.json(http.MethodPost, "/api/v1/admin/policies", map[string]any{
+			"name":            name,
+			"type":            "webdav",
+			"enabled":         true,
+			"path_template":   "{sha256}/{md5}.{ext}",
+			"conflict_policy": "rename",
+			"config":          map[string]string{"endpoint": s.svc.Cfg.DBDSN},
+			"urls": []map[string]any{
+				{"alias": "CDN", "url": "https://cdn.example.com/" + name + "/", "is_default": true},
+			},
+		}, []*http.Cookie{cookie})
+		if created.Status != http.StatusCreated {
+			t.Fatalf("创建策略 %s 失败: %d %s", name, created.Status, string(created.Body))
+		}
+		return int64(s.decode(created)["id"].(float64))
+	}
+	secondID := create("第二策略")
+	thirdID := create("第三策略")
+
+	reordered := s.json(http.MethodPatch, "/api/v1/admin/policies", map[string]any{
+		"ids": []int64{thirdID, firstID, secondID},
+	}, []*http.Cookie{cookie})
+	if reordered.Status != http.StatusNoContent {
+		t.Fatalf("重排策略失败: %d %s", reordered.Status, string(reordered.Body))
+	}
+
+	listed := s.json(http.MethodGet, "/api/v1/admin/policies", nil, []*http.Cookie{cookie})
+	if listed.Status != http.StatusOK {
+		t.Fatalf("读取策略失败: %d %s", listed.Status, string(listed.Body))
+	}
+	var policies []map[string]any
+	if err := json.Unmarshal(listed.Body, &policies); err != nil {
+		t.Fatalf("解析策略列表失败: %v", err)
+	}
+	want := []int64{thirdID, firstID, secondID}
+	if len(policies) != len(want) {
+		t.Fatalf("策略数量 = %d, 期望 %d", len(policies), len(want))
+	}
+	for index, policy := range policies {
+		if id := int64(policy["id"].(float64)); id != want[index] {
+			t.Errorf("第 %d 项策略 = %d, 期望 %d", index, id, want[index])
+		}
+		if sortValue := int(policy["sort"].(float64)); sortValue != index+1 {
+			t.Errorf("第 %d 项排序 = %d, 期望 %d", index, sortValue, index+1)
+		}
+	}
+
+	duplicated := s.json(http.MethodPatch, "/api/v1/admin/policies", map[string]any{
+		"ids": []int64{firstID, firstID},
+	}, []*http.Cookie{cookie})
+	if duplicated.Status != http.StatusBadRequest {
+		t.Errorf("重复策略 ID 应返回 400: %d %s", duplicated.Status, string(duplicated.Body))
+	}
+}
+
 func TestAdminEndpointsAndPermissions(t *testing.T) {
 	s := newServer(t)
 	cookie, policyID := s.bootstrap()

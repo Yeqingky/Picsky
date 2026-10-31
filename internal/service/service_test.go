@@ -547,6 +547,53 @@ func TestUnsupportedConflictPoliciesAreRejected(t *testing.T) {
 	}
 }
 
+func TestPolicyReorder(t *testing.T) {
+	f := newFixture(t)
+	first := f.createPolicy("排序一", "{md5}.{ext}", model.ConflictRename)
+	second := f.createPolicy("排序二", "{sha256}.{ext}", model.ConflictRename)
+	third := f.createPolicy("排序三", "{sha512}.{ext}", model.ConflictRename)
+
+	if first.Sort != 1 || second.Sort != 2 || third.Sort != 3 {
+		t.Fatalf("新建策略应依次追加排序: %d %d %d", first.Sort, second.Sort, third.Sort)
+	}
+
+	if err := f.svc.Policies.Reorder(
+		[]int64{third.ID, first.ID, second.ID},
+		f.admin, "127.0.0.1", "test-agent",
+	); err != nil {
+		t.Fatalf("重排策略失败: %v", err)
+	}
+	policies, err := f.svc.Policies.List()
+	if err != nil {
+		t.Fatalf("读取策略失败: %v", err)
+	}
+	want := []int64{third.ID, first.ID, second.ID}
+	if len(policies) != len(want) {
+		t.Fatalf("策略数量 = %d, 期望 %d", len(policies), len(want))
+	}
+	for index, policy := range policies {
+		if policy.ID != want[index] {
+			t.Errorf("第 %d 项策略 = %d, 期望 %d", index, policy.ID, want[index])
+		}
+		if policy.Sort != index+1 {
+			t.Errorf("第 %d 项排序 = %d, 期望 %d", index, policy.Sort, index+1)
+		}
+	}
+
+	for name, ids := range map[string][]int64{
+		"空顺序":    {},
+		"重复项":    {first.ID, first.ID},
+		"无效 ID":  {0},
+		"不存在的策略": {first.ID, 999999},
+	} {
+		err := f.svc.Policies.Reorder(ids, f.admin, "127.0.0.1", "test-agent")
+		var apiErr *apperr.Error
+		if !errors.As(err, &apiErr) || apiErr.Code != "invalid_request" {
+			t.Errorf("%s 应返回 invalid_request, 实际 %v", name, err)
+		}
+	}
+}
+
 func TestQuotaEnforcement(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)

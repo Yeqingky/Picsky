@@ -69,6 +69,7 @@ export const common = {
     next: '下一页',
     pageOf: '第 {{page}} / {{pages}} 页',
     selected: '已选 {{count}} 条',
+    reorder: '长按拖动调整顺序',
   },
 
   confirm: {

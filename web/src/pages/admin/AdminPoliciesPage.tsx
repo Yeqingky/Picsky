@@ -46,8 +46,42 @@ export default function AdminPoliciesPage() {
     },
   });
 
+  const reorderMutation = useMutation({
+    mutationFn: (ids: number[]) => adminPoliciesApi.reorder(ids),
+    onMutate: async (ids) => {
+      await queryClient.cancelQueries({ queryKey: ['admin', 'policies'] });
+      const previous = queryClient.getQueryData<AdminPolicy[]>(['admin', 'policies']);
+      if (previous !== undefined) {
+        const byId = new Map(previous.map((policy) => [policy.id, policy]));
+        const next = ids
+          .map((id) => byId.get(id))
+          .filter((policy): policy is AdminPolicy => policy !== undefined);
+        if (next.length === previous.length) {
+          queryClient.setQueryData(['admin', 'policies'], next);
+        }
+      }
+      return { previous };
+    },
+    onError: (_error, _ids, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(['admin', 'policies'], context.previous);
+      }
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'policies'] });
+    },
+  });
+
   const { mutate: removePolicy } = removeMutation;
   const { mutate: scanPolicy } = scanMutation;
+  const { mutate: reorderPolicies } = reorderMutation;
+
+  const handleReorder = useCallback(
+    (ids: (string | number)[]) => {
+      reorderPolicies(ids.map((id) => Number(id)));
+    },
+    [reorderPolicies],
+  );
 
   const handleDelete = useCallback(
     async (policy: AdminPolicy) => {
@@ -159,14 +193,6 @@ export default function AdminPoliciesPage() {
             ))}
           </div>
         ),
-      },
-      {
-        id: 'sort',
-        header: t('adminPolicies.list.col.sort'),
-        className: 'w-[90px]',
-        sortable: true,
-        sortValue: (row) => row.sort,
-        cell: (row) => <span className="text-sm">{row.sort}</span>,
       },
       {
         id: 'updated_at',
@@ -286,6 +312,8 @@ export default function AdminPoliciesPage() {
           rows={policiesQuery.data ?? []}
           loading={policiesQuery.isPending}
           getRowId={(row) => row.id}
+          onReorder={handleReorder}
+          reorderDisabled={reorderMutation.isPending}
           pagination={{
             page,
             pageSize,
