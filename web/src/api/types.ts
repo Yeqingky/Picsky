@@ -384,6 +384,8 @@ export interface AdminPolicy {
   };
   urls: AdminPolicyUrl[];
   sort: number;
+  /** 该策略下的图片数量 */
+  image_count: number;
   capabilities: string[];
   /** true 表示驱动上传后由后端分配直链, 不配置分发域名 */
   url_from_backend: boolean;

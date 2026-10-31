@@ -13,6 +13,7 @@ export const adminPolicies = {
     deleteTitle: '删除策略 "{{name}}"?',
     urlsCount: '{{count}} 个域名',
     notApplicable: '不适用',
+    imageUsage: '{{value}} 张图片',
     enable: '启用策略',
     disable: '禁用策略',
     col: {
@@ -20,6 +21,7 @@ export const adminPolicies = {
       type: '后端类型',
       conflict: '冲突策略',
       urls: '分发域名',
+      usage: '使用情况',
       updatedAt: '更新时间',
       actions: '操作',
     },

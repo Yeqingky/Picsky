@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { Pencil, Plus, ScanSearch, Trash2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -15,7 +15,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Switch } from '../../components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
-import { formatDateTime } from '../../utils/format';
+import { formatDateTime, formatNumber } from '../../utils/format';
 
 export default function AdminPoliciesPage() {
   const { t } = useTranslation();
@@ -173,6 +173,21 @@ export default function AdminPoliciesPage() {
             </Tooltip>
           );
         },
+      },
+      {
+        id: 'usage',
+        header: t('adminPolicies.list.col.usage'),
+        className: 'w-[120px]',
+        sortable: true,
+        sortValue: (row) => row.image_count,
+        cell: (row) => (
+          <Link
+            to={`/gallery?policy_id=${row.id}`}
+            className="text-primary text-sm hover:underline"
+          >
+            {t('adminPolicies.list.imageUsage', { value: formatNumber(row.image_count) })}
+          </Link>
+        ),
       },
       {
         id: 'updated_at',

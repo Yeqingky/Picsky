@@ -636,6 +636,28 @@ func TestPolicyHint(t *testing.T) {
 	}
 }
 
+func TestPolicyImageCount(t *testing.T) {
+	f := newFixture(t)
+	used := f.createPolicy("有图片", "{md5}.{ext}", model.ConflictRename)
+	empty := f.createPolicy("无图片", "{sha256}.{ext}", model.ConflictRename)
+	f.mustUpload(f.admin, &used.ID, "used.png", pngBytes(t, 71, 4, 4))
+
+	views, err := f.svc.Policies.List()
+	if err != nil {
+		t.Fatalf("读取策略失败: %v", err)
+	}
+	counts := make(map[int64]int64, len(views))
+	for _, view := range views {
+		counts[view.ID] = view.ImageCount
+	}
+	if counts[used.ID] != 1 {
+		t.Errorf("有图片策略数量 = %d, 期望 1", counts[used.ID])
+	}
+	if counts[empty.ID] != 0 {
+		t.Errorf("无图片策略数量 = %d, 期望 0", counts[empty.ID])
+	}
+}
+
 func TestQuotaEnforcement(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)

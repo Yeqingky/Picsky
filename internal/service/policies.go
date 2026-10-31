@@ -89,6 +89,7 @@ type PolicyView struct {
 	SecretFields   []storage.Field   `json:"secret_fields"`
 	URLFromBackend bool              `json:"url_from_backend"`
 	Formats        []string          `json:"formats"`
+	ImageCount     int64             `json:"image_count"`
 }
 
 // ConfigMap 解码非敏感配置.
@@ -226,6 +227,32 @@ func (p *Policies) List() ([]PolicyView, error) {
 			return nil, err
 		}
 		views = append(views, *view)
+	}
+	if len(policies) == 0 {
+		return views, nil
+	}
+	ids := make([]int64, len(policies))
+	for i := range policies {
+		ids[i] = policies[i].ID
+	}
+	type policyImageCount struct {
+		PolicyID int64
+		Count    int64
+	}
+	var counts []policyImageCount
+	if err := p.db.Model(&model.Image{}).
+		Select("policy_id, COUNT(*) AS count").
+		Where("policy_id IN ? AND kind = ?", ids, model.KindImage).
+		Group("policy_id").
+		Scan(&counts).Error; err != nil {
+		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	countByPolicy := make(map[int64]int64, len(counts))
+	for _, item := range counts {
+		countByPolicy[item.PolicyID] = item.Count
+	}
+	for i := range views {
+		views[i].ImageCount = countByPolicy[views[i].ID]
 	}
 	return views, nil
 }
