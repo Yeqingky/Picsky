@@ -35,6 +35,7 @@ import (
 	"github.com/yeqingky/Picsky/internal/service"
 	"github.com/yeqingky/Picsky/migrations"
 
+	_ "github.com/yeqingky/Picsky/internal/storage/oneimg"
 	_ "github.com/yeqingky/Picsky/internal/storage/webdav"
 )
 
@@ -1377,6 +1378,54 @@ func TestUploadWebDAVFailureDoesNotExposeResponseBody(t *testing.T) {
 	}
 	if strings.Contains(string(upload.Body), responseBody) {
 		t.Errorf("上传响应泄露了 WebDAV 错误响应体: %s", string(upload.Body))
+	}
+}
+
+func TestAdminListOneImgBuckets(t *testing.T) {
+	s := newServer(t)
+	cookie, _ := s.bootstrap()
+	oneimgServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/buckets/list" {
+			t.Errorf("请求路径 = %s", r.URL.Path)
+		}
+		if token := r.Header.Get("Authorization"); token != "Bearer test-token" {
+			t.Errorf("Authorization = %q", token)
+		}
+		_, _ = io.WriteString(w, `{"code":200,"data":[{"id":1,"name":"默认存储","type":"default"},{"id":2,"name":"R2","type":"r2"}]}`)
+	}))
+	defer oneimgServer.Close()
+
+	body, err := json.Marshal(map[string]any{
+		"type":    "oneimg",
+		"config":  map[string]string{"endpoint": oneimgServer.URL},
+		"secrets": map[string]string{"token": "test-token"},
+	})
+	if err != nil {
+		t.Fatalf("序列化请求失败: %v", err)
+	}
+	listed := s.raw(http.MethodPost, "/api/v1/admin/policies/buckets", bytes.NewReader(body), map[string]string{
+		"Content-Type": "application/json",
+	}, []*http.Cookie{cookie})
+	if listed.Status != http.StatusOK {
+		t.Fatalf("读取存储桶失败: %d %s", listed.Status, string(listed.Body))
+	}
+	var buckets []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(listed.Body, &buckets); err != nil {
+		t.Fatalf("解析存储桶响应失败: %v (%s)", err, string(listed.Body))
+	}
+	if len(buckets) != 2 || buckets[1].ID != 2 || buckets[1].Name != "R2" {
+		t.Fatalf("存储桶响应 = %+v", buckets)
+	}
+
+	missingToken := s.json(http.MethodPost, "/api/v1/admin/policies/buckets", map[string]any{
+		"type":   "oneimg",
+		"config": map[string]string{"endpoint": oneimgServer.URL},
+	}, []*http.Cookie{cookie})
+	if missingToken.Status != http.StatusBadRequest {
+		t.Fatalf("缺少令牌应返回 400: %d %s", missingToken.Status, string(missingToken.Body))
 	}
 }
 

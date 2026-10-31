@@ -88,6 +88,18 @@ type ObjectInfo struct {
 	URL string
 }
 
+// Bucket 描述驱动后端提供的存储桶选项.
+type Bucket struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// BucketLister 是可选接口, 返回可供策略选择的存储桶列表.
+type BucketLister interface {
+	ListBuckets(ctx context.Context) ([]Bucket, error)
+}
+
 // Options 是驱动实例化参数: 敏感配置已由上层解密.
 type Options struct {
 	Config  map[string]string

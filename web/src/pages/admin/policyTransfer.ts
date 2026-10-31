@@ -15,10 +15,12 @@ export interface PolicyTransferSource {
   type: string;
   enabled: boolean;
   endpoint: string;
+  bucketId: string;
   directory: string;
   autoLogin: boolean;
   username: string;
   password: string;
+  token: string;
   cloudreveRefreshToken: string;
   cloudreveRefreshExpires: string;
   cloudreveAccessExpires: string;
@@ -36,10 +38,11 @@ export interface PolicyTransferPayload {
   path_template: string;
   conflict_policy: ConflictPolicy;
   reuse_released_seq: boolean;
-  config: { endpoint: string; directory?: string; auto_login?: string };
+  config: { endpoint: string; bucket_id?: string; directory?: string; auto_login?: string };
   secrets?: {
     username?: string;
     password?: string;
+    token?: string;
     refresh_token?: string;
     refresh_expires?: string;
     access_expires?: string;
@@ -54,10 +57,12 @@ export interface PolicyTransferResult {
   type?: string;
   enabled?: boolean;
   endpoint?: string;
+  bucketId?: string;
   directory?: string;
   autoLogin?: boolean;
   username?: string;
   password?: string;
+  token?: string;
   cloudreveRefreshToken?: string;
   cloudreveRefreshExpires?: string;
   cloudreveAccessExpires?: string;
@@ -107,11 +112,14 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
   const secrets: {
     username?: string;
     password?: string;
+    token?: string;
     refresh_token?: string;
     refresh_expires?: string;
     access_expires?: string;
   } = {};
-  if (source.type !== 'cloudreve' || source.autoLogin) {
+  if (source.type === 'oneimg') {
+    if (source.token.trim() !== '') secrets.token = source.token.trim();
+  } else if (source.type !== 'cloudreve' || source.autoLogin) {
     if (source.username.trim() !== '') secrets.username = source.username.trim();
     if (source.password !== '') secrets.password = source.password;
   }
@@ -140,6 +148,9 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
   if (source.type === 'cloudreve') {
     payload.config.directory = source.directory;
     payload.config.auto_login = source.autoLogin ? 'true' : 'false';
+  }
+  if (source.type === 'oneimg' && source.bucketId.trim() !== '') {
+    payload.config.bucket_id = source.bucketId.trim();
   }
   if (Object.keys(secrets).length > 0) payload.secrets = secrets;
   return payload;
@@ -226,20 +237,27 @@ export function parsePolicyTransfer(
   }
 
   let endpoint = readString(root, 'endpoint', 'endpoint');
+  let bucketId = readString(root, 'bucket_id', 'bucket_id');
   let directory = readString(root, 'directory', 'directory');
   let autoLogin = readString(root, 'auto_login', 'auto_login');
   const config = root.config;
   if (config !== undefined) {
     const configRecord = asObject(config, 'config');
     const configEndpoint = readString(configRecord, 'endpoint', 'config.endpoint');
+    const configBucketId = readString(configRecord, 'bucket_id', 'config.bucket_id');
     const configDirectory = readString(configRecord, 'directory', 'config.directory');
     const configAutoLogin = readString(configRecord, 'auto_login', 'config.auto_login');
     if (configEndpoint !== undefined) endpoint = configEndpoint;
+    if (configBucketId !== undefined) bucketId = configBucketId;
     if (configDirectory !== undefined) directory = configDirectory;
     if (configAutoLogin !== undefined) autoLogin = configAutoLogin;
   }
   if (endpoint !== undefined) {
     result.endpoint = endpoint;
+    recognized += 1;
+  }
+  if (bucketId !== undefined) {
+    result.bucketId = bucketId;
     recognized += 1;
   }
   if (directory !== undefined) {
@@ -256,6 +274,7 @@ export function parsePolicyTransfer(
 
   let username = readString(root, 'username', 'username');
   let password = readString(root, 'password', 'password');
+  let token = readString(root, 'token', 'token');
   let refreshToken = readString(root, 'refresh_token', 'refresh_token');
   let refreshExpires = readString(root, 'refresh_expires', 'refresh_expires');
   let accessExpires = readString(root, 'access_expires', 'access_expires');
@@ -264,6 +283,7 @@ export function parsePolicyTransfer(
     const secretRecord = asObject(secrets, 'secrets');
     const secretUsername = readString(secretRecord, 'username', 'secrets.username');
     const secretPassword = readString(secretRecord, 'password', 'secrets.password');
+    const secretToken = readString(secretRecord, 'token', 'secrets.token');
     const secretRefreshToken = readString(secretRecord, 'refresh_token', 'secrets.refresh_token');
     const secretRefreshExpires = readString(
       secretRecord,
@@ -277,6 +297,7 @@ export function parsePolicyTransfer(
     );
     if (secretUsername !== undefined) username = secretUsername;
     if (secretPassword !== undefined) password = secretPassword;
+    if (secretToken !== undefined) token = secretToken;
     if (secretRefreshToken !== undefined) refreshToken = secretRefreshToken;
     if (secretRefreshExpires !== undefined) refreshExpires = secretRefreshExpires;
     if (secretAccessExpires !== undefined) accessExpires = secretAccessExpires;
@@ -287,6 +308,10 @@ export function parsePolicyTransfer(
   }
   if (password !== undefined) {
     result.password = password;
+    recognized += 1;
+  }
+  if (token !== undefined) {
+    result.token = token;
     recognized += 1;
   }
   if (refreshToken !== undefined) {

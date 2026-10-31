@@ -106,6 +106,7 @@ func (s *Server) Register(router *gin.Engine) {
 	policies.PATCH("", s.adminReorderPolicies)
 	policies.POST("/preview", s.adminPreviewPolicy)
 	policies.GET("/drivers", s.adminPolicyDrivers)
+	policies.POST("/buckets", s.adminListPolicyBuckets)
 	policies.POST("/cloudreve/login", s.adminCloudreveLogin)
 	policies.POST("/cloudreve/login/2fa", s.adminCloudreveTwoFactor)
 	policies.POST("/cloudreve/refresh", s.adminCloudreveRefreshToken)

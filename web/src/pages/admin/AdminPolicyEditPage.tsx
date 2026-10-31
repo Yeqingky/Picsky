@@ -82,7 +82,7 @@ import type { PolicyTransferResult } from './policyTransfer';
  * 可选后端类型: 只列出已注册且管理界面支持的驱动 (docs/storage-policy.md 第 3 节),
  * 未注册的类型提交会被后端以 400 拒绝.
  */
-const TYPE_OPTIONS = ['webdav', 'sobot', 'celine', 'metaso', 'cloudreve'] as const;
+const TYPE_OPTIONS = ['webdav', 'sobot', 'celine', 'metaso', 'oneimg', 'cloudreve'] as const;
 
 const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
 
@@ -95,6 +95,7 @@ const NEW_TYPE_TRAITS: Record<string, { capabilities: string[]; urlFromBackend: 
   sobot: { capabilities: ['upload'], urlFromBackend: true },
   celine: { capabilities: ['upload'], urlFromBackend: true },
   metaso: { capabilities: ['upload'], urlFromBackend: true },
+  oneimg: { capabilities: ['upload'], urlFromBackend: true },
   cloudreve: { capabilities: ['upload'], urlFromBackend: true },
 };
 
@@ -103,6 +104,7 @@ const DEFAULT_HINT_KEYS: Record<string, string> = {
   sobot: 'adminPolicies.edit.defaultHint.sobot',
   celine: 'adminPolicies.edit.defaultHint.celine',
   metaso: 'adminPolicies.edit.defaultHint.metaso',
+  oneimg: 'adminPolicies.edit.defaultHint.oneimg',
 };
 
 /** 由后端分配直链的驱动不显示路径, 域名, 冲突与扫描标签 */
@@ -113,6 +115,7 @@ const TYPE_HIDDEN_TABS: Record<string, readonly string[]> = {
   sobot: ['connection', ...URL_BACKEND_HIDDEN_TABS],
   celine: ['connection', ...URL_BACKEND_HIDDEN_TABS],
   metaso: ['connection', ...URL_BACKEND_HIDDEN_TABS],
+  oneimg: URL_BACKEND_HIDDEN_TABS,
   cloudreve: ['urls', 'conflict', 'scan'],
 };
 
@@ -185,6 +188,8 @@ interface FormState {
   type: string;
   enabled: boolean;
   endpoint: string;
+  token: string;
+  bucketId: string;
   directory: string;
   autoLogin: boolean;
   username: string;
@@ -232,6 +237,8 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     type: policy.type,
     enabled: policy.enabled,
     endpoint: typeof policy.config.endpoint === 'string' ? policy.config.endpoint : '',
+    token: policy.secrets?.token ?? '',
+    bucketId: typeof policy.config.bucket_id === 'string' ? policy.config.bucket_id : '',
     directory:
       typeof policy.config.directory === 'string' && policy.config.directory.trim() !== ''
         ? policy.config.directory
@@ -449,6 +456,7 @@ export default function AdminPolicyEditPage() {
 
   const [form, setForm] = useState<FormState | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [bucketMenuOpened, setBucketMenuOpened] = useState(false);
   const [urlTouched, setUrlTouched] = useState(false);
   const [draggedUrlKey, setDraggedUrlKey] = useState<string | null>(null);
   const [savedOnce, setSavedOnce] = useState(false);
@@ -501,6 +509,21 @@ export default function AdminPolicyEditPage() {
     retry: false,
   });
 
+  const bucketCredentialsReady =
+    form?.type === 'oneimg' && form.endpoint.trim() !== '' && form.token.trim() !== '';
+  const bucketsQuery = useQuery({
+    queryKey: ['admin', 'policy-buckets', form?.endpoint ?? '', form?.token ?? ''],
+    queryFn: () =>
+      adminPoliciesApi.buckets({
+        type: 'oneimg',
+        config: { endpoint: form?.endpoint.trim() ?? '' },
+        secrets: { token: form?.token.trim() ?? '' },
+      }),
+    enabled: bucketCredentialsReady && (isEdit || bucketMenuOpened),
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+
   /* ---------------------------------------------------------------- 初始化 */
 
   useEffect(() => {
@@ -523,6 +546,8 @@ export default function AdminPolicyEditPage() {
       type: TYPE_OPTIONS[0],
       enabled: true,
       endpoint: '',
+      token: '',
+      bucketId: '',
       directory: CLOUDREVE_DEFAULT_DIRECTORY,
       autoLogin: false,
       username: '',
@@ -594,8 +619,15 @@ export default function AdminPolicyEditPage() {
       }
     }
 
-    if ((!formURLFromBackend || form.type === 'cloudreve') && form.endpoint.trim() === '') {
+    if (
+      (!formURLFromBackend || form.type === 'cloudreve' || form.type === 'oneimg') &&
+      form.endpoint.trim() === ''
+    ) {
       next.endpoint = t('adminPolicies.edit.error.endpointRequired');
+    }
+
+    if (form.type === 'oneimg' && form.token.trim() === '') {
+      next.token = t('adminPolicies.edit.error.tokenRequired');
     }
 
     if (form.type === 'cloudreve' && form.autoLogin && !form.cloudreveLoggedIn) {
@@ -666,15 +698,19 @@ export default function AdminPolicyEditPage() {
     if (Object.keys(errors).length > 0) return;
 
     const isCloudreve = form.type === 'cloudreve';
+    const isOneImg = form.type === 'oneimg';
 
     const secrets: {
       username?: string;
       password?: string;
+      token?: string;
       refresh_token?: string;
       refresh_expires?: string;
       access_expires?: string;
     } = {};
-    if (!isCloudreve) {
+    if (isOneImg) {
+      if (form.token.trim() !== '') secrets.token = form.token.trim();
+    } else if (!isCloudreve) {
       if (form.username.trim() !== '') secrets.username = form.username.trim();
       if (form.password !== '') secrets.password = form.password;
     } else if (form.autoLogin) {
@@ -707,7 +743,12 @@ export default function AdminPolicyEditPage() {
                 directory: form.directory.trim() || CLOUDREVE_DEFAULT_DIRECTORY,
                 auto_login: form.autoLogin ? 'true' : 'false',
               }
-            : {},
+            : isOneImg
+              ? {
+                  endpoint: form.endpoint.trim(),
+                  ...(form.bucketId !== '' ? { bucket_id: form.bucketId } : {}),
+                }
+              : {},
           urls: [],
         }
       : {
@@ -726,7 +767,7 @@ export default function AdminPolicyEditPage() {
             sort: index + 1,
           })),
         };
-    if ((!formURLFromBackend || isCloudreve) && Object.keys(secrets).length > 0) {
+    if ((!formURLFromBackend || isCloudreve || isOneImg) && Object.keys(secrets).length > 0) {
       body.secrets = secrets;
     }
     saveMutation.mutate(body);
@@ -947,6 +988,8 @@ export default function AdminPolicyEditPage() {
               type: form.type,
               enabled: form.enabled,
               endpoint: form.endpoint,
+              token: form.token,
+              bucketId: form.bucketId,
               directory: form.directory,
               autoLogin: form.autoLogin,
               username: form.username,
@@ -1004,6 +1047,8 @@ export default function AdminPolicyEditPage() {
         next.cloudreveRefreshExpires = '';
         next.cloudreveAccessExpires = '';
       }
+      if (patch.token !== undefined) next.token = patch.token;
+      if (patch.bucketId !== undefined) next.bucketId = patch.bucketId;
       if (patch.directory !== undefined) next.directory = patch.directory;
       if (patch.autoLogin !== undefined) next.autoLogin = patch.autoLogin;
       if (patch.username !== undefined) {
@@ -1167,6 +1212,7 @@ export default function AdminPolicyEditPage() {
   }
 
   const isCloudreve = form.type === 'cloudreve';
+  const isOneImg = form.type === 'oneimg';
 
   const credentialFields = (
     <>
@@ -1440,7 +1486,9 @@ export default function AdminPolicyEditPage() {
                 hint={
                   isCloudreve
                     ? t('adminPolicies.edit.field.cloudreveEndpointHint')
-                    : t('adminPolicies.edit.field.endpointHint')
+                    : isOneImg
+                      ? t('adminPolicies.edit.field.oneimgEndpointHint')
+                      : t('adminPolicies.edit.field.endpointHint')
                 }
               >
                 <Input
@@ -1449,12 +1497,17 @@ export default function AdminPolicyEditPage() {
                   onChange={(event) =>
                     isCloudreve
                       ? updateCloudreveCredentials({ endpoint: event.target.value })
-                      : updateForm({ endpoint: event.target.value })
+                      : updateForm({
+                          endpoint: event.target.value,
+                          ...(isOneImg ? { bucketId: '' } : {}),
+                        })
                   }
                   placeholder={
                     isCloudreve
                       ? t('adminPolicies.edit.field.cloudreveEndpointPlaceholder')
-                      : t('adminPolicies.edit.field.endpointPlaceholder')
+                      : isOneImg
+                        ? t('adminPolicies.edit.field.oneimgEndpointPlaceholder')
+                        : t('adminPolicies.edit.field.endpointPlaceholder')
                   }
                   aria-invalid={errorFor('endpoint') !== undefined}
                   required
@@ -1546,7 +1599,79 @@ export default function AdminPolicyEditPage() {
                   </div>
                 </>
               )}
-              {!isCloudreve && credentialFields}
+              {isOneImg && (
+                <FormField
+                  id="policy-token"
+                  label={t('adminPolicies.edit.field.oneimgToken')}
+                  error={errorFor('token')}
+                  hint={t('adminPolicies.edit.field.oneimgTokenHint')}
+                >
+                  <Input
+                    id="policy-token"
+                    type="password"
+                    value={form.token}
+                    onChange={(event) => updateForm({ token: event.target.value, bucketId: '' })}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </FormField>
+              )}
+              {isOneImg && (
+                <FormField
+                  id="policy-bucket"
+                  label={t('adminPolicies.edit.field.bucket')}
+                  hint={
+                    bucketsQuery.isError
+                      ? errorText(
+                          bucketsQuery.error,
+                          t('adminPolicies.edit.field.bucketLoadFailed'),
+                        )
+                      : t('adminPolicies.edit.field.bucketHint')
+                  }
+                >
+                  <Select
+                    value={form.bucketId === '' ? 'default' : form.bucketId}
+                    onOpenChange={(open) => {
+                      if (!open) return;
+                      setBucketMenuOpened(true);
+                      if (bucketsQuery.isError) void bucketsQuery.refetch();
+                    }}
+                    onValueChange={(value) =>
+                      updateForm({ bucketId: value === 'default' ? '' : value })
+                    }
+                  >
+                    <SelectTrigger id="policy-bucket" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">
+                        {t('adminPolicies.edit.field.bucketDefault')}
+                      </SelectItem>
+                      {bucketsQuery.isFetching && (
+                        <SelectItem value="__loading" disabled>
+                          {t('adminPolicies.edit.field.bucketLoading')}
+                        </SelectItem>
+                      )}
+                      {bucketsQuery.data?.map((bucket) => (
+                        <SelectItem key={bucket.id} value={String(bucket.id)}>
+                          {bucket.name}
+                          {bucket.type !== '' ? ` (${bucket.type})` : ''}
+                        </SelectItem>
+                      ))}
+                      {form.bucketId !== '' &&
+                        bucketsQuery.data !== undefined &&
+                        !bucketsQuery.data.some(
+                          (bucket) => String(bucket.id) === form.bucketId,
+                        ) && (
+                          <SelectItem value={form.bucketId}>
+                            {t('adminPolicies.edit.field.bucketMissing', { id: form.bucketId })}
+                          </SelectItem>
+                        )}
+                    </SelectContent>
+                  </Select>
+                </FormField>
+              )}
+              {!isCloudreve && !isOneImg && credentialFields}
               {isCloudreve && (
                 <FormField
                   id="policy-refresh-token"

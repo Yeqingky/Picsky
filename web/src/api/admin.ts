@@ -18,6 +18,8 @@ import type {
   LogListParams,
   MaintenanceTask,
   Paginated,
+  PolicyBucket,
+  PolicyBucketListRequest,
   PolicyPreviewRequest,
   PolicyPreviewResult,
   PolicyScanEnqueued,
@@ -78,6 +80,11 @@ export const adminPoliciesApi = {
   reorder: (ids: number[]) => api.patch<void>('/admin/policies', { ids }).then(() => undefined),
 
   remove: (id: number) => api.delete<void>(`/admin/policies/${id}`).then(() => undefined),
+
+  buckets: (body: PolicyBucketListRequest) =>
+    api
+      .post<PolicyBucket[]>('/admin/policies/buckets', body, { timeout: 60_000 })
+      .then((r) => r.data),
 
   test: (id: number) =>
     api

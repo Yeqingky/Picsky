@@ -23,6 +23,21 @@ func (s *Server) adminPolicyDrivers(c *gin.Context) {
 	c.JSON(http.StatusOK, storage.Specs())
 }
 
+// adminListPolicyBuckets 使用当前表单凭据读取驱动的存储桶选项.
+func (s *Server) adminListPolicyBuckets(c *gin.Context) {
+	var payload service.BucketListInput
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	buckets, err := s.svc.Policies.ListBuckets(c.Request.Context(), payload)
+	if err != nil {
+		s.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, buckets)
+}
+
 // adminListPolicies 策略列表.
 func (s *Server) adminListPolicies(c *gin.Context) {
 	views, err := s.svc.Policies.List()

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +71,13 @@ type PolicyInput struct {
 	Secrets          map[string]string `json:"secrets"`
 	URLs             []URLInput        `json:"urls"`
 	Sort             *int              `json:"sort"`
+}
+
+// BucketListInput 是读取驱动存储桶选项的入参; 凭据来自策略编辑页当前表单.
+type BucketListInput struct {
+	Type    string            `json:"type"`
+	Config  map[string]string `json:"config"`
+	Secrets map[string]string `json:"secrets"`
 }
 
 // PolicyOrderInput 是策略排序入参: 按 ids 顺序写入新的展示顺序.
@@ -447,6 +455,39 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 		}
 		if !valid {
 			return apperr.ErrInvalidRequest.WithMessage("后端配置项 " + field.Label + " 的值无效")
+		}
+	}
+	for _, field := range spec.SecretFields {
+		if !field.Required {
+			continue
+		}
+		value := ""
+		present := false
+		if in.Secrets != nil {
+			raw, ok := in.Secrets[field.Name]
+			if ok {
+				present = true
+				value = strings.TrimSpace(raw)
+			}
+		}
+		if !present && policy != nil {
+			existing, err := p.SecretsMap(policy)
+			if err != nil {
+				return apperr.ErrInternal.WithMessage(err.Error())
+			}
+			value = strings.TrimSpace(existing[field.Name])
+		}
+		if value == "" {
+			return apperr.ErrInvalidRequest.WithMessage("缺少必填后端凭据: " + field.Label)
+		}
+	}
+	if in.Type == "oneimg" {
+		bucketID := strings.TrimSpace(in.Config["bucket_id"])
+		if bucketID != "" {
+			id, err := strconv.Atoi(bucketID)
+			if err != nil || id <= 0 {
+				return apperr.ErrInvalidRequest.WithMessage("存储桶 ID 必须是正整数")
+			}
 		}
 	}
 	if in.Type == "cloudreve" {
@@ -835,6 +876,30 @@ func (p *Policies) Delete(id int64, actor *Principal, ip, userAgent string) erro
 		UserAgent:  userAgent,
 	})
 	return nil
+}
+
+// ListBuckets 读取驱动提供的存储桶选项; 用于未保存策略在编辑页选择存储桶.
+func (p *Policies) ListBuckets(ctx context.Context, in BucketListInput) ([]storage.Bucket, error) {
+	spec, ok := storage.SpecOf(in.Type)
+	if !ok {
+		return nil, apperr.ErrInvalidRequest.WithMessage("未知存储后端类型: " + in.Type)
+	}
+	if !spec.Has(storage.CapUpload) {
+		return nil, apperr.ErrInvalidRequest.WithMessage("存储后端未声明上传能力")
+	}
+	adapter, err := storage.New(in.Type, storage.Options{Config: in.Config, Secrets: in.Secrets})
+	if err != nil {
+		return nil, apperr.ErrInvalidRequest.WithMessage(err.Error())
+	}
+	lister, ok := adapter.(storage.BucketLister)
+	if !ok {
+		return nil, apperr.ErrInvalidRequest.WithMessage("该存储后端不支持存储桶列表")
+	}
+	buckets, err := lister.ListBuckets(ctx)
+	if err != nil {
+		return nil, apperr.ErrInvalidRequest.WithMessage(err.Error())
+	}
+	return buckets, nil
 }
 
 // Test 执行连接测试: 写入并删除探测对象.

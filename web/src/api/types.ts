@@ -381,6 +381,7 @@ export interface AdminPolicy {
   secrets?: {
     username?: string;
     password?: string;
+    token?: string;
     refresh_token?: string;
     refresh_expires?: string;
     access_expires?: string;
@@ -411,12 +412,25 @@ export interface AdminPolicyWriteRequest {
   secrets?: {
     username?: string;
     password?: string;
+    token?: string;
     refresh_token?: string;
     refresh_expires?: string;
     access_expires?: string;
   };
   urls: AdminPolicyUrl[];
   sort?: number;
+}
+
+export interface PolicyBucket {
+  id: number;
+  name: string;
+  type: string;
+}
+
+export interface PolicyBucketListRequest {
+  type: string;
+  config: Record<string, string>;
+  secrets: Record<string, string>;
 }
 
 export interface PolicyTestResult {
