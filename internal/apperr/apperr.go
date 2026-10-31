@@ -100,3 +100,17 @@ func From(err error) *Error {
 	}
 	return New(http.StatusInternalServerError, internalErrorCode, internalErrorMessage)
 }
+
+// Expose 返回未清洗的错误副本, 仅供管理员请求使用.
+// 保留原始消息与 Details, 便于管理员排查外部服务故障; 不得用于普通用户响应.
+func Expose(err error) *Error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *Error
+	if errors.As(err, &apiErr) && apiErr != nil {
+		clone := *apiErr
+		return &clone
+	}
+	return New(http.StatusInternalServerError, internalErrorCode, err.Error())
+}

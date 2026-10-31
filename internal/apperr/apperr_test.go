@@ -55,6 +55,34 @@ func TestFromSanitizesServerErrors(t *testing.T) {
 	}
 }
 
+func TestExposePreservesOriginalError(t *testing.T) {
+	original := ErrBackend.WithMessage("dial tcp 10.24.3.7:8443: connection refused").
+		WithDetails(map[string]any{"policy_id": 7})
+	got := Expose(original)
+	if got.Status != original.Status || got.Code != original.Code || got.Message != original.Message {
+		t.Fatalf("Expose 应保留原始错误: got %#v, want %#v", got, original)
+	}
+	if got.Details == nil || got.Details["policy_id"] != 7 {
+		t.Fatalf("Expose 应保留 details: %#v", got.Details)
+	}
+	if got == original {
+		t.Fatal("Expose 应返回副本, 避免修改预定义错误")
+	}
+
+	plain := errors.New("unexpected backend failure")
+	exposed := Expose(plain)
+	if exposed.Status != http.StatusInternalServerError || exposed.Code != ErrInternal.Code {
+		t.Fatalf("未包装错误的状态码 = %#v", exposed)
+	}
+	if exposed.Message != plain.Error() {
+		t.Fatalf("未包装错误的消息 = %q, want %q", exposed.Message, plain.Error())
+	}
+
+	if Expose(nil) != nil {
+		t.Fatal("Expose(nil) 应返回 nil")
+	}
+}
+
 func TestFromPreservesClientErrors(t *testing.T) {
 	original := ErrInvalidRequest.WithMessage("参数非法").WithDetails(map[string]any{"field": "name"})
 	got := From(original)

@@ -184,6 +184,12 @@ func (s *Server) fail(c *gin.Context, err error) {
 	apiErr := apperr.From(err)
 	if apiErr.Status >= http.StatusInternalServerError {
 		s.log.Error("请求处理失败", "path", c.Request.URL.Path, "method", c.Request.Method, "error", err)
+		// 管理员需要完整的外部服务错误用于排查; 普通用户仍返回通用消息.
+		if principal := middleware.Principal(c); principal != nil && principal.IsAdmin() {
+			if exposed := apperr.Expose(err); exposed != nil {
+				apiErr = exposed
+			}
+		}
 	}
 	if apiErr.Status == http.StatusTooManyRequests && apiErr.Details != nil {
 		if retry, ok := apiErr.Details["retry_after_seconds"].(int); ok {
