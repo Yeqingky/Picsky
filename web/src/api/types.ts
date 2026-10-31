@@ -371,7 +371,6 @@ export interface AdminPolicy {
   reuse_released_seq: boolean;
   config: {
     endpoint?: string;
-    auth_type?: string;
     region?: string;
     bucket?: string;
     path_style?: boolean;

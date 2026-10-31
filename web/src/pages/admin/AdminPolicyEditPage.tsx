@@ -53,7 +53,6 @@ import {
 } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { RadioGroup, RadioGroupItem } from '../../components/ui/radio-group';
 import {
   Select,
   SelectContent,
@@ -84,10 +83,6 @@ import type { PolicyTransferResult } from './policyTransfer';
  * 未注册的类型提交会被后端以 400 拒绝.
  */
 const TYPE_OPTIONS = ['webdav', 'sobot', 'celine', 'metaso', 'cloudreve'] as const;
-
-type CloudreveAuthType = 'password' | 'oauth';
-
-const CLOUDREVE_AUTH_OPTIONS: readonly CloudreveAuthType[] = ['password', 'oauth'];
 
 const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
 
@@ -192,7 +187,6 @@ interface FormState {
   endpoint: string;
   directory: string;
   autoLogin: boolean;
-  authType: CloudreveAuthType;
   username: string;
   password: string;
   cloudreveLoggedIn: boolean;
@@ -243,7 +237,6 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
         ? policy.config.directory
         : CLOUDREVE_DEFAULT_DIRECTORY,
     autoLogin: policy.config.auto_login === 'true',
-    authType: policy.config.auth_type === 'oauth' ? 'oauth' : 'password',
     username: policy.secrets?.username ?? '',
     password: policy.secrets?.password ?? '',
     cloudreveLoggedIn: policy.login_ready === true,
@@ -532,7 +525,6 @@ export default function AdminPolicyEditPage() {
       endpoint: '',
       directory: CLOUDREVE_DEFAULT_DIRECTORY,
       autoLogin: false,
-      authType: 'password',
       username: '',
       password: '',
       cloudreveLoggedIn: false,
@@ -606,16 +598,12 @@ export default function AdminPolicyEditPage() {
       next.endpoint = t('adminPolicies.edit.error.endpointRequired');
     }
 
-    if (form.type === 'cloudreve' && form.autoLogin) {
-      if (form.authType === 'oauth') {
-        next.authType = t('adminPolicies.edit.error.oauthUnsupported');
-      } else if (form.authType === 'password' && !form.cloudreveLoggedIn) {
-        if (form.username.trim() === '') {
-          next.username = t('adminPolicies.edit.error.cloudreveEmailRequired');
-        }
-        if (form.password === '') {
-          next.password = t('adminPolicies.edit.error.cloudrevePasswordRequired');
-        }
+    if (form.type === 'cloudreve' && form.autoLogin && !form.cloudreveLoggedIn) {
+      if (form.username.trim() === '') {
+        next.username = t('adminPolicies.edit.error.cloudreveEmailRequired');
+      }
+      if (form.password === '') {
+        next.password = t('adminPolicies.edit.error.cloudrevePasswordRequired');
       }
     }
 
@@ -717,7 +705,6 @@ export default function AdminPolicyEditPage() {
             ? {
                 endpoint: form.endpoint.trim(),
                 directory: form.directory.trim() || CLOUDREVE_DEFAULT_DIRECTORY,
-                auth_type: form.autoLogin ? form.authType : 'password',
                 auto_login: form.autoLogin ? 'true' : 'false',
               }
             : {},
@@ -963,7 +950,6 @@ export default function AdminPolicyEditPage() {
               endpoint: form.endpoint,
               directory: form.directory,
               autoLogin: form.autoLogin,
-              authType: form.authType,
               username: form.username,
               password: form.password,
               cloudreveRefreshToken: form.cloudreveRefreshToken,
@@ -1021,13 +1007,6 @@ export default function AdminPolicyEditPage() {
       }
       if (patch.directory !== undefined) next.directory = patch.directory;
       if (patch.autoLogin !== undefined) next.autoLogin = patch.autoLogin;
-      if (patch.authType !== undefined) {
-        next.authType = patch.authType === 'oauth' ? 'oauth' : 'password';
-        next.cloudreveLoggedIn = false;
-        next.cloudreveRefreshToken = '';
-        next.cloudreveRefreshExpires = '';
-        next.cloudreveAccessExpires = '';
-      }
       if (patch.username !== undefined) {
         next.username = patch.username;
         next.cloudreveLoggedIn = false;
@@ -1531,46 +1510,12 @@ export default function AdminPolicyEditPage() {
                     >
                       <div className="min-h-0 overflow-hidden">
                         <div className="flex flex-col gap-4 pt-4">
-                          <FormField
-                            id="policy-auth-type"
-                            label={t('adminPolicies.edit.field.authType')}
-                            error={errorFor('authType')}
-                          >
-                            <RadioGroup
-                              id="policy-auth-type"
-                              value={form.authType}
-                              onValueChange={(value) => {
-                                const next = CLOUDREVE_AUTH_OPTIONS.find(
-                                  (option) => option === value,
-                                );
-                                if (next !== undefined)
-                                  updateCloudreveCredentials({ authType: next });
-                              }}
-                              className="flex flex-row flex-wrap gap-4"
-                            >
-                              {CLOUDREVE_AUTH_OPTIONS.map((option) => (
-                                <div key={option} className="flex items-center gap-2">
-                                  <RadioGroupItem value={option} id={`policy-auth-${option}`} />
-                                  <Label htmlFor={`policy-auth-${option}`} className="font-normal">
-                                    {t(`adminPolicies.edit.field.authType_${option}`)}
-                                  </Label>
-                                </div>
-                              ))}
-                            </RadioGroup>
-                          </FormField>
                           <Alert className="border-transparent bg-warning/10 text-warning">
                             <AlertDescription>
                               {t('adminPolicies.edit.field.cloudreveCaptchaHint')}
                             </AlertDescription>
                           </Alert>
-                          {form.authType === 'oauth' && (
-                            <Alert variant="destructive">
-                              <AlertDescription>
-                                {t('adminPolicies.edit.field.oauthUnsupportedHint')}
-                              </AlertDescription>
-                            </Alert>
-                          )}
-                          {form.authType === 'password' && loginMutation.isError && (
+                          {loginMutation.isError && (
                             <Alert variant="destructive">
                               <AlertDescription>
                                 {errorText(
@@ -1580,13 +1525,13 @@ export default function AdminPolicyEditPage() {
                               </AlertDescription>
                             </Alert>
                           )}
-                          {form.authType === 'password' && credentialFields}
+                          {credentialFields}
                           <div className="flex justify-end">
                             <Button
                               type="button"
                               variant="outline"
                               size="sm"
-                              disabled={loginMutation.isPending || form.authType === 'oauth'}
+                              disabled={loginMutation.isPending}
                               onClick={() => loginMutation.mutate()}
                             >
                               {loginMutation.isPending

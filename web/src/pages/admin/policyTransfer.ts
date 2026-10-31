@@ -17,7 +17,6 @@ export interface PolicyTransferSource {
   endpoint: string;
   directory: string;
   autoLogin: boolean;
-  authType: string;
   username: string;
   password: string;
   cloudreveRefreshToken: string;
@@ -37,7 +36,7 @@ export interface PolicyTransferPayload {
   path_template: string;
   conflict_policy: ConflictPolicy;
   reuse_released_seq: boolean;
-  config: { endpoint: string; directory?: string; auth_type?: string; auto_login?: string };
+  config: { endpoint: string; directory?: string; auto_login?: string };
   secrets?: {
     username?: string;
     password?: string;
@@ -57,7 +56,6 @@ export interface PolicyTransferResult {
   endpoint?: string;
   directory?: string;
   autoLogin?: boolean;
-  authType?: string;
   username?: string;
   password?: string;
   cloudreveRefreshToken?: string;
@@ -84,7 +82,6 @@ export class PolicyTransferError extends Error {
 }
 
 const CONFLICT_VALUES: readonly ConflictPolicy[] = ['rename', 'skip'];
-const CLOUDREVE_AUTH_VALUES = ['password', 'oauth'] as const;
 
 /** 边界解析: JSON 解析结果按字段路径转对象, 非对象直接报字段错误 */
 function asObject(value: unknown, path: string): Record<string, unknown> {
@@ -142,7 +139,6 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
   };
   if (source.type === 'cloudreve') {
     payload.config.directory = source.directory;
-    payload.config.auth_type = source.authType;
     payload.config.auto_login = source.autoLogin ? 'true' : 'false';
   }
   if (Object.keys(secrets).length > 0) payload.secrets = secrets;
@@ -230,19 +226,16 @@ export function parsePolicyTransfer(
   }
 
   let endpoint = readString(root, 'endpoint', 'endpoint');
-  let authType = readString(root, 'auth_type', 'auth_type');
   let directory = readString(root, 'directory', 'directory');
   let autoLogin = readString(root, 'auto_login', 'auto_login');
   const config = root.config;
   if (config !== undefined) {
     const configRecord = asObject(config, 'config');
     const configEndpoint = readString(configRecord, 'endpoint', 'config.endpoint');
-    const configAuthType = readString(configRecord, 'auth_type', 'config.auth_type');
     const configDirectory = readString(configRecord, 'directory', 'config.directory');
     const configAutoLogin = readString(configRecord, 'auto_login', 'config.auto_login');
     if (configEndpoint !== undefined) endpoint = configEndpoint;
     if (configDirectory !== undefined) directory = configDirectory;
-    if (configAuthType !== undefined) authType = configAuthType;
     if (configAutoLogin !== undefined) autoLogin = configAutoLogin;
   }
   if (endpoint !== undefined) {
@@ -251,12 +244,6 @@ export function parsePolicyTransfer(
   }
   if (directory !== undefined) {
     result.directory = directory;
-    recognized += 1;
-  }
-  if (authType !== undefined) {
-    const matched = CLOUDREVE_AUTH_VALUES.find((value) => value === authType);
-    if (matched === undefined) throw new PolicyTransferError('field', 'config.auth_type');
-    result.authType = matched;
     recognized += 1;
   }
   if (autoLogin !== undefined) {

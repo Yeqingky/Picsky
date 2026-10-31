@@ -1,6 +1,5 @@
 // Package cloudreve 实现 Cloudreve v4 存储驱动.
 // 账号密码登录获取 AccessToken 后调用文件接口上传, 并由 Cloudreve 分配直链.
-// OAuth 登录暂未支持.
 package cloudreve
 
 import (
@@ -23,8 +22,6 @@ import (
 const (
 	driverType          = "cloudreve"
 	apiPrefix           = "/api/v4"
-	authPassword        = "password"
-	authOAuth           = "oauth"
 	scanPageSize        = 100
 	scanRequestInterval = 200 * time.Millisecond
 	maxListObjects      = 200000
@@ -55,16 +52,6 @@ func init() {
 			{Name: "endpoint", Label: "服务地址", Required: true, Placeholder: "https://cloudreve.example.com"},
 			{Name: "directory", Label: "目录", Placeholder: "/picsky"},
 			{Name: "auto_login", Label: "自动登录", Type: "switch"},
-			{
-				Name:     "auth_type",
-				Label:    "鉴权方式",
-				Required: true,
-				Type:     "radio",
-				Options: []storage.FieldOption{
-					{Value: authPassword, Label: "账号密码"},
-					{Value: authOAuth, Label: "OAuth"},
-				},
-			},
 		},
 		SecretFields: []storage.Field{
 			{Name: "username", Label: "邮箱", Placeholder: "Cloudreve 账号邮箱"},
@@ -101,17 +88,6 @@ func newAdapter(opts storage.Options) (storage.Adapter, error) {
 	apiBase, err := apiBaseFromEndpoint(raw)
 	if err != nil {
 		return nil, err
-	}
-
-	authType := strings.TrimSpace(opts.Config["auth_type"])
-	if authType == "" {
-		authType = authPassword
-	}
-	if authType == authOAuth {
-		return nil, errors.New("Cloudreve OAuth 登录暂未支持, 请使用账号密码")
-	}
-	if authType != authPassword {
-		return nil, errors.New("未知 Cloudreve 鉴权方式: " + authType)
 	}
 
 	directory, err := storage.NormalizePrefix(opts.Config["directory"])

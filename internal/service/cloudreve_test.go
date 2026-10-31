@@ -15,18 +15,18 @@ import (
 	_ "github.com/yeqingky/Picsky/internal/storage/cloudreve"
 )
 
-func TestPolicyRejectsInvalidCloudreveAuthType(t *testing.T) {
+func TestPolicyRejectsInvalidCloudreveAutoLogin(t *testing.T) {
 	f := newFixture(t)
 	_, err := f.svc.Policies.Create(service.PolicyInput{
-		Name: "Cloudreve 非法鉴权",
+		Name: "Cloudreve 非法自动登录",
 		Type: "cloudreve",
 		Config: map[string]string{
-			"endpoint":  "https://cloudreve.example.com",
-			"auth_type": "token",
+			"endpoint":   "https://cloudreve.example.com",
+			"auto_login": "yes",
 		},
 	}, f.admin, "127.0.0.1", "test-agent")
-	if err == nil || !strings.Contains(err.Error(), "鉴权方式") {
-		t.Fatalf("错误 = %v, 期望拒绝非法鉴权方式", err)
+	if err == nil || !strings.Contains(err.Error(), "自动登录") {
+		t.Fatalf("错误 = %v, 期望拒绝非法自动登录配置", err)
 	}
 }
 
@@ -44,8 +44,7 @@ func TestDefaultPathTemplateRequiresExtSuffix(t *testing.T) {
 func TestCloudrevePolicyRequiresLoginToEnable(t *testing.T) {
 	f := newFixture(t)
 	config := map[string]string{
-		"endpoint":  "https://cloudreve.example.com",
-		"auth_type": "password",
+		"endpoint": "https://cloudreve.example.com",
 	}
 	policy, err := f.svc.Policies.Create(service.PolicyInput{
 		Name:   "Cloudreve 未登录",
@@ -126,7 +125,7 @@ func TestCloudreveScanRequiresLogin(t *testing.T) {
 	policy, err := f.svc.Policies.Create(service.PolicyInput{
 		Name:   "Cloudreve 未登录扫描",
 		Type:   "cloudreve",
-		Config: map[string]string{"endpoint": "https://cloudreve.example.com", "auth_type": "password"},
+		Config: map[string]string{"endpoint": "https://cloudreve.example.com"},
 	}, f.admin, "127.0.0.1", "test-agent")
 	if err != nil {
 		t.Fatalf("创建未登录策略失败: %v", err)
@@ -199,7 +198,7 @@ func TestCloudreveScanBackfillsDirectLink(t *testing.T) {
 	policy, err := f.svc.Policies.Create(service.PolicyInput{
 		Name:   "Cloudreve 扫描",
 		Type:   "cloudreve",
-		Config: map[string]string{"endpoint": server.URL, "auth_type": "password"},
+		Config: map[string]string{"endpoint": server.URL},
 		Secrets: map[string]string{
 			"refresh_token": "refresh-token",
 		},

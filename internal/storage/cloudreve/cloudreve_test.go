@@ -39,22 +39,14 @@ func TestDriverSpec(t *testing.T) {
 	if spec.Has(storage.CapDelete) {
 		t.Error("Cloudreve 驱动不应声明删除能力")
 	}
-	if len(spec.ConfigFields) != 4 {
-		t.Fatalf("配置字段数量 = %d, 期望 4", len(spec.ConfigFields))
+	if len(spec.ConfigFields) != 3 {
+		t.Fatalf("配置字段数量 = %d, 期望 3", len(spec.ConfigFields))
 	}
 	if spec.ConfigFields[1].Name != "directory" {
 		t.Errorf("目录字段 = %+v", spec.ConfigFields[1])
 	}
 	if spec.ConfigFields[2].Name != "auto_login" || spec.ConfigFields[2].Type != "switch" {
 		t.Errorf("自动登录字段 = %+v", spec.ConfigFields[2])
-	}
-	if spec.ConfigFields[3].Name != "auth_type" || spec.ConfigFields[3].Type != "radio" {
-		t.Errorf("鉴权方式字段 = %+v", spec.ConfigFields[3])
-	}
-	if len(spec.ConfigFields[3].Options) != 2 ||
-		spec.ConfigFields[3].Options[0].Value != authPassword ||
-		spec.ConfigFields[3].Options[1].Value != authOAuth {
-		t.Errorf("鉴权方式选项 = %+v", spec.ConfigFields[3].Options)
 	}
 	if len(spec.SecretFields) != 3 ||
 		spec.SecretFields[0].Name != "username" ||
@@ -94,7 +86,7 @@ func TestPutLogsInUploadsAndReturnsDirectLink(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := newTestAdapter(t, server.URL, "")
+	adapter := newTestAdapter(t, server.URL)
 	result, err := adapter.Put(context.Background(), "picsky/0f/foo.png", strings.NewReader("image-bytes"), int64(len("image-bytes")), "image/png")
 	if err != nil {
 		t.Fatalf("Put 失败: %v", err)
@@ -135,7 +127,7 @@ func TestPutUploadsChunksInOrder(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := newTestAdapter(t, server.URL, "")
+	adapter := newTestAdapter(t, server.URL)
 	if _, err := adapter.Put(context.Background(), "foo.png", strings.NewReader("0123456789"), 10, "image/png"); err != nil {
 		t.Fatalf("Put 失败: %v", err)
 	}
@@ -172,7 +164,7 @@ func TestPutUsesEndpointAPIPrefix(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := newTestAdapter(t, server.URL+"/cloud/", "")
+	adapter := newTestAdapter(t, server.URL+"/cloud/")
 	if _, err := adapter.Put(context.Background(), "foo.png", strings.NewReader("image"), 5, "image/png"); err != nil {
 		t.Fatalf("Put 失败: %v", err)
 	}
@@ -217,7 +209,7 @@ func TestPutUsesRemoteUploadURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := newTestAdapter(t, server.URL, "")
+	adapter := newTestAdapter(t, server.URL)
 	if _, err := adapter.Put(context.Background(), "foo.png", strings.NewReader("abcde"), 5, "image/png"); err != nil {
 		t.Fatalf("Put 失败: %v", err)
 	}
@@ -336,7 +328,7 @@ func TestPutErrors(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			server := httptest.NewServer(testCase.handler)
 			defer server.Close()
-			adapter := newTestAdapter(t, server.URL, "")
+			adapter := newTestAdapter(t, server.URL)
 			_, err := adapter.Put(context.Background(), "foo.png", strings.NewReader("image"), 5, "image/png")
 			if err == nil || !strings.Contains(err.Error(), testCase.wantSub) {
 				t.Fatalf("错误 = %v, 期望包含 %q", err, testCase.wantSub)
@@ -346,7 +338,6 @@ func TestPutErrors(t *testing.T) {
 }
 
 func TestNewAdapterValidation(t *testing.T) {
-	valid := map[string]string{"endpoint": "https://cloudreve.example.com", "auth_type": authPassword}
 	validSecrets := map[string]string{"username": "me@example.com", "password": "secret"}
 	cases := []struct {
 		name    string
@@ -354,12 +345,10 @@ func TestNewAdapterValidation(t *testing.T) {
 		secrets map[string]string
 		wantSub string
 	}{
-		{"缺少地址", map[string]string{"auth_type": authPassword}, validSecrets, "endpoint"},
-		{"非法协议", map[string]string{"endpoint": "ftp://example.com", "auth_type": authPassword}, validSecrets, "http:// 或 https://"},
-		{"OAuth 占位", map[string]string{"endpoint": valid["endpoint"], "auth_type": authOAuth}, validSecrets, "OAuth"},
-		{"未知鉴权", map[string]string{"endpoint": valid["endpoint"], "auth_type": "token"}, validSecrets, "未知 Cloudreve 鉴权方式"},
-		{"缺少邮箱", valid, map[string]string{"password": "secret"}, "邮箱"},
-		{"缺少密码", valid, map[string]string{"username": "me@example.com"}, "密码"},
+		{"缺少地址", map[string]string{}, validSecrets, "endpoint"},
+		{"非法协议", map[string]string{"endpoint": "ftp://example.com"}, validSecrets, "http:// 或 https://"},
+		{"缺少邮箱", map[string]string{"endpoint": "https://cloudreve.example.com"}, map[string]string{"password": "secret"}, "邮箱"},
+		{"缺少密码", map[string]string{"endpoint": "https://cloudreve.example.com"}, map[string]string{"username": "me@example.com"}, "密码"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -463,7 +452,6 @@ func TestAutoLoginFallsBackToPassword(t *testing.T) {
 	rawAdapter, err := newAdapter(storage.Options{
 		Config: map[string]string{
 			"endpoint":   server.URL,
-			"auth_type":  authPassword,
 			"auto_login": "true",
 		},
 		Secrets: map[string]string{
@@ -490,7 +478,6 @@ func TestAutoLoginFallsBackToPassword(t *testing.T) {
 	manual, err := newAdapter(storage.Options{
 		Config: map[string]string{
 			"endpoint":   server.URL,
-			"auth_type":  authPassword,
 			"auto_login": "false",
 		},
 		Secrets: map[string]string{
@@ -543,7 +530,7 @@ func TestPutUsesStoredRefreshToken(t *testing.T) {
 	defer server.Close()
 
 	adapter, err := newAdapter(storage.Options{
-		Config: map[string]string{"endpoint": server.URL, "auth_type": authPassword},
+		Config: map[string]string{"endpoint": server.URL},
 		Secrets: map[string]string{
 			"refresh_token": "stored-refresh",
 		},
@@ -610,7 +597,7 @@ func TestTestUploadsProbePNG(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := newTestAdapter(t, server.URL, "")
+	adapter := newTestAdapter(t, server.URL)
 	if err := adapter.Test(context.Background(), ""); err != nil {
 		t.Fatalf("Test 失败: %v", err)
 	}
@@ -661,7 +648,7 @@ func TestListRecursesAndPaginates(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := newTestAdapter(t, server.URL, "")
+	adapter := newTestAdapter(t, server.URL)
 	objects, err := adapter.List(context.Background(), "picsky")
 	if err != nil {
 		t.Fatalf("List 失败: %v", err)
@@ -719,7 +706,7 @@ func TestStatAndReadUseDirectLinks(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := newTestAdapter(t, server.URL, "")
+	adapter := newTestAdapter(t, server.URL)
 	info, err := adapter.Stat(context.Background(), "picsky/foo.png")
 	if err != nil {
 		t.Fatalf("Stat 失败: %v", err)
@@ -769,7 +756,7 @@ func TestReadFallsBackToTemporaryURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	adapter := newTestAdapter(t, server.URL, "")
+	adapter := newTestAdapter(t, server.URL)
 	reader, err := adapter.Read(context.Background(), "picsky/foo.png")
 	if err != nil {
 		t.Fatalf("Read 失败: %v", err)
@@ -788,13 +775,10 @@ func TestUnsupportedOperations(t *testing.T) {
 	}
 }
 
-func newTestAdapter(t *testing.T, endpoint, authType string) storage.Adapter {
+func newTestAdapter(t *testing.T, endpoint string) storage.Adapter {
 	t.Helper()
-	if authType == "" {
-		authType = authPassword
-	}
 	adapter, err := newAdapter(storage.Options{
-		Config:  map[string]string{"endpoint": endpoint, "auth_type": authType},
+		Config:  map[string]string{"endpoint": endpoint},
 		Secrets: map[string]string{"username": "me@example.com", "password": "secret"},
 	})
 	if err != nil {
