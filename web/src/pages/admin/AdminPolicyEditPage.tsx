@@ -1196,7 +1196,6 @@ export default function AdminPolicyEditPage() {
       <div>
         <PageHeader
           title={isNew ? t('adminPolicies.edit.titleNew') : t('adminPolicies.list.title')}
-          description={isNew ? t('adminPolicies.edit.descriptionNew') : undefined}
           actions={
             <>
               <Skeleton className="h-9 w-20 rounded-lg" />
@@ -1284,13 +1283,6 @@ export default function AdminPolicyEditPage() {
           isNew
             ? t('adminPolicies.edit.titleNew')
             : t('adminPolicies.edit.titleEdit', { name: form.name })
-        }
-        description={
-          isNew
-            ? formURLFromBackend
-              ? t('adminPolicies.edit.descriptionNewUrlBackend')
-              : t('adminPolicies.edit.descriptionNew')
-            : undefined
         }
         actions={
           <>

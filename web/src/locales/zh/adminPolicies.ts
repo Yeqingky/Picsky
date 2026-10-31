@@ -65,9 +65,6 @@ export const adminPolicies = {
   edit: {
     titleNew: '新建存储策略',
     titleEdit: '编辑存储策略: {{name}}',
-    descriptionNew: '新建时预填系统设置中的默认魔法路径与默认冲突策略; 后端类型创建后不可修改.',
-    descriptionNewUrlBackend:
-      '选择 Sobot, 思琳中国或秘塔后只需填写策略名称; 初春图床需要配置站点地址, API Token 与可选存储桶; Cloudreve 需要配置服务地址, Refresh Token 或自动登录凭据与魔法路径. 后端类型创建后不可修改.',
     defaultHint: {
       sobot: '单文件最大 50MB.',
       celine: '单文件最大 20MB, 仅支持 PNG / JPEG / GIF, 图片会被重编码.',
