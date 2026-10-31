@@ -181,6 +181,8 @@ export const adminPolicies = {
     url: {
       add: '添加域名',
       empty: '尚未配置分发域名, 至少需要一项.',
+      prefixOverrideHint:
+        '配置分发域名后, 记录直链由默认域名拼接后端返回的路径; 未配置时使用初春图床站点直链.',
       aliasLabel: '别名',
       aliasPlaceholder: '融合CDN',
       urlLabel: '域名 URL',

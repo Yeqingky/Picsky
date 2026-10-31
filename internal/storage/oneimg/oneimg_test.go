@@ -35,6 +35,9 @@ func TestDriverSpec(t *testing.T) {
 	if !spec.URLFromBackend {
 		t.Error("初春图床驱动应由后端分配直链")
 	}
+	if !spec.URLPrefixOverride {
+		t.Error("初春图床驱动应允许分发域名覆盖后端直链前缀")
+	}
 	if len(spec.Capabilities) != 1 || spec.Capabilities[0] != "upload" {
 		t.Errorf("初春图床驱动应只声明上传能力: %v", spec.Capabilities)
 	}

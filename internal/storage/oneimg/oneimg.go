@@ -54,7 +54,8 @@ func init() {
 		SecretFields: []storage.Field{
 			{Name: "token", Label: "API Token", Required: true},
 		},
-		URLFromBackend: true,
+		URLFromBackend:    true,
+		URLPrefixOverride: true,
 	}, newAdapter)
 }
 

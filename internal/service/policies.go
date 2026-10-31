@@ -88,18 +88,19 @@ type PolicyOrderInput struct {
 // PolicyView 是策略的管理视图.
 type PolicyView struct {
 	*model.StoragePolicy
-	URLs           []model.PolicyURL `json:"urls"`
-	Capabilities   []string          `json:"capabilities"`
-	ConfigValues   map[string]string `json:"config"`
-	Secrets        map[string]string `json:"secrets,omitempty"`
-	SecretsPresent bool              `json:"secrets_present"`
-	LoginReady     bool              `json:"login_ready"`
-	DriverLabel    string            `json:"driver_label"`
-	ConfigFields   []storage.Field   `json:"config_fields"`
-	SecretFields   []storage.Field   `json:"secret_fields"`
-	URLFromBackend bool              `json:"url_from_backend"`
-	Formats        []string          `json:"formats"`
-	ImageCount     int64             `json:"image_count"`
+	URLs              []model.PolicyURL `json:"urls"`
+	Capabilities      []string          `json:"capabilities"`
+	ConfigValues      map[string]string `json:"config"`
+	Secrets           map[string]string `json:"secrets,omitempty"`
+	SecretsPresent    bool              `json:"secrets_present"`
+	LoginReady        bool              `json:"login_ready"`
+	DriverLabel       string            `json:"driver_label"`
+	ConfigFields      []storage.Field   `json:"config_fields"`
+	SecretFields      []storage.Field   `json:"secret_fields"`
+	URLFromBackend    bool              `json:"url_from_backend"`
+	URLPrefixOverride bool              `json:"url_prefix_override"`
+	Formats           []string          `json:"formats"`
+	ImageCount        int64             `json:"image_count"`
 }
 
 // ConfigMap 解码非敏感配置.
@@ -244,18 +245,19 @@ func (p *Policies) View(policy *model.StoragePolicy) (*PolicyView, error) {
 		loginReady = strings.TrimSpace(secrets["refresh_token"]) != ""
 	}
 	view := &PolicyView{
-		StoragePolicy:  policy,
-		URLs:           urls,
-		Capabilities:   spec.Capabilities,
-		ConfigValues:   config,
-		Secrets:        secrets,
-		SecretsPresent: strings.TrimSpace(policy.Secrets) != "",
-		LoginReady:     loginReady,
-		DriverLabel:    spec.Label,
-		ConfigFields:   spec.ConfigFields,
-		SecretFields:   spec.SecretFields,
-		URLFromBackend: spec.URLFromBackend,
-		Formats:        formats,
+		StoragePolicy:     policy,
+		URLs:              urls,
+		Capabilities:      spec.Capabilities,
+		ConfigValues:      config,
+		Secrets:           secrets,
+		SecretsPresent:    strings.TrimSpace(policy.Secrets) != "",
+		LoginReady:        loginReady,
+		DriverLabel:       spec.Label,
+		ConfigFields:      spec.ConfigFields,
+		SecretFields:      spec.SecretFields,
+		URLFromBackend:    spec.URLFromBackend,
+		URLPrefixOverride: spec.URLPrefixOverride,
+		Formats:           formats,
 	}
 	if view.URLs == nil {
 		view.URLs = []model.PolicyURL{}
@@ -409,7 +411,7 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 		return apperr.ErrInvalidRequest.WithMessage("存储后端未声明上传能力")
 	}
 	if spec.URLFromBackend {
-		// 后端自行分配直链: 分发域名不参与 URL 拼接, 只填策略名也能创建.
+		// 后端自行分配直链: 只填策略名也能创建; 声明前缀覆盖的驱动可另配分发域名.
 		if strings.TrimSpace(in.PathTemplate) == "" {
 			template := strings.TrimSpace(spec.DefaultPathTemplate)
 			if template == "" && p.settings != nil {
@@ -423,7 +425,7 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 		if in.ConflictPolicy == "" {
 			in.ConflictPolicy = model.ConflictRename
 		}
-		if len(in.URLs) > 0 {
+		if len(in.URLs) > 0 && !spec.URLPrefixOverride {
 			return apperr.ErrInvalidRequest.WithMessage("该后端由服务端返回直链, 不支持分发域名")
 		}
 	}
@@ -546,7 +548,7 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 			defaultCount++
 		}
 	}
-	if !spec.URLFromBackend && defaultCount != 1 {
+	if len(in.URLs) > 0 && defaultCount != 1 {
 		return apperr.ErrInvalidRequest.WithMessage("必须恰好有一个默认分发域名")
 	}
 	_ = policy

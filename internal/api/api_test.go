@@ -1120,6 +1120,126 @@ func TestLoginTwoStepTotpAPI(t *testing.T) {
 	}
 }
 
+func TestImageURLUsesOneImgDefaultDomain(t *testing.T) {
+	s := newServer(t)
+	cookie, _ := s.bootstrap()
+
+	created := s.json(http.MethodPost, "/api/v1/admin/policies", map[string]any{
+		"name":            "初春图床",
+		"type":            "oneimg",
+		"enabled":         true,
+		"config":          map[string]string{"endpoint": "http://host.docker.internal:8080"},
+		"secrets":         map[string]string{"token": "test-token"},
+		"path_template":   "{md5:2}/{md5}.{ext}",
+		"conflict_policy": "rename",
+		"urls": []map[string]any{
+			{"alias": "站点", "url": "https://cdn.example.com", "is_default": true},
+			{"alias": "备用", "url": "https://backup.example.com", "is_default": false},
+		},
+	}, []*http.Cookie{cookie})
+	if created.Status != http.StatusCreated {
+		t.Fatalf("创建策略失败: %d %s", created.Status, string(created.Body))
+	}
+	policyID := int64(s.decode(created)["id"].(float64))
+
+	var admin model.User
+	if err := s.db.Where("email = ?", "admin@example.com").First(&admin).Error; err != nil {
+		t.Fatalf("读取管理员失败: %v", err)
+	}
+	record := model.Image{
+		UserID:           admin.ID,
+		PolicyID:         policyID,
+		RelPath:          "uploads/2026/10/pic.webp",
+		ObjectKey:        "uploads/2026/10/pic.webp",
+		MD5:              "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+		SHA1:             "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+		SHA256:           strings.Repeat("0f", 32),
+		SHA512:           strings.Repeat("0f", 64),
+		Size:             128,
+		Kind:             model.KindImage,
+		Format:           "webp",
+		Ext:              "webp",
+		MIME:             "image/webp",
+		OriginalFilename: "pic.webp",
+		URL:              "http://host.docker.internal:8080/uploads/2026/10/pic.webp",
+		QuotaCharged:     true,
+		Source:           model.SourceWeb,
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := s.db.Create(&record).Error; err != nil {
+		t.Fatalf("写入图片记录失败: %v", err)
+	}
+
+	detail := s.json(http.MethodGet, fmt.Sprintf("/api/v1/images/%d", record.ID), nil, []*http.Cookie{cookie})
+	if detail.Status != http.StatusOK {
+		t.Fatalf("读取图片详情失败: %d %s", detail.Status, string(detail.Body))
+	}
+	payload := s.decode(detail)
+	if payload["url"] != "https://cdn.example.com/uploads/2026/10/pic.webp" {
+		t.Errorf("图片直链 = %v, 期望使用默认分发域名", payload["url"])
+	}
+	urls, ok := payload["urls"].([]any)
+	if !ok || len(urls) != 2 {
+		t.Errorf("分发域名列表 = %v", payload["urls"])
+	}
+}
+
+func TestImageURLUsesCurrentWebDAVDefaultDomain(t *testing.T) {
+	s := newServer(t)
+	cookie, _ := s.bootstrap()
+
+	created := s.json(http.MethodPost, "/api/v1/admin/policies", map[string]any{
+		"name":            "WebDAV 换域名",
+		"type":            "webdav",
+		"enabled":         true,
+		"path_template":   "{md5:2}/{md5}.{ext}",
+		"conflict_policy": "rename",
+		"config":          map[string]string{"endpoint": s.svc.Cfg.DBDSN},
+		"urls":            []map[string]any{{"alias": "新域名", "url": "https://new.example.com/image", "is_default": true}},
+	}, []*http.Cookie{cookie})
+	if created.Status != http.StatusCreated {
+		t.Fatalf("创建策略失败: %d %s", created.Status, string(created.Body))
+	}
+	policyID := int64(s.decode(created)["id"].(float64))
+
+	var admin model.User
+	if err := s.db.Where("email = ?", "admin@example.com").First(&admin).Error; err != nil {
+		t.Fatalf("读取管理员失败: %v", err)
+	}
+	record := model.Image{
+		UserID:           admin.ID,
+		PolicyID:         policyID,
+		RelPath:          "0f/pic.png",
+		ObjectKey:        "0f/pic.png",
+		MD5:              "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+		SHA1:             "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+		SHA256:           strings.Repeat("1f", 32),
+		SHA512:           strings.Repeat("1f", 64),
+		Size:             128,
+		Kind:             model.KindImage,
+		Format:           "png",
+		Ext:              "png",
+		MIME:             "image/png",
+		OriginalFilename: "pic.png",
+		URL:              "https://old.example.com/image/0f/pic.png",
+		QuotaCharged:     true,
+		Source:           model.SourceWeb,
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := s.db.Create(&record).Error; err != nil {
+		t.Fatalf("写入图片记录失败: %v", err)
+	}
+
+	detail := s.json(http.MethodGet, fmt.Sprintf("/api/v1/images/%d", record.ID), nil, []*http.Cookie{cookie})
+	if detail.Status != http.StatusOK {
+		t.Fatalf("读取图片详情失败: %d %s", detail.Status, string(detail.Body))
+	}
+	payload := s.decode(detail)
+	if payload["url"] != "https://new.example.com/image/0f/pic.png" {
+		t.Errorf("图片直链 = %v, 期望使用当前默认域名", payload["url"])
+	}
+}
+
 func TestUploadImagesAndKeys(t *testing.T) {
 	s := newServer(t)
 	cookie, policyID := s.bootstrap()

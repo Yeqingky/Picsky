@@ -147,15 +147,15 @@ export default function AdminPoliciesPage() {
         header: t('adminPolicies.list.col.urls'),
         className: 'w-[200px]',
         cell: (row) => {
-          if (row.url_from_backend) {
-            return (
-              <span className="text-muted-foreground text-sm">
-                {t('adminPolicies.list.notApplicable')}
-              </span>
-            );
-          }
           const urls = row.urls;
           if (urls.length === 0) {
+            if (row.url_from_backend) {
+              return (
+                <span className="text-muted-foreground text-sm">
+                  {t('adminPolicies.list.notApplicable')}
+                </span>
+              );
+            }
             return <span className="text-muted-foreground text-sm">-</span>;
           }
           const defaultUrl = urls.find((item) => item.is_default) ?? urls[0];

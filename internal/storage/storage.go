@@ -131,9 +131,12 @@ type Spec struct {
 	Capabilities []string `json:"capabilities"`
 	ConfigFields []Field  `json:"config_fields"`
 	SecretFields []Field  `json:"secret_fields"`
-	// URLFromBackend 表示驱动在后端分配最终直链, 策略不配置分发域名,
+	// URLFromBackend 表示驱动在后端分配最终直链, 策略默认不配置分发域名,
 	// 上传后以驱动返回的 URL 与路径作为记录直链与相对路径.
 	URLFromBackend bool `json:"url_from_backend"`
+	// URLPrefixOverride 表示策略分发域名可覆盖后端直链前缀: 配置默认分发域名时,
+	// 记录直链改为默认域名加后端直链路径, 未配置时仍使用后端直链.
+	URLPrefixOverride bool `json:"url_prefix_override"`
 	// DefaultPathTemplate 是驱动建议的默认魔法路径; 为空时使用系统设置.
 	DefaultPathTemplate string `json:"default_path_template,omitempty"`
 	// MaxFileSize 是驱动可接受的单对象最大字节数; 0 表示不额外限制.

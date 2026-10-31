@@ -9,13 +9,14 @@ import (
 
 func TestResolveRecordURL(t *testing.T) {
 	cases := []struct {
-		name       string
-		defaultURL string
-		relPath    string
-		put        storage.PutResult
-		wantURL    string
-		wantPath   string
-		wantErr    bool
+		name           string
+		defaultURL     string
+		relPath        string
+		prefixOverride bool
+		put            storage.PutResult
+		wantURL        string
+		wantPath       string
+		wantErr        bool
 	}{
 		{
 			name:       "分发域名拼接",
@@ -33,12 +34,29 @@ func TestResolveRecordURL(t *testing.T) {
 			wantPath:   "2026/10/30/abc.png",
 		},
 		{
-			name:       "后端直链优先于分发域名",
+			name:       "未声明前缀覆盖时后端直链优先于分发域名",
 			defaultURL: "https://cdn.example.com/image",
 			relPath:    "0f/foo.png",
 			put:        storage.PutResult{URL: "https://img.example.com/a/b.png"},
 			wantURL:    "https://img.example.com/a/b.png",
 			wantPath:   "a/b.png",
+		},
+		{
+			name:           "分发域名覆盖后端直链前缀",
+			defaultURL:     "https://cdn.example.com",
+			relPath:        "0f/foo.png",
+			prefixOverride: true,
+			put:            storage.PutResult{URL: "http://oneimg.local:8080/uploads/2026/10/30/abc.webp"},
+			wantURL:        "https://cdn.example.com/uploads/2026/10/30/abc.webp",
+			wantPath:       "uploads/2026/10/30/abc.webp",
+		},
+		{
+			name:           "前缀覆盖但未配置分发域名",
+			relPath:        "0f/foo.png",
+			prefixOverride: true,
+			put:            storage.PutResult{URL: "https://img.example.com/a/b.png"},
+			wantURL:        "https://img.example.com/a/b.png",
+			wantPath:       "a/b.png",
 		},
 		{
 			name:       "后端直链指定对象键",
@@ -60,7 +78,7 @@ func TestResolveRecordURL(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			gotURL, gotPath, err := resolveRecordURL(testCase.defaultURL, testCase.relPath, testCase.put)
+			gotURL, gotPath, err := resolveRecordURL(testCase.defaultURL, testCase.relPath, testCase.prefixOverride, testCase.put)
 			if testCase.wantErr {
 				if err == nil {
 					t.Fatalf("期望返回错误, 实际 %q %q", gotURL, gotPath)

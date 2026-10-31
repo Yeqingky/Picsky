@@ -395,6 +395,8 @@ export interface AdminPolicy {
   capabilities: string[];
   /** true 表示驱动上传后由后端分配直链, 不配置分发域名 */
   url_from_backend: boolean;
+  /** true 表示分发域名可覆盖后端直链前缀 */
+  url_prefix_override: boolean;
   created_at: string;
   updated_at: string;
 }

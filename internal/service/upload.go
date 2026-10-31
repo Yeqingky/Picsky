@@ -200,7 +200,8 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if err != nil {
 		return nil, err
 	}
-	if spec, ok := storage.SpecOf(policy.Type); ok {
+	spec, specFound := storage.SpecOf(policy.Type)
+	if specFound {
 		if err := checkPolicyFormats(spec.Formats, detected.Format); err != nil {
 			return nil, err
 		}
@@ -216,9 +217,10 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if err != nil {
 		return nil, err
 	}
-	// 由后端分配直链的驱动不需要分发域名; 其他驱动必须配置默认域名.
+	// 由后端分配直链的驱动默认不配置分发域名; 声明前缀覆盖时可选用默认域名替换直链前缀.
+	prefixOverride := spec.URLFromBackend && spec.URLPrefixOverride
 	defaultURL := ""
-	if len(urls) > 0 {
+	if len(urls) > 0 && (!spec.URLFromBackend || prefixOverride) {
 		defaultURL, err = u.policies.DefaultURL(policy.ID)
 		if err != nil {
 			return nil, err
@@ -232,7 +234,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 		Order("id ASC").First(&existing).Error
 	switch {
 	case err == nil:
-		return u.reuseRecord(req, policy, urls, &existing)
+		return u.reuseRecord(req, policy, defaultURL, urls, &existing)
 	case errors.Is(err, gorm.ErrRecordNotFound):
 	default:
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
@@ -258,7 +260,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 			Order("id ASC").First(&concurrentExisting).Error
 		switch {
 		case err == nil:
-			return u.reuseRecord(req, policy, urls, &concurrentExisting)
+			return u.reuseRecord(req, policy, defaultURL, urls, &concurrentExisting)
 		case errors.Is(err, gorm.ErrRecordNotFound):
 		default:
 			return nil, apperr.ErrInternal.WithMessage(err.Error())
@@ -300,7 +302,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 			break
 		}
 		if conflictRecord != nil && conflictRecord.SHA256 == sums.SHA256 {
-			return u.reuseRecord(req, policy, urls, conflictRecord)
+			return u.reuseRecord(req, policy, defaultURL, urls, conflictRecord)
 		}
 		if conflictRecord == nil {
 			// 对象已存在但记录尚不可见: 可能是并发上传相同内容, 先按内容再确认一次.
@@ -309,7 +311,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 				return nil, err
 			}
 			if contentRecord != nil {
-				return u.reuseRecord(req, policy, urls, contentRecord)
+				return u.reuseRecord(req, policy, defaultURL, urls, contentRecord)
 			}
 		}
 
@@ -381,7 +383,7 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if err != nil {
 		return nil, apperr.ErrBackend.WithMessage(err.Error())
 	}
-	recordURL, objectPath, err := resolveRecordURL(defaultURL, relPath, putResult)
+	recordURL, objectPath, err := resolveRecordURL(defaultURL, relPath, prefixOverride, putResult)
 	if err != nil {
 		return nil, apperr.ErrBackend.WithMessage(err.Error())
 	}
@@ -521,8 +523,13 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 }
 
 // reuseRecord 复用已有对象: 自己的记录幂等返回, 他人的记录新建免费记录.
-func (u *Upload) reuseRecord(req UploadRequest, policy *model.StoragePolicy, urls []model.PolicyURL, existing *model.Image) (*UploadResult, error) {
+func (u *Upload) reuseRecord(req UploadRequest, policy *model.StoragePolicy, defaultURL string, urls []model.PolicyURL, existing *model.Image) (*UploadResult, error) {
 	user := req.Principal.User
+	recordPath := existing.RelPath
+	if strings.TrimSpace(recordPath) == "" {
+		recordPath = existing.ObjectKey
+	}
+	existing.URL = defaultDomainRecordURL(defaultURL, recordPath, existing.URL)
 	if existing.UserID == user.ID {
 		u.audit.Recordf(Entry{
 			UserID:     &user.ID,
@@ -672,6 +679,17 @@ func (u *Upload) Check(principal *Principal, sha256 string, policyID *int64) (*C
 	}
 	if err != nil {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	urls, err := u.policies.URLs(policy.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(urls) > 0 {
+		recordPath := existing.RelPath
+		if strings.TrimSpace(recordPath) == "" {
+			recordPath = existing.ObjectKey
+		}
+		existing.URL = defaultDomainRecordURL(urls[0].URL, recordPath, existing.URL)
 	}
 	return &CheckResult{Exists: true, Record: &CheckRecord{ID: existing.ID, URL: existing.URL, Size: existing.Size}}, nil
 }
@@ -831,8 +849,20 @@ func sourceOrDefault(source string) string {
 }
 
 // resolveRecordURL 按驱动写入结果确定记录直链与实际对象路径.
-// 后端分配直链时直接使用该 URL 并把其路径作为对象键, 否则按分发域名与相对路径拼接.
-func resolveRecordURL(defaultURL, relPath string, result storage.PutResult) (string, string, error) {
+// 后端分配直链时以其路径作为对象键; 驱动声明前缀覆盖且配置了默认分发域名时改用默认域名拼接,
+// 否则直接使用后端直链.
+func defaultDomainRecordURL(defaultURL, relPath, storedURL string) string {
+	if defaultURL == "" {
+		return storedURL
+	}
+	relPath = strings.Trim(relPath, "/")
+	if relPath == "" {
+		return storedURL
+	}
+	return storage.JoinURL(defaultURL, relPath)
+}
+
+func resolveRecordURL(defaultURL, relPath string, prefixOverride bool, result storage.PutResult) (string, string, error) {
 	if result.URL == "" {
 		if defaultURL == "" {
 			return "", "", errors.New("存储后端未返回直链")
@@ -846,6 +876,9 @@ func resolveRecordURL(defaultURL, relPath string, result storage.PutResult) (str
 	}
 	if objectPath == "" {
 		objectPath = urlPath
+	}
+	if prefixOverride && defaultURL != "" {
+		return storage.JoinURL(defaultURL, objectPath), objectPath, nil
 	}
 	return result.URL, objectPath, nil
 }

@@ -87,7 +87,10 @@ const TYPE_OPTIONS = ['webdav', 'sobot', 'celine', 'metaso', 'oneimg', 'cloudrev
 const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
 
 /** 新建时的驱动特征: 编辑模式以服务端返回的 capabilities / url_from_backend 为准 */
-const NEW_TYPE_TRAITS: Record<string, { capabilities: string[]; urlFromBackend: boolean }> = {
+const NEW_TYPE_TRAITS: Record<
+  string,
+  { capabilities: string[]; urlFromBackend: boolean; urlPrefixOverride?: boolean }
+> = {
   webdav: {
     capabilities: ['upload', 'list', 'read', 'delete', 'overwrite', 'stat', 'mkdir'],
     urlFromBackend: false,
@@ -95,7 +98,7 @@ const NEW_TYPE_TRAITS: Record<string, { capabilities: string[]; urlFromBackend: 
   sobot: { capabilities: ['upload'], urlFromBackend: true },
   celine: { capabilities: ['upload'], urlFromBackend: true },
   metaso: { capabilities: ['upload'], urlFromBackend: true },
-  oneimg: { capabilities: ['upload'], urlFromBackend: true },
+  oneimg: { capabilities: ['upload'], urlFromBackend: true, urlPrefixOverride: true },
   cloudreve: { capabilities: ['upload'], urlFromBackend: true },
 };
 
@@ -115,7 +118,7 @@ const TYPE_HIDDEN_TABS: Record<string, readonly string[]> = {
   sobot: ['connection', ...URL_BACKEND_HIDDEN_TABS],
   celine: ['connection', ...URL_BACKEND_HIDDEN_TABS],
   metaso: ['connection', ...URL_BACKEND_HIDDEN_TABS],
-  oneimg: URL_BACKEND_HIDDEN_TABS,
+  oneimg: ['path', 'conflict', 'scan'],
   cloudreve: ['urls', 'conflict', 'scan'],
 };
 
@@ -474,6 +477,7 @@ export default function AdminPolicyEditPage() {
   // 标签写入 ?tab=: 刷新与深链保持当前分组; 默认标签不落 URL, 扫描补录仅编辑模式可见
   const [searchParams, setSearchParams] = useSearchParams();
   const formURLFromBackend = NEW_TYPE_TRAITS[form?.type ?? '']?.urlFromBackend ?? false;
+  const formURLPrefixOverride = NEW_TYPE_TRAITS[form?.type ?? '']?.urlPrefixOverride ?? false;
   const urlBackendHint = formURLFromBackend
     ? t(`adminPolicies.edit.field.urlBackendHint.${form?.type ?? ''}`, { defaultValue: '' })
     : '';
@@ -644,8 +648,9 @@ export default function AdminPolicyEditPage() {
       next.hint = t('adminPolicies.edit.error.hintTooLong');
     }
 
-    if (!formURLFromBackend) {
+    if (!formURLFromBackend || formURLPrefixOverride) {
       form.urls.forEach((row, index) => {
+        if (formURLPrefixOverride && row.alias.trim() === '' && row.url.trim() === '') return;
         if (row.alias.trim() === '')
           next[`urls.${index}.alias`] = t('adminPolicies.edit.error.urlAliasRequired');
         if (row.url.trim() === '')
@@ -653,12 +658,14 @@ export default function AdminPolicyEditPage() {
         else if (!URL_RE.test(row.url.trim()))
           next[`urls.${index}.url`] = t('adminPolicies.edit.error.urlInvalid');
       });
+    }
 
-      if (form.urls.length === 0) next.urls = t('adminPolicies.edit.error.urlsRequired');
+    if (!formURLFromBackend && form.urls.length === 0) {
+      next.urls = t('adminPolicies.edit.error.urlsRequired');
     }
 
     return next;
-  }, [form, formURLFromBackend, t]);
+  }, [form, formURLFromBackend, formURLPrefixOverride, t]);
 
   const sequenceTemplate = form !== null && SEQ_RE.test(form.pathTemplate.trim());
 
@@ -728,6 +735,15 @@ export default function AdminPolicyEditPage() {
       secrets.access_expires = form.cloudreveAccessExpires;
     }
 
+    const urlRows = form.urls
+      .filter((row) => row.alias.trim() !== '' || row.url.trim() !== '')
+      .map((row, index) => ({
+        alias: row.alias.trim(),
+        url: row.url.trim(),
+        is_default: index === 0,
+        sort: index + 1,
+      }));
+
     const body: AdminPolicyWriteRequest = formURLFromBackend
       ? {
           name: form.name.trim(),
@@ -749,7 +765,7 @@ export default function AdminPolicyEditPage() {
                   ...(form.bucketId !== '' ? { bucket_id: form.bucketId } : {}),
                 }
               : {},
-          urls: [],
+          urls: formURLPrefixOverride ? urlRows : [],
         }
       : {
           name: form.name.trim(),
@@ -760,12 +776,7 @@ export default function AdminPolicyEditPage() {
           conflict_policy: form.conflictPolicy,
           reuse_released_seq: form.reuseReleasedSeq,
           config: { endpoint: form.endpoint.trim() },
-          urls: form.urls.map((row, index) => ({
-            alias: row.alias.trim(),
-            url: row.url.trim(),
-            is_default: index === 0,
-            sort: index + 1,
-          })),
+          urls: urlRows,
         };
     if ((!formURLFromBackend || isCloudreve || isOneImg) && Object.keys(secrets).length > 0) {
       body.secrets = secrets;
@@ -1893,11 +1904,16 @@ export default function AdminPolicyEditPage() {
                   {t('adminPolicies.edit.url.add')}
                 </Button>
               </div>
-              {form.urls.length === 0 && (
-                <Alert className="border-transparent bg-info/10 text-info">
-                  <AlertDescription>{t('adminPolicies.edit.url.empty')}</AlertDescription>
-                </Alert>
-              )}
+              {form.urls.every((row) => row.alias.trim() === '' && row.url.trim() === '') &&
+                (formURLPrefixOverride ? (
+                  <p className="text-muted-foreground text-xs">
+                    {t('adminPolicies.edit.url.prefixOverrideHint')}
+                  </p>
+                ) : (
+                  <Alert className="border-transparent bg-info/10 text-info">
+                    <AlertDescription>{t('adminPolicies.edit.url.empty')}</AlertDescription>
+                  </Alert>
+                ))}
 
               {form.urls.length > 0 && (
                 <div className="flex w-full flex-col gap-3">

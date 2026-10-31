@@ -304,6 +304,7 @@ type policyMeta struct {
 	Name         string
 	Capabilities []string
 	URLs         []model.PolicyURL
+	DefaultURL   string
 }
 
 // imageDTO 是图片记录的下发结构.
@@ -399,6 +400,11 @@ func (s *Server) metaFor(policyIDs []int64) (map[int64]*policyMeta, error) {
 			meta.URLs = append(meta.URLs, url)
 		}
 	}
+	for _, meta := range metas {
+		if len(meta.URLs) > 0 {
+			meta.DefaultURL = meta.URLs[0].URL
+		}
+	}
 	return metas, nil
 }
 
@@ -448,6 +454,15 @@ func (s *Server) toImageDTO(record *model.Image, meta *policyMeta, userEmail str
 		dto.PolicyName = meta.Name
 		dto.PolicyCapabilities = meta.Capabilities
 		dto.URLs = s.urlsFor(meta, record.RelPath)
+		if meta.DefaultURL != "" {
+			relPath := strings.Trim(record.RelPath, "/")
+			if relPath == "" {
+				relPath = record.ObjectKey
+			}
+			if relPath != "" {
+				dto.URL = storage.JoinURL(meta.DefaultURL, relPath)
+			}
+		}
 	}
 	return dto
 }
