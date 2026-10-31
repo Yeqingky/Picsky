@@ -23,26 +23,32 @@ export function GalleryImageCard({
   onToggleSelect,
   onOpen,
 }: GalleryImageCardProps) {
+  const activate = () => {
+    if (selectionMode) {
+      onToggleSelect(record.id);
+      return;
+    }
+    onOpen(record);
+  };
+
   return (
     <div
       className={cn(
         'group relative overflow-hidden rounded-lg border transition-colors',
         selected ? 'border-primary' : 'border-border',
+        selectionMode ? 'cursor-pointer' : 'cursor-zoom-in',
       )}
       style={{ height }}
+      onClick={activate}
     >
-      <LazyImage
-        src={record.url}
-        alt={record.original_filename}
-        hash={record.sha256}
-        onClick={() => onOpen(record)}
-      />
+      <LazyImage src={record.url} alt={record.original_filename} hash={record.sha256} />
 
       <div className="pointer-events-none absolute inset-x-1 top-1 flex items-start justify-between">
         {selectionMode ? (
           <Checkbox
             checked={selected}
             onCheckedChange={() => onToggleSelect(record.id)}
+            onClick={(event) => event.stopPropagation()}
             aria-label={record.original_filename}
             className="bg-card/90 pointer-events-auto rounded"
           />
