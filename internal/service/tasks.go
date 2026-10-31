@@ -20,6 +20,7 @@ const (
 	taskWorkerInterval = 15 * time.Second
 	taskMaxAttempts    = 3
 	taskPurgeAfter     = 30 * 24 * time.Hour
+	taskScanTimeout    = 30 * time.Minute
 )
 
 // Tasks 是维护任务队列: 入队, 调度, 手动执行与幂等重试.
@@ -406,7 +407,7 @@ func (t *Tasks) performObjectDelete(ctx context.Context, policy *model.StoragePo
 	if references > 0 {
 		return nil
 	}
-	if value, ok := storage.ExtractSequence(policy.PathTemplate, objectKey); ok {
+	if value, ok := storage.ExtractSequence(policy.PathTemplate, recordPathForPolicy(policy, objectKey)); ok {
 		return releasePolicySequence(t.db, policy, value)
 	}
 	return nil
@@ -469,6 +470,8 @@ func (t *Tasks) markObjectDeleteFailed(task *model.MaintenanceTask, cause error)
 }
 
 func (t *Tasks) executePolicyScan(ctx context.Context, task *model.MaintenanceTask) error {
+	ctx, cancel := context.WithTimeout(ctx, taskScanTimeout)
+	defer cancel()
 	var payload struct {
 		PolicyID int64   `json:"policy_id"`
 		UserID   int64   `json:"user_id"`

@@ -426,6 +426,9 @@ func ValidateTemplate(template string) error {
 	if !hasContentHash && sequenceCount == 0 {
 		return errors.New("魔法路径模板必须包含内容哈希变量或 {seq}")
 	}
+	if !strings.HasSuffix(template, ".{ext}") {
+		return errors.New("魔法路径模板必须以 .{ext} 结尾")
+	}
 	return nil
 }
 
@@ -482,6 +485,25 @@ func NormalizeObjectKey(prefix, relPath string) string {
 		segments = append(segments, segment)
 	}
 	return strings.Join(segments, "/")
+}
+
+// NormalizePrefix 规范化目录前缀: 去首尾斜杠并校验路径段; 空值表示根目录.
+func NormalizePrefix(raw string) (string, error) {
+	prefix := strings.Trim(strings.TrimSpace(raw), "/")
+	if err := ValidatePrefix(prefix); err != nil {
+		return "", err
+	}
+	return prefix, nil
+}
+
+// WithPrefix 给对象键加上目录前缀; 已带相同前缀时不重复添加.
+func WithPrefix(prefix, key string) string {
+	prefix = strings.Trim(prefix, "/")
+	key = NormalizeObjectKey("", key)
+	if prefix == "" || key == "" || key == prefix || strings.HasPrefix(key, prefix+"/") {
+		return key
+	}
+	return prefix + "/" + key
 }
 
 // JoinURL 拼接分发域名与相对路径, 规范化尾部斜杠.

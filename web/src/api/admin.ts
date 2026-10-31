@@ -11,6 +11,10 @@ import type {
   AdminUserUpdateRequest,
   AuditLog,
   ClientIPSource,
+  CloudreveLoginRequest,
+  CloudreveLoginResult,
+  CloudreveRefreshRequest,
+  CloudreveTwoFactorRequest,
   LogListParams,
   MaintenanceTask,
   Paginated,
@@ -90,6 +94,15 @@ export const adminPoliciesApi = {
 
   preview: (body: PolicyPreviewRequest) =>
     api.post<PolicyPreviewResult>('/admin/policies/preview', body).then((r) => r.data),
+
+  cloudreveLogin: (body: CloudreveLoginRequest) =>
+    api.post<CloudreveLoginResult>('/admin/policies/cloudreve/login', body).then((r) => r.data),
+
+  cloudreveTwoFactor: (body: CloudreveTwoFactorRequest) =>
+    api.post<CloudreveLoginResult>('/admin/policies/cloudreve/login/2fa', body).then((r) => r.data),
+
+  cloudreveRefresh: (body: CloudreveRefreshRequest) =>
+    api.post<CloudreveLoginResult>('/admin/policies/cloudreve/refresh', body).then((r) => r.data),
 };
 
 export const adminSettingsApi = {

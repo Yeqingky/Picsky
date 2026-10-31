@@ -63,7 +63,8 @@ export const adminSystem = {
       maxFileSizeHint: '当前 {{size}}; 可被用户组覆盖',
       conflictPolicy: '默认冲突策略',
       pathTemplate: '默认路径模板',
-      pathTemplateHint: '新建存储策略时预填; 必须包含内容哈希变量 ({md5} / {sha256} / {sha512})',
+      pathTemplateHint:
+        '新建存储策略时预填; 必须包含内容哈希变量 ({md5} / {sha256} / {sha512}) 并以 .{ext} 结尾',
       deleteObject: '引用归零时删除外部对象',
       deleteObjectHint: '仅在存储后端声明 delete 能力时生效',
       galleryPageSize: '图库每页数量',
@@ -79,6 +80,7 @@ export const adminSystem = {
       formatsToken: '格式仅可包含字母与数字',
       emailDomains: '请输入有效的邮箱域名',
       pathHash: '路径模板必须包含内容哈希变量 ({md5} / {sha256} / {sha512})',
+      pathExt: '路径模板必须以 .{ext} 结尾',
       groupId: '请输入有效的用户组 ID',
     },
   },

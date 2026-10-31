@@ -84,6 +84,8 @@ type ObjectInfo struct {
 	Size    int64
 	ModTime time.Time
 	IsDir   bool
+	// URL 是后端为对象分配的直链; 为空时由上层按分发域名拼接.
+	URL string
 }
 
 // Options 是驱动实例化参数: 敏感配置已由上层解密.
@@ -92,13 +94,22 @@ type Options struct {
 	Secrets map[string]string
 }
 
+// FieldOption 是枚举配置字段的可选值.
+type FieldOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
 // Field 描述一个配置字段, 供管理后台渲染表单.
+// Type 为空时按文本输入处理; 当前支持 text (默认) 与 radio.
 type Field struct {
-	Name        string `json:"name"`
-	Label       string `json:"label"`
-	Required    bool   `json:"required"`
-	Secret      bool   `json:"secret"`
-	Placeholder string `json:"placeholder"`
+	Name        string        `json:"name"`
+	Label       string        `json:"label"`
+	Required    bool          `json:"required"`
+	Secret      bool          `json:"secret"`
+	Placeholder string        `json:"placeholder"`
+	Type        string        `json:"type,omitempty"`
+	Options     []FieldOption `json:"options,omitempty"`
 }
 
 // Spec 是驱动静态声明: 类型, 能力与配置字段.
@@ -111,6 +122,8 @@ type Spec struct {
 	// URLFromBackend 表示驱动在后端分配最终直链, 策略不配置分发域名,
 	// 上传后以驱动返回的 URL 与路径作为记录直链与相对路径.
 	URLFromBackend bool `json:"url_from_backend"`
+	// DefaultPathTemplate 是驱动建议的默认魔法路径; 为空时使用系统设置.
+	DefaultPathTemplate string `json:"default_path_template,omitempty"`
 	// MaxFileSize 是驱动可接受的单对象最大字节数; 0 表示不额外限制.
 	MaxFileSize int64 `json:"max_file_size_bytes"`
 	// Formats 是驱动支持的图片格式 (imgdetect 格式名); 空表示不额外限制.
@@ -122,10 +135,12 @@ type Spec struct {
 func (s Spec) Has(cap Capability) bool { return s.caps.Has(cap) }
 
 // PutResult 是写入结果.
-// URL 非空表示后端分配了最终直链, 上层用它作为记录 URL, 并从其路径推导相对路径;
-// 为空时上层按策略分发域名与渲染路径拼接.
+// URL 非空表示后端分配了最终直链, 上层用它作为记录 URL;
+// ObjectKey 非空时直接作为实际对象路径, 否则从 URL 路径推导.
+// URL 为空时上层按策略分发域名与渲染路径拼接.
 type PutResult struct {
-	URL string
+	URL       string
+	ObjectKey string
 }
 
 // Adapter 是存储后端驱动接口.
@@ -146,6 +161,18 @@ type Adapter interface {
 	Read(ctx context.Context, key string) (io.ReadCloser, error)
 	// Test 写入一个探测对象, 用于连接测试; 声明 CapDelete 的驱动应自行清理.
 	Test(ctx context.Context, prefix string) error
+}
+
+// ScanChecker 是可选接口, 用于在创建扫描任务前校验后端凭据与访问权限.
+// 预检失败时上层拒绝入队, 不创建维护任务.
+type ScanChecker interface {
+	CheckScan(ctx context.Context) error
+}
+
+// ScanRootProvider 是可选接口, 返回驱动配置的扫描根目录.
+// 非空时扫描只列举该目录, 并清理策略内不在该目录下的本地记录.
+type ScanRootProvider interface {
+	ScanRoot() string
 }
 
 // Factory 由驱动实现, 用于实例化 Adapter.

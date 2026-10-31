@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/yeqingky/Picsky/internal/model"
 	"github.com/yeqingky/Picsky/internal/service"
 	"github.com/yeqingky/Picsky/internal/storage"
+	"github.com/yeqingky/Picsky/internal/storage/cloudreve"
 )
 
 // adminPolicyDrivers 返回已注册存储后端类型与字段定义.
@@ -128,6 +130,107 @@ func (s *Server) adminTestPolicy(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// cloudreveLoginPayload 是 Cloudreve 登录接口响应.
+type cloudreveLoginPayload struct {
+	Status         string `json:"status"`
+	SessionID      string `json:"session_id,omitempty"`
+	RefreshToken   string `json:"refresh_token,omitempty"`
+	RefreshExpires string `json:"refresh_expires,omitempty"`
+	AccessExpires  string `json:"access_expires,omitempty"`
+}
+
+// cloudreveExpiryText 把 Cloudreve 令牌到期时间格式化为 RFC3339; 零值返回空.
+func cloudreveExpiryText(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339)
+}
+
+// cloudreveLoginError 把 Cloudreve 登录错误转为可展示的 400; 仅管理员接口返回.
+func cloudreveLoginError(err error) error {
+	return apperr.New(http.StatusBadRequest, "cloudreve_login_failed", err.Error())
+}
+
+// adminCloudreveLogin 使用账号密码登录 Cloudreve; 需要 2FA 时返回会话 ID.
+func (s *Server) adminCloudreveLogin(c *gin.Context) {
+	var payload struct {
+		Endpoint string `json:"endpoint"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	result, err := cloudreve.LoginPassword(c.Request.Context(), payload.Endpoint, payload.Email, payload.Password)
+	if err != nil {
+		s.fail(c, cloudreveLoginError(err))
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	if result.TwoFactor {
+		c.JSON(http.StatusOK, cloudreveLoginPayload{Status: "2fa", SessionID: result.SessionID})
+		return
+	}
+	c.JSON(http.StatusOK, cloudreveLoginPayload{
+		Status:         "ok",
+		RefreshToken:   result.RefreshToken,
+		RefreshExpires: result.RefreshExpires,
+		AccessExpires:  cloudreveExpiryText(result.AccessExpires),
+	})
+}
+
+// adminCloudreveRefreshToken 使用 RefreshToken 换取新的令牌信息.
+// 该接口只返回到期时间与可能轮换后的 RefreshToken, 不把 AccessToken 下发到浏览器.
+func (s *Server) adminCloudreveRefreshToken(c *gin.Context) {
+	var payload struct {
+		Endpoint     string `json:"endpoint"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	result, err := cloudreve.RefreshAccessToken(c.Request.Context(), payload.Endpoint, payload.RefreshToken)
+	if err != nil {
+		s.fail(c, cloudreveLoginError(err))
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, cloudreveLoginPayload{
+		Status:         "ok",
+		RefreshToken:   result.RefreshToken,
+		RefreshExpires: result.RefreshExpires,
+		AccessExpires:  cloudreveExpiryText(result.AccessExpires),
+	})
+}
+
+// adminCloudreveTwoFactor 完成 Cloudreve 两步验证登录.
+func (s *Server) adminCloudreveTwoFactor(c *gin.Context) {
+	var payload struct {
+		Endpoint  string `json:"endpoint"`
+		SessionID string `json:"session_id"`
+		OTP       string `json:"otp"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	result, err := cloudreve.CompleteTwoFactor(c.Request.Context(), payload.Endpoint, payload.SessionID, payload.OTP)
+	if err != nil {
+		s.fail(c, cloudreveLoginError(err))
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, cloudreveLoginPayload{
+		Status:         "ok",
+		RefreshToken:   result.RefreshToken,
+		RefreshExpires: result.RefreshExpires,
+		AccessExpires:  cloudreveExpiryText(result.AccessExpires),
+	})
+}
+
 // adminPreviewPolicy 路径与 URL 预览.
 func (s *Server) adminPreviewPolicy(c *gin.Context) {
 	var payload service.PreviewInput
@@ -159,7 +262,7 @@ func (s *Server) adminScanPolicy(c *gin.Context) {
 		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
 		return
 	}
-	task, err := s.svc.Policies.EnqueueScan(id, principal.User.ID, payload.Path, payload.DryRun)
+	task, err := s.svc.Policies.EnqueueScan(c.Request.Context(), id, principal.User.ID, payload.Path, payload.DryRun)
 	if err != nil {
 		s.fail(c, err)
 		return

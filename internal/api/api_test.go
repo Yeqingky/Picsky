@@ -2524,6 +2524,93 @@ func TestJSONBodySizeLimit(t *testing.T) {
 	}
 }
 
+func TestCloudreveLoginEndpoints(t *testing.T) {
+	s := newServer(t)
+	cookie, _ := s.bootstrap()
+
+	tokenData := func() map[string]any {
+		expires := time.Now().Add(time.Hour).Format(time.RFC3339Nano)
+		return map[string]any{
+			"user": map[string]any{
+				"group": map[string]any{"direct_link_batch_size": 10},
+			},
+			"token": map[string]any{
+				"access_token":    "access-token",
+				"access_expires":  expires,
+				"refresh_token":   "refresh-token",
+				"refresh_expires": expires,
+			},
+		}
+	}
+	cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/v4/session/token":
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body["password"] == "need2fa" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 203, "data": "2fa-session"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": tokenData()})
+		case r.URL.Path == "/api/v4/session/token/2fa":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": tokenData()})
+		case r.URL.Path == "/api/v4/session/token/refresh":
+			data := tokenData()
+			token := data["token"].(map[string]any)
+			token["refresh_token"] = "rotated-refresh"
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+				"access_token":    token["access_token"],
+				"access_expires":  token["access_expires"],
+				"refresh_token":   token["refresh_token"],
+				"refresh_expires": token["refresh_expires"],
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer cloud.Close()
+
+	login := s.json(http.MethodPost, "/api/v1/admin/policies/cloudreve/login", map[string]any{
+		"endpoint": cloud.URL,
+		"email":    "admin@example.com",
+		"password": "password123",
+	}, []*http.Cookie{cookie})
+	if login.Status != http.StatusOK {
+		t.Fatalf("登录失败: %d %s", login.Status, string(login.Body))
+	}
+	body := s.decode(login)
+	if body["status"] != "ok" || body["refresh_token"] != "refresh-token" {
+		t.Fatalf("登录响应 = %v", body)
+	}
+
+	twoFactor := s.json(http.MethodPost, "/api/v1/admin/policies/cloudreve/login", map[string]any{
+		"endpoint": cloud.URL,
+		"email":    "admin@example.com",
+		"password": "need2fa",
+	}, []*http.Cookie{cookie})
+	if twoFactor.Status != http.StatusOK || s.decode(twoFactor)["status"] != "2fa" {
+		t.Fatalf("2FA 挑战响应 = %d %s", twoFactor.Status, string(twoFactor.Body))
+	}
+	completed := s.json(http.MethodPost, "/api/v1/admin/policies/cloudreve/login/2fa", map[string]any{
+		"endpoint":   cloud.URL,
+		"session_id": "2fa-session",
+		"otp":        "123456",
+	}, []*http.Cookie{cookie})
+	if completed.Status != http.StatusOK || s.decode(completed)["refresh_token"] != "refresh-token" {
+		t.Fatalf("2FA 完成响应 = %d %s", completed.Status, string(completed.Body))
+	}
+	refreshed := s.json(http.MethodPost, "/api/v1/admin/policies/cloudreve/refresh", map[string]any{
+		"endpoint":      cloud.URL,
+		"refresh_token": "old-refresh",
+	}, []*http.Cookie{cookie})
+	refreshBody := s.decode(refreshed)
+	if refreshed.Status != http.StatusOK || refreshBody["refresh_token"] != "rotated-refresh" ||
+		refreshBody["access_expires"] == nil || refreshBody["refresh_expires"] == nil {
+		t.Fatalf("刷新令牌响应 = %d %s", refreshed.Status, string(refreshed.Body))
+	}
+}
+
 func TestRegisterEmailAllowlistAPI(t *testing.T) {
 	s := newServer(t)
 	if err := s.svc.Settings.Update(map[string]string{

@@ -15,8 +15,14 @@ export interface PolicyTransferSource {
   type: string;
   enabled: boolean;
   endpoint: string;
+  directory: string;
+  autoLogin: boolean;
+  authType: string;
   username: string;
   password: string;
+  cloudreveRefreshToken: string;
+  cloudreveRefreshExpires: string;
+  cloudreveAccessExpires: string;
   pathTemplate: string;
   conflictPolicy: ConflictPolicy;
   reuseReleasedSeq: boolean;
@@ -31,8 +37,14 @@ export interface PolicyTransferPayload {
   path_template: string;
   conflict_policy: ConflictPolicy;
   reuse_released_seq: boolean;
-  config: { endpoint: string };
-  secrets?: { username?: string; password?: string };
+  config: { endpoint: string; directory?: string; auth_type?: string; auto_login?: string };
+  secrets?: {
+    username?: string;
+    password?: string;
+    refresh_token?: string;
+    refresh_expires?: string;
+    access_expires?: string;
+  };
   urls: { alias: string; url: string; is_default: boolean; sort: number }[];
 }
 
@@ -43,8 +55,14 @@ export interface PolicyTransferResult {
   type?: string;
   enabled?: boolean;
   endpoint?: string;
+  directory?: string;
+  autoLogin?: boolean;
+  authType?: string;
   username?: string;
   password?: string;
+  cloudreveRefreshToken?: string;
+  cloudreveRefreshExpires?: string;
+  cloudreveAccessExpires?: string;
   pathTemplate?: string;
   conflictPolicy?: ConflictPolicy;
   reuseReleasedSeq?: boolean;
@@ -66,6 +84,7 @@ export class PolicyTransferError extends Error {
 }
 
 const CONFLICT_VALUES: readonly ConflictPolicy[] = ['rename', 'skip'];
+const CLOUDREVE_AUTH_VALUES = ['password', 'oauth'] as const;
 
 /** 边界解析: JSON 解析结果按字段路径转对象, 非对象直接报字段错误 */
 function asObject(value: unknown, path: string): Record<string, unknown> {
@@ -88,9 +107,22 @@ function readString(
 
 /** 当前表单 -> 可复制的 JSON (与管理接口写请求字段一致, 凭据为明文) */
 export function buildPolicyTransferPayload(source: PolicyTransferSource): PolicyTransferPayload {
-  const secrets: { username?: string; password?: string } = {};
-  if (source.username.trim() !== '') secrets.username = source.username.trim();
-  if (source.password !== '') secrets.password = source.password;
+  const secrets: {
+    username?: string;
+    password?: string;
+    refresh_token?: string;
+    refresh_expires?: string;
+    access_expires?: string;
+  } = {};
+  if (source.type !== 'cloudreve' || source.autoLogin) {
+    if (source.username.trim() !== '') secrets.username = source.username.trim();
+    if (source.password !== '') secrets.password = source.password;
+  }
+  if (source.type === 'cloudreve') {
+    secrets.refresh_token = source.cloudreveRefreshToken;
+    secrets.refresh_expires = source.cloudreveRefreshExpires;
+    secrets.access_expires = source.cloudreveAccessExpires;
+  }
 
   const payload: PolicyTransferPayload = {
     name: source.name,
@@ -108,6 +140,11 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
       sort: index + 1,
     })),
   };
+  if (source.type === 'cloudreve') {
+    payload.config.directory = source.directory;
+    payload.config.auth_type = source.authType;
+    payload.config.auto_login = source.autoLogin ? 'true' : 'false';
+  }
   if (Object.keys(secrets).length > 0) payload.secrets = secrets;
   return payload;
 }
@@ -193,25 +230,69 @@ export function parsePolicyTransfer(
   }
 
   let endpoint = readString(root, 'endpoint', 'endpoint');
+  let authType = readString(root, 'auth_type', 'auth_type');
+  let directory = readString(root, 'directory', 'directory');
+  let autoLogin = readString(root, 'auto_login', 'auto_login');
   const config = root.config;
   if (config !== undefined) {
-    const configEndpoint = readString(asObject(config, 'config'), 'endpoint', 'config.endpoint');
+    const configRecord = asObject(config, 'config');
+    const configEndpoint = readString(configRecord, 'endpoint', 'config.endpoint');
+    const configAuthType = readString(configRecord, 'auth_type', 'config.auth_type');
+    const configDirectory = readString(configRecord, 'directory', 'config.directory');
+    const configAutoLogin = readString(configRecord, 'auto_login', 'config.auto_login');
     if (configEndpoint !== undefined) endpoint = configEndpoint;
+    if (configDirectory !== undefined) directory = configDirectory;
+    if (configAuthType !== undefined) authType = configAuthType;
+    if (configAutoLogin !== undefined) autoLogin = configAutoLogin;
   }
   if (endpoint !== undefined) {
     result.endpoint = endpoint;
     recognized += 1;
   }
+  if (directory !== undefined) {
+    result.directory = directory;
+    recognized += 1;
+  }
+  if (authType !== undefined) {
+    const matched = CLOUDREVE_AUTH_VALUES.find((value) => value === authType);
+    if (matched === undefined) throw new PolicyTransferError('field', 'config.auth_type');
+    result.authType = matched;
+    recognized += 1;
+  }
+  if (autoLogin !== undefined) {
+    if (autoLogin !== 'true' && autoLogin !== 'false') {
+      throw new PolicyTransferError('field', 'config.auto_login');
+    }
+    result.autoLogin = autoLogin === 'true';
+    recognized += 1;
+  }
 
   let username = readString(root, 'username', 'username');
   let password = readString(root, 'password', 'password');
+  let refreshToken = readString(root, 'refresh_token', 'refresh_token');
+  let refreshExpires = readString(root, 'refresh_expires', 'refresh_expires');
+  let accessExpires = readString(root, 'access_expires', 'access_expires');
   const secrets = root.secrets;
   if (secrets !== undefined) {
     const secretRecord = asObject(secrets, 'secrets');
     const secretUsername = readString(secretRecord, 'username', 'secrets.username');
     const secretPassword = readString(secretRecord, 'password', 'secrets.password');
+    const secretRefreshToken = readString(secretRecord, 'refresh_token', 'secrets.refresh_token');
+    const secretRefreshExpires = readString(
+      secretRecord,
+      'refresh_expires',
+      'secrets.refresh_expires',
+    );
+    const secretAccessExpires = readString(
+      secretRecord,
+      'access_expires',
+      'secrets.access_expires',
+    );
     if (secretUsername !== undefined) username = secretUsername;
     if (secretPassword !== undefined) password = secretPassword;
+    if (secretRefreshToken !== undefined) refreshToken = secretRefreshToken;
+    if (secretRefreshExpires !== undefined) refreshExpires = secretRefreshExpires;
+    if (secretAccessExpires !== undefined) accessExpires = secretAccessExpires;
   }
   if (username !== undefined) {
     result.username = username;
@@ -219,6 +300,18 @@ export function parsePolicyTransfer(
   }
   if (password !== undefined) {
     result.password = password;
+    recognized += 1;
+  }
+  if (refreshToken !== undefined) {
+    result.cloudreveRefreshToken = refreshToken;
+    recognized += 1;
+  }
+  if (refreshExpires !== undefined) {
+    result.cloudreveRefreshExpires = refreshExpires;
+    recognized += 1;
+  }
+  if (accessExpires !== undefined) {
+    result.cloudreveAccessExpires = accessExpires;
     recognized += 1;
   }
 

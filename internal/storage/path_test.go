@@ -22,7 +22,7 @@ func TestRenderPathExamples(t *testing.T) {
 		{"{md5:4}/{md5:8}.{ext}", "0f1e/0f1e2d3c.png"},
 		{"{ext}/{md5}.{ext}", "png/0f1e2d3c4b5a69788796a5b4c3d2e1f0.png"},
 		{"{md5}.{ext}", "0f1e2d3c4b5a69788796a5b4c3d2e1f0.png"},
-		{"{seq}.jpg", "1.jpg"},
+		{"{seq}.{ext}", "1.png"},
 	}
 	for _, testCase := range cases {
 		got, err := RenderPath(testCase.template, vars)
@@ -63,7 +63,7 @@ func TestRenderPathRandomVariables(t *testing.T) {
 }
 
 func TestPathRendererKeepsGeneratedVariablesAcrossSequences(t *testing.T) {
-	renderer, err := NewPathRenderer("{rand:8}_{seq}_{rand:8}.jpg", PathVars{})
+	renderer, err := NewPathRenderer("{rand:8}_{seq}_{rand:8}.{ext}", PathVars{Ext: "png"})
 	if err != nil {
 		t.Fatalf("NewPathRenderer 返回错误: %v", err)
 	}
@@ -136,6 +136,7 @@ func TestValidateTemplateRejects(t *testing.T) {
 		"{md5:33}.{ext}",
 		"{md5:0}.{ext}",
 		"{md5}.{ext",
+		"{md5}.jpg",
 		strings.Repeat("a", 129) + "/{md5}",
 		"{seq}_{seq}.jpg",
 	}

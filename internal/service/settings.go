@@ -15,6 +15,7 @@ import (
 	"github.com/yeqingky/Picsky/internal/clientip"
 	"github.com/yeqingky/Picsky/internal/crypto"
 	"github.com/yeqingky/Picsky/internal/model"
+	"github.com/yeqingky/Picsky/internal/storage"
 	"github.com/yeqingky/Picsky/migrations"
 )
 
@@ -203,6 +204,11 @@ func (s *Settings) Update(values map[string]string) error {
 		}
 		if key == "default_conflict_policy" && value != model.ConflictRename && value != model.ConflictSkip {
 			return apperr.ErrInvalidRequest.WithMessage("默认冲突策略无效")
+		}
+		if key == "default_path_template" {
+			if err := storage.ValidateTemplate(strings.TrimSpace(value)); err != nil {
+				return apperr.ErrInvalidRequest.WithMessage(err.Error())
+			}
 		}
 		if key == "default_group_id" {
 			if err := s.checkDefaultGroup(value); err != nil {

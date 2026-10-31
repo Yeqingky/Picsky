@@ -280,9 +280,10 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 		return nil, apperr.ErrInternal.WithMessage("魔法路径渲染失败: " + err.Error())
 	}
 
+	prefixDir := storagePrefix(policy)
 	var objectKey string
 	for {
-		objectKey = storage.NormalizeObjectKey("", relPath)
+		objectKey = storage.WithPrefix(prefixDir, relPath)
 		conflictRecord, err := u.recordForKey(policy.ID, objectKey)
 		if err != nil {
 			return nil, err
@@ -384,7 +385,9 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	if err != nil {
 		return nil, apperr.ErrBackend.WithMessage(err.Error())
 	}
-	relPath = objectPath
+	if prefixDir == "" {
+		relPath = objectPath
+	}
 	objectKey = objectPath
 
 	now := nowUTC()
@@ -753,8 +756,8 @@ func (u *Upload) lockPolicyPath(policyID int64) func() {
 func (u *Upload) maxPathSequence(policyID int64, prefix, suffix string) (uint64, error) {
 	pattern := escapeLikeLiteral(prefix) + "%" + escapeLikeLiteral(suffix)
 	rows, err := u.db.Model(&model.Image{}).
-		Select("object_key").
-		Where("policy_id = ? AND object_key LIKE ? ESCAPE '!'", policyID, pattern).
+		Select("rel_path").
+		Where("policy_id = ? AND rel_path LIKE ? ESCAPE '!'", policyID, pattern).
 		Rows()
 	if err != nil {
 		return 0, apperr.ErrInternal.WithMessage("查询递增序号失败: " + err.Error())
@@ -836,9 +839,13 @@ func resolveRecordURL(defaultURL, relPath string, result storage.PutResult) (str
 		}
 		return storage.JoinURL(defaultURL, relPath), relPath, nil
 	}
-	objectPath, err := storage.ObjectPathFromURL(result.URL)
+	objectPath := strings.Trim(result.ObjectKey, "/")
+	urlPath, err := storage.ObjectPathFromURL(result.URL)
 	if err != nil {
 		return "", "", fmt.Errorf("存储后端返回的直链无效: %w", err)
+	}
+	if objectPath == "" {
+		objectPath = urlPath
 	}
 	return result.URL, objectPath, nil
 }

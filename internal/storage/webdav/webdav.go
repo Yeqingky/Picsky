@@ -269,6 +269,12 @@ func (a *adapter) Read(ctx context.Context, key string) (io.ReadCloser, error) {
 	return resp.Body, nil
 }
 
+// CheckScan 在扫描前执行一次根目录 PROPFIND, 校验凭据与访问权限.
+func (a *adapter) CheckScan(ctx context.Context) error {
+	_, err := a.propfind(ctx, "", "0")
+	return err
+}
+
 // Test 写入并删除一个探测对象.
 func (a *adapter) Test(ctx context.Context, prefix string) error {
 	suffix, err := randomSuffix()

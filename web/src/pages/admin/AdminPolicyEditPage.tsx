@@ -28,6 +28,7 @@ import { adminPoliciesApi, adminSettingsApi } from '../../api';
 import type {
   AdminPolicy,
   AdminPolicyWriteRequest,
+  CloudreveLoginResult,
   ConflictPolicy,
   PolicyScanRequest,
   PolicyScanResult,
@@ -52,6 +53,7 @@ import {
 } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { RadioGroup, RadioGroupItem } from '../../components/ui/radio-group';
 import {
   Select,
   SelectContent,
@@ -69,7 +71,7 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useDelayedLoading } from '../../hooks/useDelayedLoading';
 import { cn } from '../../lib/utils';
 import { copyText } from '../../utils/clipboard';
-import { formatDuration } from '../../utils/format';
+import { formatDateTime, formatDuration } from '../../utils/format';
 import {
   buildPolicyTransferPayload,
   parsePolicyTransfer,
@@ -81,7 +83,11 @@ import type { PolicyTransferResult } from './policyTransfer';
  * 可选后端类型: 只列出已注册且管理界面支持的驱动 (docs/storage-policy.md 第 3 节),
  * 未注册的类型提交会被后端以 400 拒绝.
  */
-const TYPE_OPTIONS = ['webdav', 'sobot', 'celine', 'metaso'] as const;
+const TYPE_OPTIONS = ['webdav', 'sobot', 'celine', 'metaso', 'cloudreve'] as const;
+
+type CloudreveAuthType = 'password' | 'oauth';
+
+const CLOUDREVE_AUTH_OPTIONS: readonly CloudreveAuthType[] = ['password', 'oauth'];
 
 const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
 
@@ -94,6 +100,7 @@ const NEW_TYPE_TRAITS: Record<string, { capabilities: string[]; urlFromBackend: 
   sobot: { capabilities: ['upload'], urlFromBackend: true },
   celine: { capabilities: ['upload'], urlFromBackend: true },
   metaso: { capabilities: ['upload'], urlFromBackend: true },
+  cloudreve: { capabilities: ['upload'], urlFromBackend: true },
 };
 
 /** 新建策略选择后端后自动填入的提示文字 (普通用户可见的简单限制) */
@@ -103,14 +110,16 @@ const DEFAULT_HINT_KEYS: Record<string, string> = {
   metaso: 'adminPolicies.edit.defaultHint.metaso',
 };
 
-/** 由后端分配直链的驱动不显示连接, 路径, 域名, 冲突与扫描标签 */
-const URL_BACKEND_HIDDEN_TABS: readonly string[] = [
-  'connection',
-  'path',
-  'urls',
-  'conflict',
-  'scan',
-];
+/** 由后端分配直链的驱动不显示路径, 域名, 冲突与扫描标签 */
+const URL_BACKEND_HIDDEN_TABS: readonly string[] = ['path', 'urls', 'conflict', 'scan'];
+
+/** Cloudreve 需要连接配置, 魔法路径与扫描, 但仍由后端分配直链 */
+const TYPE_HIDDEN_TABS: Record<string, readonly string[]> = {
+  sobot: ['connection', ...URL_BACKEND_HIDDEN_TABS],
+  celine: ['connection', ...URL_BACKEND_HIDDEN_TABS],
+  metaso: ['connection', ...URL_BACKEND_HIDDEN_TABS],
+  cloudreve: ['urls', 'conflict'],
+};
 
 const TAB_ICON_CLASS = 'size-4 shrink-0';
 
@@ -160,6 +169,9 @@ const SEQ_RE = /\{seq\}/;
 const URL_RE = /^https?:\/\//i;
 
 const DEFAULT_PATH_TEMPLATE = '{md5:2}/{md5}.{ext}';
+const CLOUDREVE_DEFAULT_PATH_TEMPLATE = '{md5:2}/{md5}.{ext}';
+const CLOUDREVE_DEFAULT_DIRECTORY = '/picsky';
+const PATH_EXT_SUFFIX = '.{ext}';
 const DEFAULT_CONFLICT_POLICY: ConflictPolicy = 'rename';
 
 const PREVIEW_MD5 = '0f1e2d3c4b5a69788796a5b4c3d2e1f0';
@@ -178,8 +190,15 @@ interface FormState {
   type: string;
   enabled: boolean;
   endpoint: string;
+  directory: string;
+  autoLogin: boolean;
+  authType: CloudreveAuthType;
   username: string;
   password: string;
+  cloudreveLoggedIn: boolean;
+  cloudreveRefreshToken: string;
+  cloudreveRefreshExpires: string;
+  cloudreveAccessExpires: string;
   pathTemplate: string;
   conflictPolicy: ConflictPolicy;
   reuseReleasedSeq: boolean;
@@ -219,8 +238,18 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     type: policy.type,
     enabled: policy.enabled,
     endpoint: typeof policy.config.endpoint === 'string' ? policy.config.endpoint : '',
+    directory:
+      typeof policy.config.directory === 'string' && policy.config.directory.trim() !== ''
+        ? policy.config.directory
+        : CLOUDREVE_DEFAULT_DIRECTORY,
+    autoLogin: policy.config.auto_login === 'true',
+    authType: policy.config.auth_type === 'oauth' ? 'oauth' : 'password',
     username: policy.secrets?.username ?? '',
     password: policy.secrets?.password ?? '',
+    cloudreveLoggedIn: policy.login_ready === true,
+    cloudreveRefreshToken: policy.secrets?.refresh_token ?? '',
+    cloudreveRefreshExpires: policy.secrets?.refresh_expires ?? '',
+    cloudreveAccessExpires: policy.secrets?.access_expires ?? '',
     pathTemplate: policy.path_template,
     conflictPolicy: policy.conflict_policy,
     reuseReleasedSeq: policy.reuse_released_seq,
@@ -433,8 +462,13 @@ export default function AdminPolicyEditPage() {
   const [scanPath, setScanPath] = useState('');
   const [dryRun, setDryRun] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showRefreshToken, setShowRefreshToken] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [twoFactorOpen, setTwoFactorOpen] = useState(false);
+  const [twoFactorSessionID, setTwoFactorSessionID] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
 
   // 标签写入 ?tab=: 刷新与深链保持当前分组; 默认标签不落 URL, 扫描补录仅编辑模式可见
   const [searchParams, setSearchParams] = useSearchParams();
@@ -443,9 +477,10 @@ export default function AdminPolicyEditPage() {
     ? t(`adminPolicies.edit.field.urlBackendHint.${form?.type ?? ''}`, { defaultValue: '' })
     : '';
   const availableTabs = isEdit ? POLICY_TABS : POLICY_TABS.filter((item) => item.id !== 'scan');
-  const visibleTabs = formURLFromBackend
-    ? availableTabs.filter((item) => !URL_BACKEND_HIDDEN_TABS.includes(item.id))
-    : availableTabs;
+  const hiddenTabs = formURLFromBackend
+    ? (TYPE_HIDDEN_TABS[form?.type ?? ''] ?? URL_BACKEND_HIDDEN_TABS)
+    : [];
+  const visibleTabs = availableTabs.filter((item) => !hiddenTabs.includes(item.id));
   const requestedTab = searchParams.get('tab');
   const tab: PolicyTabId = visibleTabs.find((item) => item.id === requestedTab)?.id ?? 'basic';
 
@@ -495,8 +530,15 @@ export default function AdminPolicyEditPage() {
       type: TYPE_OPTIONS[0],
       enabled: true,
       endpoint: '',
+      directory: CLOUDREVE_DEFAULT_DIRECTORY,
+      autoLogin: false,
+      authType: 'password',
       username: '',
       password: '',
+      cloudreveLoggedIn: false,
+      cloudreveRefreshToken: '',
+      cloudreveRefreshExpires: '',
+      cloudreveAccessExpires: '',
       pathTemplate:
         typeof rawTemplate === 'string' && rawTemplate.trim() !== ''
           ? rawTemplate
@@ -520,10 +562,11 @@ export default function AdminPolicyEditPage() {
 
   const debouncedTemplate = useDebouncedValue(form?.pathTemplate ?? '', 400);
   const previewSkeleton = useDelayedLoading(previewPending);
+  const usesPathTemplate = !formURLFromBackend || form?.type === 'cloudreve';
 
   useEffect(() => {
     const template = debouncedTemplate.trim();
-    if (formURLFromBackend || template === '' || !PATH_VARIABLE_RE.test(template)) {
+    if (!usesPathTemplate || template === '' || !PATH_VARIABLE_RE.test(template)) {
       // 模板非法时清空上一次结果, 避免对照表展示过期路径
       resetPreview();
       return;
@@ -535,7 +578,7 @@ export default function AdminPolicyEditPage() {
       sha512: PREVIEW_SHA512,
       ext: 'png',
     });
-  }, [debouncedTemplate, formURLFromBackend, runPreview, resetPreview]);
+  }, [debouncedTemplate, usesPathTemplate, runPreview, resetPreview]);
 
   /* ---------------------------------------------------------------- 校验 */
 
@@ -543,21 +586,36 @@ export default function AdminPolicyEditPage() {
     const next: Record<string, string> = {};
     if (form === null) return next;
 
-    if (!formURLFromBackend) {
+    if (!formURLFromBackend || form.type === 'cloudreve') {
       const template = form.pathTemplate.trim();
       if (template === '') next.pathTemplate = t('adminPolicies.edit.error.templateRequired');
       else if (!PATH_VARIABLE_RE.test(template))
         next.pathTemplate = t('adminPolicies.edit.error.templateVariable');
       else if (template.startsWith('/') || template.includes('//') || template.includes('..')) {
         next.pathTemplate = t('adminPolicies.edit.error.templateInvalid');
+      } else if (!template.endsWith(PATH_EXT_SUFFIX)) {
+        next.pathTemplate = t('adminPolicies.edit.error.templateExtSuffix');
       }
 
       if (SEQ_RE.test(template) && form.conflictPolicy !== 'rename') {
         next.conflictPolicy = t('adminPolicies.edit.error.seqRequiresRename');
       }
+    }
 
-      if (form.endpoint.trim() === '') {
-        next.endpoint = t('adminPolicies.edit.error.endpointRequired');
+    if ((!formURLFromBackend || form.type === 'cloudreve') && form.endpoint.trim() === '') {
+      next.endpoint = t('adminPolicies.edit.error.endpointRequired');
+    }
+
+    if (form.type === 'cloudreve' && form.autoLogin) {
+      if (form.authType === 'oauth') {
+        next.authType = t('adminPolicies.edit.error.oauthUnsupported');
+      } else if (form.authType === 'password' && !form.cloudreveLoggedIn) {
+        if (form.username.trim() === '') {
+          next.username = t('adminPolicies.edit.error.cloudreveEmailRequired');
+        }
+        if (form.password === '') {
+          next.password = t('adminPolicies.edit.error.cloudrevePasswordRequired');
+        }
       }
     }
 
@@ -619,20 +677,50 @@ export default function AdminPolicyEditPage() {
     setSubmitted(true);
     if (Object.keys(errors).length > 0) return;
 
-    const secrets: { username?: string; password?: string } = {};
-    if (form.username.trim() !== '') secrets.username = form.username.trim();
-    if (form.password !== '') secrets.password = form.password;
+    const isCloudreve = form.type === 'cloudreve';
+
+    const secrets: {
+      username?: string;
+      password?: string;
+      refresh_token?: string;
+      refresh_expires?: string;
+      access_expires?: string;
+    } = {};
+    if (!isCloudreve) {
+      if (form.username.trim() !== '') secrets.username = form.username.trim();
+      if (form.password !== '') secrets.password = form.password;
+    } else if (form.autoLogin) {
+      if (form.username.trim() !== '') secrets.username = form.username.trim();
+      if (form.password !== '') secrets.password = form.password;
+    } else if (isEdit) {
+      // 手动令牌模式不保存账号凭据; 空串通知后端删除旧凭据.
+      secrets.username = '';
+      secrets.password = '';
+    }
+    if (isCloudreve) {
+      // 空串表示清除旧令牌: 修改地址或凭据后必须让后端删除已失效的 RefreshToken.
+      secrets.refresh_token = form.cloudreveRefreshToken;
+      secrets.refresh_expires = form.cloudreveRefreshExpires;
+      secrets.access_expires = form.cloudreveAccessExpires;
+    }
 
     const body: AdminPolicyWriteRequest = formURLFromBackend
       ? {
           name: form.name.trim(),
           hint: form.hint.trim(),
           type: form.type,
-          enabled: form.enabled,
-          path_template: DEFAULT_PATH_TEMPLATE,
+          enabled: isCloudreve ? form.cloudreveLoggedIn : form.enabled,
+          path_template: isCloudreve ? form.pathTemplate.trim() : DEFAULT_PATH_TEMPLATE,
           conflict_policy: DEFAULT_CONFLICT_POLICY,
-          reuse_released_seq: false,
-          config: {},
+          reuse_released_seq: isCloudreve ? form.reuseReleasedSeq : false,
+          config: isCloudreve
+            ? {
+                endpoint: form.endpoint.trim(),
+                directory: form.directory.trim() || CLOUDREVE_DEFAULT_DIRECTORY,
+                auth_type: form.autoLogin ? form.authType : 'password',
+                auto_login: form.autoLogin ? 'true' : 'false',
+              }
+            : {},
           urls: [],
         }
       : {
@@ -651,7 +739,9 @@ export default function AdminPolicyEditPage() {
             sort: index + 1,
           })),
         };
-    if (!formURLFromBackend && Object.keys(secrets).length > 0) body.secrets = secrets;
+    if ((!formURLFromBackend || isCloudreve) && Object.keys(secrets).length > 0) {
+      body.secrets = secrets;
+    }
     saveMutation.mutate(body);
   };
 
@@ -660,6 +750,110 @@ export default function AdminPolicyEditPage() {
   const testMutation = useMutation({
     mutationFn: (targetId: number) => adminPoliciesApi.test(targetId),
   });
+
+  const applyCloudreveLogin = (result: CloudreveLoginResult): boolean => {
+    if (
+      result.status !== 'ok' ||
+      result.refresh_token === undefined ||
+      result.refresh_token === ''
+    ) {
+      toast.error(t('adminPolicies.edit.login.failed'));
+      return false;
+    }
+    setForm((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            cloudreveLoggedIn: true,
+            cloudreveRefreshToken: result.refresh_token ?? '',
+            cloudreveRefreshExpires: result.refresh_expires ?? '',
+            cloudreveAccessExpires: result.access_expires ?? '',
+          },
+    );
+    return true;
+  };
+
+  const loginMutation = useMutation({
+    mutationFn: () => {
+      if (form === null) throw new Error(t('adminPolicies.edit.login.formNotReady'));
+      return adminPoliciesApi.cloudreveLogin({
+        endpoint: form.endpoint.trim(),
+        email: form.username.trim(),
+        password: form.password,
+      });
+    },
+    onSuccess: (result) => {
+      if (result.status === '2fa') {
+        if (result.session_id === undefined || result.session_id === '') {
+          toast.error(t('adminPolicies.edit.login.failed'));
+          return;
+        }
+        setTwoFactorSessionID(result.session_id);
+        setTwoFactorCode('');
+        setTwoFactorError(null);
+        setTwoFactorOpen(true);
+        return;
+      }
+      if (applyCloudreveLogin(result)) {
+        toast.success(t('adminPolicies.edit.login.success'));
+      }
+    },
+  });
+
+  const twoFactorMutation = useMutation({
+    mutationFn: (vars: { sessionID: string; otp: string }) =>
+      adminPoliciesApi.cloudreveTwoFactor({
+        endpoint: form?.endpoint.trim() ?? '',
+        session_id: vars.sessionID,
+        otp: vars.otp,
+      }),
+    onSuccess: (result) => {
+      if (!applyCloudreveLogin(result)) return;
+      setTwoFactorOpen(false);
+      setTwoFactorCode('');
+      setTwoFactorError(null);
+      toast.success(t('adminPolicies.edit.login.success'));
+    },
+    onError: (error) => {
+      setTwoFactorError(errorText(error, t('adminPolicies.edit.login.twoFactorFailed')));
+    },
+  });
+
+  const refreshTokenMutation = useMutation({
+    mutationFn: () => {
+      if (form === null) throw new Error(t('adminPolicies.edit.login.formNotReady'));
+      return adminPoliciesApi.cloudreveRefresh({
+        endpoint: form.endpoint.trim(),
+        refresh_token: form.cloudreveRefreshToken.trim(),
+      });
+    },
+    onSuccess: (result) => {
+      if (!applyCloudreveLogin(result)) return;
+      toast.success(t('adminPolicies.edit.login.refreshSuccess'));
+    },
+  });
+
+  const validateRefreshToken = () => {
+    if (form === null || form.autoLogin) return;
+    if (form.endpoint.trim() === '' || form.cloudreveRefreshToken.trim() === '') return;
+    refreshTokenMutation.mutate();
+  };
+
+  const updateRefreshToken = (value: string) => {
+    refreshTokenMutation.reset();
+    setForm((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            cloudreveLoggedIn: false,
+            cloudreveRefreshToken: value,
+            cloudreveRefreshExpires: '',
+            cloudreveAccessExpires: '',
+          },
+    );
+  };
 
   const scanMutation = useMutation({
     mutationFn: (vars: { targetId: number; body: PolicyScanRequest }) =>
@@ -693,9 +887,24 @@ export default function AdminPolicyEditPage() {
   const capabilities =
     policy?.capabilities ?? NEW_TYPE_TRAITS[form?.type ?? '']?.capabilities ?? [];
   const canStat = capabilities.includes('stat');
+  const scanLoginRequired = !form || (form.type === 'cloudreve' && !form.cloudreveLoggedIn);
 
   const updateForm = useCallback((patch: Partial<FormState>) => {
     setForm((current) => (current === null ? current : { ...current, ...patch }));
+  }, []);
+  const updateCloudreveCredentials = useCallback((patch: Partial<FormState>) => {
+    setForm((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            ...patch,
+            cloudreveLoggedIn: false,
+            cloudreveRefreshToken: '',
+            cloudreveRefreshExpires: '',
+            cloudreveAccessExpires: '',
+          },
+    );
   }, []);
   const driverDefaultHint = (type: string) => {
     const key = DEFAULT_HINT_KEYS[type];
@@ -713,10 +922,23 @@ export default function AdminPolicyEditPage() {
       const hint = current.hint.trim();
       const defaultHints = Object.keys(DEFAULT_HINT_KEYS).map((key) => driverDefaultHint(key));
       const replaceHint = hint === '' || defaultHints.includes(hint);
+      let pathTemplate = current.pathTemplate;
+      if (nextType === 'cloudreve') {
+        pathTemplate = CLOUDREVE_DEFAULT_PATH_TEMPLATE;
+      } else if (pathTemplate === CLOUDREVE_DEFAULT_PATH_TEMPLATE) {
+        pathTemplate = DEFAULT_PATH_TEMPLATE;
+      }
       return {
         ...current,
         type: nextType,
         hint: replaceHint ? driverDefaultHint(nextType) : current.hint,
+        pathTemplate,
+        directory: CLOUDREVE_DEFAULT_DIRECTORY,
+        autoLogin: false,
+        cloudreveLoggedIn: false,
+        cloudreveRefreshToken: '',
+        cloudreveRefreshExpires: '',
+        cloudreveAccessExpires: '',
       };
     });
   };
@@ -739,8 +961,14 @@ export default function AdminPolicyEditPage() {
               type: form.type,
               enabled: form.enabled,
               endpoint: form.endpoint,
+              directory: form.directory,
+              autoLogin: form.autoLogin,
+              authType: form.authType,
               username: form.username,
               password: form.password,
+              cloudreveRefreshToken: form.cloudreveRefreshToken,
+              cloudreveRefreshExpires: form.cloudreveRefreshExpires,
+              cloudreveAccessExpires: form.cloudreveAccessExpires,
               pathTemplate: form.pathTemplate,
               conflictPolicy: form.conflictPolicy,
               reuseReleasedSeq: form.reuseReleasedSeq,
@@ -783,9 +1011,47 @@ export default function AdminPolicyEditPage() {
       if (patch.hint !== undefined) next.hint = patch.hint;
       if (nextType !== undefined) next.type = nextType;
       if (patch.enabled !== undefined) next.enabled = patch.enabled;
-      if (patch.endpoint !== undefined) next.endpoint = patch.endpoint;
-      if (patch.username !== undefined) next.username = patch.username;
-      if (patch.password !== undefined) next.password = patch.password;
+      if (patch.directory !== undefined) next.directory = patch.directory;
+      if (patch.endpoint !== undefined) {
+        next.endpoint = patch.endpoint;
+        next.cloudreveLoggedIn = false;
+        next.cloudreveRefreshToken = '';
+        next.cloudreveRefreshExpires = '';
+        next.cloudreveAccessExpires = '';
+      }
+      if (patch.directory !== undefined) next.directory = patch.directory;
+      if (patch.autoLogin !== undefined) next.autoLogin = patch.autoLogin;
+      if (patch.authType !== undefined) {
+        next.authType = patch.authType === 'oauth' ? 'oauth' : 'password';
+        next.cloudreveLoggedIn = false;
+        next.cloudreveRefreshToken = '';
+        next.cloudreveRefreshExpires = '';
+        next.cloudreveAccessExpires = '';
+      }
+      if (patch.username !== undefined) {
+        next.username = patch.username;
+        next.cloudreveLoggedIn = false;
+        next.cloudreveRefreshToken = '';
+        next.cloudreveRefreshExpires = '';
+        next.cloudreveAccessExpires = '';
+      }
+      if (patch.password !== undefined) {
+        next.password = patch.password;
+        next.cloudreveLoggedIn = false;
+        next.cloudreveRefreshToken = '';
+        next.cloudreveRefreshExpires = '';
+        next.cloudreveAccessExpires = '';
+      }
+      if (patch.cloudreveRefreshToken !== undefined) {
+        next.cloudreveRefreshToken = patch.cloudreveRefreshToken;
+        next.cloudreveLoggedIn = patch.cloudreveRefreshToken !== '';
+      }
+      if (patch.cloudreveRefreshExpires !== undefined) {
+        next.cloudreveRefreshExpires = patch.cloudreveRefreshExpires;
+      }
+      if (patch.cloudreveAccessExpires !== undefined) {
+        next.cloudreveAccessExpires = patch.cloudreveAccessExpires;
+      }
       if (patch.pathTemplate !== undefined) next.pathTemplate = patch.pathTemplate;
       if (patch.conflictPolicy !== undefined) next.conflictPolicy = patch.conflictPolicy;
       if (patch.reuseReleasedSeq !== undefined) next.reuseReleasedSeq = patch.reuseReleasedSeq;
@@ -921,6 +1187,71 @@ export default function AdminPolicyEditPage() {
       </div>
     );
   }
+
+  const isCloudreve = form.type === 'cloudreve';
+
+  const credentialFields = (
+    <>
+      <FormField
+        id="policy-username"
+        label={
+          isCloudreve
+            ? t('adminPolicies.edit.field.cloudreveEmail')
+            : t('adminPolicies.edit.field.username')
+        }
+        error={errorFor('username')}
+        hint={isCloudreve ? t('adminPolicies.edit.field.cloudreveEmailHint') : undefined}
+      >
+        <Input
+          id="policy-username"
+          value={form.username}
+          onChange={(event) =>
+            isCloudreve
+              ? updateCloudreveCredentials({ username: event.target.value })
+              : updateForm({ username: event.target.value })
+          }
+          autoComplete={isCloudreve ? 'username' : 'off'}
+        />
+      </FormField>
+      <FormField
+        id="policy-password"
+        label={t('adminPolicies.edit.field.password')}
+        error={errorFor('password')}
+        hint={
+          isCloudreve
+            ? t('adminPolicies.edit.field.cloudrevePasswordHint')
+            : t('adminPolicies.edit.field.passwordHint')
+        }
+      >
+        <div className="relative">
+          <Input
+            id="policy-password"
+            type={showPassword ? 'text' : 'password'}
+            value={form.password}
+            onChange={(event) =>
+              isCloudreve
+                ? updateCloudreveCredentials({ password: event.target.value })
+                : updateForm({ password: event.target.value })
+            }
+            autoComplete="new-password"
+            className="pr-9"
+          />
+          <button
+            type="button"
+            aria-label={t(
+              showPassword
+                ? 'adminPolicies.edit.field.passwordHide'
+                : 'adminPolicies.edit.field.passwordShow',
+            )}
+            className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 transition-colors"
+            onClick={() => setShowPassword((current) => !current)}
+          >
+            {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+          </button>
+        </div>
+      </FormField>
+    </>
+  );
 
   return (
     <form onSubmit={handleSubmit} noValidate>
@@ -1100,25 +1431,27 @@ export default function AdminPolicyEditPage() {
 
         <TabsContent value="connection" className={TAB_PANEL_CLASS}>
           <PolicySection
-            hint={t('adminPolicies.edit.section.connectionHint')}
             actions={
-              isEdit ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={testMutation.isPending}
-                  onClick={() => testMutation.mutate(numericId)}
-                >
-                  {testMutation.isPending
-                    ? t('adminPolicies.edit.test.running')
-                    : t('adminPolicies.edit.test.button')}
-                </Button>
-              ) : (
-                <p className="text-muted-foreground text-xs">
-                  {t('adminPolicies.edit.test.needSave')}
-                </p>
-              )
+              <>
+                {!isCloudreve &&
+                  (isEdit ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={testMutation.isPending}
+                      onClick={() => testMutation.mutate(numericId)}
+                    >
+                      {testMutation.isPending
+                        ? t('adminPolicies.edit.test.running')
+                        : t('adminPolicies.edit.test.button')}
+                    </Button>
+                  ) : (
+                    <p className="text-muted-foreground text-xs">
+                      {t('adminPolicies.edit.test.needSave')}
+                    </p>
+                  ))}
+              </>
             }
           >
             <div className="flex flex-col gap-5">
@@ -1126,53 +1459,214 @@ export default function AdminPolicyEditPage() {
                 id="policy-endpoint"
                 label={t('adminPolicies.edit.field.endpoint')}
                 error={errorFor('endpoint')}
-                hint={t('adminPolicies.edit.field.endpointHint')}
+                hint={
+                  isCloudreve
+                    ? t('adminPolicies.edit.field.cloudreveEndpointHint')
+                    : t('adminPolicies.edit.field.endpointHint')
+                }
               >
                 <Input
                   id="policy-endpoint"
                   value={form.endpoint}
-                  onChange={(event) => updateForm({ endpoint: event.target.value })}
-                  placeholder={t('adminPolicies.edit.field.endpointPlaceholder')}
+                  onChange={(event) =>
+                    isCloudreve
+                      ? updateCloudreveCredentials({ endpoint: event.target.value })
+                      : updateForm({ endpoint: event.target.value })
+                  }
+                  placeholder={
+                    isCloudreve
+                      ? t('adminPolicies.edit.field.cloudreveEndpointPlaceholder')
+                      : t('adminPolicies.edit.field.endpointPlaceholder')
+                  }
                   aria-invalid={errorFor('endpoint') !== undefined}
                   required
                 />
               </FormField>
-              <FormField id="policy-username" label={t('adminPolicies.edit.field.username')}>
-                <Input
-                  id="policy-username"
-                  value={form.username}
-                  onChange={(event) => updateForm({ username: event.target.value })}
-                  autoComplete="off"
-                />
-              </FormField>
-              <FormField
-                id="policy-password"
-                label={t('adminPolicies.edit.field.password')}
-                hint={t('adminPolicies.edit.field.passwordHint')}
-              >
-                <div className="relative">
-                  <Input
-                    id="policy-password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={form.password}
-                    onChange={(event) => updateForm({ password: event.target.value })}
-                    autoComplete="new-password"
-                    className="pr-9"
-                  />
-                  <button
-                    type="button"
-                    aria-label={t(
-                      showPassword
-                        ? 'adminPolicies.edit.field.passwordHide'
-                        : 'adminPolicies.edit.field.passwordShow',
-                    )}
-                    className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 transition-colors"
-                    onClick={() => setShowPassword((current) => !current)}
+              {isCloudreve && (
+                <>
+                  <FormField
+                    id="policy-directory"
+                    label={t('adminPolicies.edit.field.directory')}
+                    hint={t('adminPolicies.edit.field.directoryHint')}
                   >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                </div>
-              </FormField>
+                    <Input
+                      id="policy-directory"
+                      value={form.directory}
+                      onChange={(event) => updateForm({ directory: event.target.value })}
+                      placeholder={CLOUDREVE_DEFAULT_DIRECTORY}
+                      className="font-mono"
+                      required
+                    />
+                  </FormField>
+                  <div className="flex flex-col rounded-lg border p-4">
+                    <SwitchRow
+                      id="policy-auto-login"
+                      label={t('adminPolicies.edit.field.autoLogin')}
+                      hint={t('adminPolicies.edit.field.autoLoginHint')}
+                      checked={form.autoLogin}
+                      onCheckedChange={(checked) => {
+                        refreshTokenMutation.reset();
+                        updateForm(
+                          checked
+                            ? {
+                                autoLogin: true,
+                                cloudreveLoggedIn: false,
+                                cloudreveRefreshToken: '',
+                                cloudreveRefreshExpires: '',
+                                cloudreveAccessExpires: '',
+                              }
+                            : { autoLogin: false },
+                        );
+                      }}
+                    />
+                    <div
+                      className={cn(
+                        'grid transition-[grid-template-rows,opacity] duration-300 ease-out',
+                        form.autoLogin
+                          ? 'grid-rows-[1fr] opacity-100'
+                          : 'grid-rows-[0fr] opacity-0',
+                      )}
+                      aria-hidden={!form.autoLogin}
+                      inert={!form.autoLogin}
+                    >
+                      <div className="min-h-0 overflow-hidden">
+                        <div className="flex flex-col gap-4 pt-4">
+                          <FormField
+                            id="policy-auth-type"
+                            label={t('adminPolicies.edit.field.authType')}
+                            error={errorFor('authType')}
+                          >
+                            <RadioGroup
+                              id="policy-auth-type"
+                              value={form.authType}
+                              onValueChange={(value) => {
+                                const next = CLOUDREVE_AUTH_OPTIONS.find(
+                                  (option) => option === value,
+                                );
+                                if (next !== undefined)
+                                  updateCloudreveCredentials({ authType: next });
+                              }}
+                              className="flex flex-row flex-wrap gap-4"
+                            >
+                              {CLOUDREVE_AUTH_OPTIONS.map((option) => (
+                                <div key={option} className="flex items-center gap-2">
+                                  <RadioGroupItem value={option} id={`policy-auth-${option}`} />
+                                  <Label htmlFor={`policy-auth-${option}`} className="font-normal">
+                                    {t(`adminPolicies.edit.field.authType_${option}`)}
+                                  </Label>
+                                </div>
+                              ))}
+                            </RadioGroup>
+                          </FormField>
+                          <Alert className="border-transparent bg-warning/10 text-warning">
+                            <AlertDescription>
+                              {t('adminPolicies.edit.field.cloudreveCaptchaHint')}
+                            </AlertDescription>
+                          </Alert>
+                          {form.authType === 'oauth' && (
+                            <Alert variant="destructive">
+                              <AlertDescription>
+                                {t('adminPolicies.edit.field.oauthUnsupportedHint')}
+                              </AlertDescription>
+                            </Alert>
+                          )}
+                          {form.authType === 'password' && loginMutation.isError && (
+                            <Alert variant="destructive">
+                              <AlertDescription>
+                                {errorText(
+                                  loginMutation.error,
+                                  t('adminPolicies.edit.login.failed'),
+                                )}
+                              </AlertDescription>
+                            </Alert>
+                          )}
+                          {form.authType === 'password' && credentialFields}
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={loginMutation.isPending || form.authType === 'oauth'}
+                              onClick={() => loginMutation.mutate()}
+                            >
+                              {loginMutation.isPending
+                                ? t('adminPolicies.edit.login.running')
+                                : form.cloudreveLoggedIn
+                                  ? t('adminPolicies.edit.login.relogin')
+                                  : t('adminPolicies.edit.login.button')}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+              {!isCloudreve && credentialFields}
+              {isCloudreve && (
+                <FormField
+                  id="policy-refresh-token"
+                  label={t('adminPolicies.edit.field.refreshToken')}
+                  error={
+                    refreshTokenMutation.isError
+                      ? errorText(
+                          refreshTokenMutation.error,
+                          t('adminPolicies.edit.login.refreshFailed'),
+                        )
+                      : undefined
+                  }
+                >
+                  <div className="relative">
+                    <Input
+                      id="policy-refresh-token"
+                      type={showRefreshToken ? 'text' : 'password'}
+                      value={form.cloudreveRefreshToken}
+                      readOnly={form.autoLogin}
+                      onChange={(event) => {
+                        if (!form.autoLogin) updateRefreshToken(event.target.value);
+                      }}
+                      onBlur={validateRefreshToken}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className={cn('pr-9', form.autoLogin && 'bg-muted')}
+                    />
+                    <button
+                      type="button"
+                      aria-label={t(
+                        showRefreshToken
+                          ? 'adminPolicies.edit.field.refreshTokenHide'
+                          : 'adminPolicies.edit.field.refreshTokenShow',
+                      )}
+                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 transition-colors"
+                      onClick={() => setShowRefreshToken((current) => !current)}
+                    >
+                      {showRefreshToken ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </button>
+                  </div>
+                  {(form.cloudreveAccessExpires !== '' || form.cloudreveRefreshExpires !== '') && (
+                    <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                      {form.cloudreveAccessExpires !== '' && (
+                        <span>
+                          {t('adminPolicies.edit.field.accessTokenExpires', {
+                            time: formatDateTime(form.cloudreveAccessExpires),
+                          })}
+                        </span>
+                      )}
+                      {form.cloudreveRefreshExpires !== '' && (
+                        <span>
+                          {t('adminPolicies.edit.field.refreshTokenExpires', {
+                            time: formatDateTime(form.cloudreveRefreshExpires),
+                          })}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </FormField>
+              )}
               {testMutation.data !== undefined &&
                 (testMutation.data.ok ? (
                   <Alert className="border-transparent bg-success/10 text-success">
@@ -1196,6 +1690,25 @@ export default function AdminPolicyEditPage() {
                   </AlertDescription>
                 </Alert>
               )}
+              {isCloudreve &&
+                (isEdit ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-end"
+                    disabled={testMutation.isPending}
+                    onClick={() => testMutation.mutate(numericId)}
+                  >
+                    {testMutation.isPending
+                      ? t('adminPolicies.edit.test.running')
+                      : t('adminPolicies.edit.test.button')}
+                  </Button>
+                ) : (
+                  <p className="text-muted-foreground text-xs">
+                    {t('adminPolicies.edit.test.needSave')}
+                  </p>
+                ))}
             </div>
           </PolicySection>
         </TabsContent>
@@ -1266,12 +1779,16 @@ export default function AdminPolicyEditPage() {
               ) : (
                 <div className="flex flex-col gap-3">
                   <PathReferenceRows relPath={preview.rel_path} objectKey={preview.object_key} />
-                  <Separator />
-                  <UrlReferenceList
-                    title={t('adminPolicies.edit.preview.urls')}
-                    items={referenceUrls}
-                    emptyText={t('adminPolicies.edit.reference.emptyUrls')}
-                  />
+                  {!formURLFromBackend && (
+                    <>
+                      <Separator />
+                      <UrlReferenceList
+                        title={t('adminPolicies.edit.preview.urls')}
+                        items={referenceUrls}
+                        emptyText={t('adminPolicies.edit.reference.emptyUrls')}
+                      />
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1566,10 +2083,10 @@ export default function AdminPolicyEditPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={scanMutation.isPending || scanTaskActive}
+                  disabled={scanLoginRequired || scanMutation.isPending || scanTaskActive}
                   onClick={() => {
                     if (!isEdit) return;
-                    const trimmed = scanPath.trim();
+                    const trimmed = form?.type === 'cloudreve' ? '' : scanPath.trim();
                     scanMutation.mutate({
                       targetId: numericId,
                       body: {
@@ -1589,18 +2106,20 @@ export default function AdminPolicyEditPage() {
               }
             >
               <div className="flex flex-col gap-4">
-                <FormField
-                  id="policy-scan-path"
-                  label={t('adminPolicies.edit.field.scanPath')}
-                  hint={t('adminPolicies.edit.field.scanPathOptional')}
-                >
-                  <Input
+                {form?.type !== 'cloudreve' && (
+                  <FormField
                     id="policy-scan-path"
-                    value={scanPath}
-                    onChange={(event) => setScanPath(event.target.value)}
-                    className="font-mono"
-                  />
-                </FormField>
+                    label={t('adminPolicies.edit.field.scanPath')}
+                    hint={t('adminPolicies.edit.field.scanPathOptional')}
+                  >
+                    <Input
+                      id="policy-scan-path"
+                      value={scanPath}
+                      onChange={(event) => setScanPath(event.target.value)}
+                      className="font-mono"
+                    />
+                  </FormField>
+                )}
                 <SwitchRow
                   id="policy-scan-dry-run"
                   label={t('adminPolicies.edit.field.dryRun')}
@@ -1652,6 +2171,13 @@ export default function AdminPolicyEditPage() {
                           <p className="text-sm">
                             {t('adminPolicies.edit.scan.done', { id: scanTask.id })}
                           </p>
+                          {scanResult !== null && (scanResult.removed ?? 0) > 0 && (
+                            <p className="mt-2 text-sm">
+                              {t('adminPolicies.edit.scan.removed', {
+                                count: scanResult.removed,
+                              })}
+                            </p>
+                          )}
                           {scanResult !== null && scanResult.failed.length > 0 && (
                             <div className="mt-2 flex flex-col gap-1">
                               <p className="text-sm font-semibold">
@@ -1717,6 +2243,70 @@ export default function AdminPolicyEditPage() {
           </div>
         </PolicySection>
       )}
+
+      <Dialog
+        open={twoFactorOpen}
+        onOpenChange={(open) => {
+          setTwoFactorOpen(open);
+          if (!open) {
+            setTwoFactorCode('');
+            setTwoFactorError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('adminPolicies.edit.login.twoFactorTitle')}</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <p className="text-muted-foreground text-sm">
+              {t('adminPolicies.edit.login.twoFactorHint')}
+            </p>
+            <Input
+              value={twoFactorCode}
+              onChange={(event) => setTwoFactorCode(event.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              autoFocus
+              placeholder={t('adminPolicies.edit.login.twoFactorPlaceholder')}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !twoFactorMutation.isPending) {
+                  event.preventDefault();
+                  twoFactorMutation.mutate({
+                    sessionID: twoFactorSessionID,
+                    otp: twoFactorCode.trim(),
+                  });
+                }
+              }}
+            />
+            {twoFactorError !== null && (
+              <Alert variant="destructive">
+                <AlertDescription>{twoFactorError}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setTwoFactorOpen(false)}>
+              {t('common.action.cancel')}
+            </Button>
+            <Button
+              type="button"
+              disabled={twoFactorMutation.isPending || twoFactorCode.trim() === ''}
+              onClick={() =>
+                twoFactorMutation.mutate({
+                  sessionID: twoFactorSessionID,
+                  otp: twoFactorCode.trim(),
+                })
+              }
+            >
+              {twoFactorMutation.isPending
+                ? t('adminPolicies.edit.login.twoFactorRunning')
+                : t('adminPolicies.edit.login.twoFactorSubmit')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {exportOpen && <PolicyExportDialog json={exportJson} onClose={() => setExportOpen(false)} />}
       {importOpen && (

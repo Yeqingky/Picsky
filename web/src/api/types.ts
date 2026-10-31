@@ -371,6 +371,7 @@ export interface AdminPolicy {
   reuse_released_seq: boolean;
   config: {
     endpoint?: string;
+    auth_type?: string;
     region?: string;
     bucket?: string;
     path_style?: boolean;
@@ -381,7 +382,12 @@ export interface AdminPolicy {
   secrets?: {
     username?: string;
     password?: string;
+    refresh_token?: string;
+    refresh_expires?: string;
+    access_expires?: string;
   };
+  /** true 表示该策略已完成登录; Cloudreve 未登录时不能启用 */
+  login_ready: boolean;
   urls: AdminPolicyUrl[];
   sort: number;
   /** 该策略下的图片数量 */
@@ -402,10 +408,13 @@ export interface AdminPolicyWriteRequest {
   conflict_policy: ConflictPolicy;
   reuse_released_seq?: boolean;
   config: Record<string, unknown>;
-  /** 仅写: {"username","password"} */
+  /** 仅写: {"username","password","refresh_token","refresh_expires","access_expires"} */
   secrets?: {
     username?: string;
     password?: string;
+    refresh_token?: string;
+    refresh_expires?: string;
+    access_expires?: string;
   };
   urls: AdminPolicyUrl[];
   sort?: number;
@@ -415,6 +424,31 @@ export interface PolicyTestResult {
   ok: boolean;
   elapsed_ms: number;
   error: string | null;
+}
+
+export interface CloudreveLoginRequest {
+  endpoint: string;
+  email?: string;
+  password?: string;
+}
+
+export interface CloudreveLoginResult {
+  status: 'ok' | '2fa';
+  session_id?: string;
+  refresh_token?: string;
+  refresh_expires?: string;
+  access_expires?: string;
+}
+
+export interface CloudreveRefreshRequest {
+  endpoint: string;
+  refresh_token: string;
+}
+
+export interface CloudreveTwoFactorRequest {
+  endpoint: string;
+  session_id: string;
+  otp: string;
 }
 
 export interface PolicyScanRequest {
@@ -431,6 +465,7 @@ export interface PolicyScanResult {
   images: number;
   files: number;
   skipped: number;
+  removed?: number;
   failed: { path: string; error: string }[];
 }
 

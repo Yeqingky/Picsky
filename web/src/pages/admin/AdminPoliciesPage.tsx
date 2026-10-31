@@ -205,6 +205,7 @@ export default function AdminPoliciesPage() {
           const scannable = row.capabilities.includes('list') && row.capabilities.includes('read');
           const scanning = scanMutation.isPending && scanMutation.variables === row.id;
           const toggling = toggleMutation.isPending && toggleMutation.variables?.id === row.id;
+          const loginRequired = row.type === 'cloudreve' && !row.login_ready;
           return (
             <div className="flex items-center gap-1">
               <Tooltip>
@@ -212,18 +213,24 @@ export default function AdminPoliciesPage() {
                   <span className="inline-flex">
                     <Switch
                       checked={row.enabled}
-                      disabled={toggling}
+                      disabled={toggling || loginRequired}
                       onCheckedChange={(checked) => togglePolicy({ id: row.id, enabled: checked })}
                       aria-label={
-                        row.enabled
-                          ? t('adminPolicies.list.disable')
-                          : t('adminPolicies.list.enable')
+                        loginRequired
+                          ? t('adminPolicies.list.loginRequired')
+                          : row.enabled
+                            ? t('adminPolicies.list.disable')
+                            : t('adminPolicies.list.enable')
                       }
                     />
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {row.enabled ? t('adminPolicies.list.disable') : t('adminPolicies.list.enable')}
+                  {loginRequired
+                    ? t('adminPolicies.list.loginRequired')
+                    : row.enabled
+                      ? t('adminPolicies.list.disable')
+                      : t('adminPolicies.list.enable')}
                 </TooltipContent>
               </Tooltip>
               <Tooltip>
@@ -233,7 +240,7 @@ export default function AdminPoliciesPage() {
                       variant="ghost"
                       size="icon-sm"
                       aria-label={t('adminPolicies.list.scan')}
-                      disabled={!scannable || scanning}
+                      disabled={!scannable || scanning || loginRequired}
                       onClick={() => scanPolicy(row.id)}
                     >
                       <ScanSearch className="size-4" />

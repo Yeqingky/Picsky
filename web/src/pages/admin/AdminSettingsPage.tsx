@@ -251,6 +251,8 @@ function validateSettings(values: Draft, t: TFunction): Errors {
   const pathTemplate = values.default_path_template.trim();
   if (!/\{md5|\{sha256|\{sha512/.test(pathTemplate)) {
     errors.default_path_template = t('adminSystem.settings.validation.pathHash');
+  } else if (!pathTemplate.endsWith('.{ext}')) {
+    errors.default_path_template = t('adminSystem.settings.validation.pathExt');
   }
 
   return errors;

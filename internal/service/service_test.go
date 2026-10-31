@@ -15,6 +15,7 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -530,7 +531,7 @@ func TestUnsupportedConflictPoliciesAreRejected(t *testing.T) {
 		input := service.PolicyInput{
 			Name:           "unsupported-" + conflict,
 			Type:           "webdav",
-			PathTemplate:   "{seq}.jpg",
+			PathTemplate:   "{seq}.{ext}",
 			ConflictPolicy: conflict,
 			Config:         map[string]string{"endpoint": f.davEndpoint()},
 			URLs:           []service.URLInput{{Alias: "cdn", URL: "https://cdn.example.com/image/", IsDefault: true}},
@@ -1588,14 +1589,14 @@ func TestPathPreviewMatchesUpload(t *testing.T) {
 		t.Errorf("哈希模板冲突预览应追加 -1, 实际 %q", preview.ConflictRelPath)
 	}
 
-	sequencePreview, err := f.svc.Policies.Preview(service.PreviewInput{PathTemplate: "{seq}.jpg"})
+	sequencePreview, err := f.svc.Policies.Preview(service.PreviewInput{PathTemplate: "{seq}.{ext}"})
 	if err != nil {
 		t.Fatalf("递增路径预览失败: %v", err)
 	}
-	if sequencePreview.RelPath != "1.jpg" {
+	if sequencePreview.RelPath != "1.png" {
 		t.Errorf("递增变量预览应从 1 开始, 实际 %q", sequencePreview.RelPath)
 	}
-	if sequencePreview.ConflictRelPath != "2.jpg" {
+	if sequencePreview.ConflictRelPath != "2.png" {
 		t.Errorf("序号模板冲突预览应为下一个序号, 实际 %q", sequencePreview.ConflictRelPath)
 	}
 
@@ -1692,6 +1693,43 @@ func TestCapabilitiesAndDriverRegistry(t *testing.T) {
 	}
 }
 
+func TestScanPreflightRejectsBadWebDAVCredentials(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	f := newFixture(t)
+	policy, err := f.svc.Policies.Create(service.PolicyInput{
+		Name:           "WebDAV 鉴权失败",
+		Type:           "webdav",
+		Enabled:        new(false),
+		PathTemplate:   "{md5}.{ext}",
+		ConflictPolicy: model.ConflictRename,
+		Config:         map[string]string{"endpoint": server.URL},
+		Secrets:        map[string]string{"username": "wrong", "password": "wrong"},
+		URLs: []service.URLInput{
+			{Alias: "CDN", URL: "https://cdn.example.com/image/", IsDefault: true},
+		},
+	}, f.admin, "127.0.0.1", "test-agent")
+	if err != nil {
+		t.Fatalf("创建策略失败: %v", err)
+	}
+	if _, err := f.svc.Policies.EnqueueScan(context.Background(), policy.ID, f.admin.User.ID, nil, false); err == nil ||
+		!strings.Contains(err.Error(), "扫描预检失败") {
+		t.Fatalf("鉴权失败扫描错误 = %v, 期望预检失败", err)
+	}
+	var tasks int64
+	if err := f.database.Model(&model.MaintenanceTask{}).
+		Where("type = ?", model.TaskPolicyScan).
+		Count(&tasks).Error; err != nil {
+		t.Fatalf("统计扫描任务失败: %v", err)
+	}
+	if tasks != 0 {
+		t.Fatalf("预检失败不应创建扫描任务, 实际 %d", tasks)
+	}
+}
+
 func TestTaskQueueScanAndLogPurge(t *testing.T) {
 	f := newFixture(t)
 	policy := f.createPolicy("主存储", "{md5}.{ext}", model.ConflictRename)
@@ -1709,7 +1747,7 @@ func TestTaskQueueScanAndLogPurge(t *testing.T) {
 		Update("status", model.TaskDone).Error; err != nil {
 		t.Fatalf("清理自动扫描任务失败: %v", err)
 	}
-	task, err := f.svc.Policies.EnqueueScan(policy.ID, f.admin.User.ID, nil, false)
+	task, err := f.svc.Policies.EnqueueScan(context.Background(), policy.ID, f.admin.User.ID, nil, false)
 	if err != nil {
 		t.Fatalf("入队扫描失败: %v", err)
 	}

@@ -25,8 +25,9 @@ import (
 
 // 扫描相关限制.
 const (
-	scanMaxFileSize = 64 << 20 // 扫描时读取内容的体积上限
-	scanHeadBytes   = 512
+	scanMaxFileSize      = 64 << 20 // 扫描时读取内容的体积上限
+	scanHeadBytes        = 512
+	scanPreflightTimeout = 20 * time.Second
 )
 
 // Policies 管理存储策略, 分发域名, 路径渲染与扫描补录.
@@ -84,6 +85,7 @@ type PolicyView struct {
 	ConfigValues   map[string]string `json:"config"`
 	Secrets        map[string]string `json:"secrets,omitempty"`
 	SecretsPresent bool              `json:"secrets_present"`
+	LoginReady     bool              `json:"login_ready"`
 	DriverLabel    string            `json:"driver_label"`
 	ConfigFields   []storage.Field   `json:"config_fields"`
 	SecretFields   []storage.Field   `json:"secret_fields"`
@@ -102,6 +104,40 @@ func (p *Policies) ConfigMap(policy *model.StoragePolicy) (map[string]string, er
 		return nil, fmt.Errorf("策略配置解析失败: %w", err)
 	}
 	return values, nil
+}
+
+// storagePrefix 返回策略的对象路径前缀; 目前仅 Cloudreve 使用配置目录.
+func storagePrefix(policy *model.StoragePolicy) string {
+	if policy.Type != "cloudreve" {
+		return ""
+	}
+	config := map[string]string{}
+	_ = json.Unmarshal([]byte(policy.Config), &config)
+	prefix, err := storage.NormalizePrefix(config["directory"])
+	if err != nil || prefix == "" {
+		return "picsky"
+	}
+	return prefix
+}
+
+// relativeRecordPath 把实际对象键转换为记录路径; 目录前缀不进入 rel_path.
+func relativeRecordPath(prefix, key string) string {
+	prefix = strings.Trim(prefix, "/")
+	key = strings.Trim(key, "/")
+	if prefix != "" && strings.HasPrefix(key, prefix+"/") {
+		return strings.TrimPrefix(key, prefix+"/")
+	}
+	return key
+}
+
+// recordPathForPolicy 计算记录 rel_path: 模板已包含目录时保留完整路径, 否则去掉目录.
+func recordPathForPolicy(policy *model.StoragePolicy, key string) string {
+	prefix := storagePrefix(policy)
+	key = strings.Trim(key, "/")
+	if prefix != "" && strings.HasPrefix(policy.PathTemplate, prefix+"/") {
+		return key
+	}
+	return relativeRecordPath(prefix, key)
 }
 
 // SecretsMap 解密敏感配置.
@@ -195,6 +231,10 @@ func (p *Policies) View(policy *model.StoragePolicy) (*PolicyView, error) {
 	if formats == nil {
 		formats = []string{}
 	}
+	loginReady := true
+	if policy.Type == "cloudreve" {
+		loginReady = strings.TrimSpace(secrets["refresh_token"]) != ""
+	}
 	view := &PolicyView{
 		StoragePolicy:  policy,
 		URLs:           urls,
@@ -202,6 +242,7 @@ func (p *Policies) View(policy *model.StoragePolicy) (*PolicyView, error) {
 		ConfigValues:   config,
 		Secrets:        secrets,
 		SecretsPresent: strings.TrimSpace(policy.Secrets) != "",
+		LoginReady:     loginReady,
 		DriverLabel:    spec.Label,
 		ConfigFields:   spec.ConfigFields,
 		SecretFields:   spec.SecretFields,
@@ -323,6 +364,23 @@ func (p *Policies) Resolve(principal *Principal, requestedID *int64) (*model.Sto
 	return &allowed[0], nil
 }
 
+// cloudreveTokenPresent 判断入参或已有策略中是否保存了 Cloudreve 登录令牌.
+func (p *Policies) cloudreveTokenPresent(in PolicyInput, policy *model.StoragePolicy) (bool, error) {
+	if in.Secrets != nil {
+		if token, ok := in.Secrets["refresh_token"]; ok {
+			return strings.TrimSpace(token) != "", nil
+		}
+	}
+	if policy == nil {
+		return false, nil
+	}
+	secrets, err := p.SecretsMap(policy)
+	if err != nil {
+		return false, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	return strings.TrimSpace(secrets["refresh_token"]) != "", nil
+}
+
 // Validate 校验策略入参.
 func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error {
 	in.Name = strings.TrimSpace(in.Name)
@@ -345,8 +403,8 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 	if spec.URLFromBackend {
 		// 后端自行分配直链: 分发域名不参与 URL 拼接, 只填策略名也能创建.
 		if strings.TrimSpace(in.PathTemplate) == "" {
-			template := ""
-			if p.settings != nil {
+			template := strings.TrimSpace(spec.DefaultPathTemplate)
+			if template == "" && p.settings != nil {
 				template = strings.TrimSpace(p.settings.String("default_path_template"))
 			}
 			if template == "" {
@@ -373,8 +431,54 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 		return apperr.ErrInvalidRequest.WithMessage("包含 {seq} 的路径模板只支持 rename 冲突策略")
 	}
 	for _, field := range spec.ConfigFields {
-		if field.Required && strings.TrimSpace(in.Config[field.Name]) == "" {
+		value := strings.TrimSpace(in.Config[field.Name])
+		if field.Required && value == "" {
 			return apperr.ErrInvalidRequest.WithMessage("缺少必填后端配置: " + field.Label)
+		}
+		if value == "" || len(field.Options) == 0 {
+			continue
+		}
+		valid := false
+		for _, option := range field.Options {
+			if option.Value == value {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return apperr.ErrInvalidRequest.WithMessage("后端配置项 " + field.Label + " 的值无效")
+		}
+	}
+	if in.Type == "cloudreve" {
+		if in.Config == nil {
+			in.Config = map[string]string{}
+		}
+		directory := strings.TrimSpace(in.Config["directory"])
+		if directory == "" {
+			directory = "/picsky"
+		}
+		prefix, err := storage.NormalizePrefix(directory)
+		if err != nil || prefix == "" {
+			return apperr.ErrInvalidRequest.WithMessage("Cloudreve 目录非法")
+		}
+		in.Config["directory"] = "/" + prefix
+		switch strings.TrimSpace(in.Config["auto_login"]) {
+		case "", "true", "false":
+		default:
+			return apperr.ErrInvalidRequest.WithMessage("Cloudreve 自动登录配置无效")
+		}
+		hasToken, err := p.cloudreveTokenPresent(*in, policy)
+		if err != nil {
+			return err
+		}
+		if in.Enabled == nil {
+			enabled := hasToken
+			if policy != nil {
+				enabled = policy.Enabled && hasToken
+			}
+			in.Enabled = &enabled
+		} else if *in.Enabled && !hasToken {
+			return apperr.ErrInvalidRequest.WithMessage("Cloudreve 策略需要先在策略编辑页登录才能启用")
 		}
 	}
 	if !spec.URLFromBackend && len(in.URLs) == 0 {
@@ -851,6 +955,7 @@ type ScanResult struct {
 	Images  int           `json:"images"`
 	Files   int           `json:"files"`
 	Skipped int           `json:"skipped"`
+	Removed int           `json:"removed"`
 	Failed  []ScanFailure `json:"failed"`
 }
 
@@ -866,6 +971,15 @@ func (p *Policies) scanSource(policyID int64, subPath *string) (storage.Adapter,
 	if err != nil {
 		return nil, "", err
 	}
+	if policy.Type == "cloudreve" {
+		secrets, err := p.SecretsMap(policy)
+		if err != nil {
+			return nil, "", apperr.ErrInternal.WithMessage(err.Error())
+		}
+		if strings.TrimSpace(secrets["refresh_token"]) == "" {
+			return nil, "", apperr.ErrInvalidRequest.WithMessage("Cloudreve 策略需要先在策略编辑页完成登录才能扫描补录")
+		}
+	}
 	adapter, err := p.Adapter(policy)
 	if err != nil {
 		return nil, "", err
@@ -874,15 +988,16 @@ func (p *Policies) scanSource(policyID int64, subPath *string) (storage.Adapter,
 	if !caps.Has(storage.CapList) || !caps.Has(storage.CapRead) {
 		return nil, "", apperr.ErrInvalidRequest.WithMessage("该存储后端不支持列举与读取能力, 无法扫描补录")
 	}
+	spec, _ := storage.SpecOf(policy.Type)
+	if spec.URLFromBackend && !caps.Has(storage.CapStat) {
+		return nil, "", apperr.ErrInvalidRequest.WithMessage("该存储后端需要对象查询能力才能扫描补录")
+	}
 	prefix := ""
 	if subPath != nil && strings.TrimSpace(*subPath) != "" {
 		if err := storage.ValidatePrefix(*subPath); err != nil {
 			return nil, "", apperr.ErrInvalidRequest.WithMessage(err.Error())
 		}
 		prefix = storage.NormalizeObjectKey("", strings.TrimSpace(*subPath))
-	}
-	if _, err := p.DefaultURL(policy.ID); err != nil {
-		return nil, "", err
 	}
 	return adapter, prefix, nil
 }
@@ -907,12 +1022,20 @@ func (p *Policies) ListScanObjects(ctx context.Context, policyID int64, subPath 
 }
 
 // EnqueueScan 立即创建扫描任务; 对象列举与清单持久化由后台任务完成.
-func (p *Policies) EnqueueScan(policyID, ownerID int64, subPath *string, dryRun bool) (*model.MaintenanceTask, error) {
+func (p *Policies) EnqueueScan(ctx context.Context, policyID, ownerID int64, subPath *string, dryRun bool) (*model.MaintenanceTask, error) {
 	if p.tasks == nil {
 		return nil, apperr.ErrInternal.WithMessage("维护任务队列未初始化")
 	}
-	if _, _, err := p.scanSource(policyID, subPath); err != nil {
+	adapter, _, err := p.scanSource(policyID, subPath)
+	if err != nil {
 		return nil, err
+	}
+	if checker, ok := adapter.(storage.ScanChecker); ok {
+		checkCtx, cancel := context.WithTimeout(ctx, scanPreflightTimeout)
+		defer cancel()
+		if err := checker.CheckScan(checkCtx); err != nil {
+			return nil, apperr.ErrBackend.WithMessage("扫描预检失败: " + err.Error())
+		}
 	}
 	return p.tasks.EnqueuePolicyScan(policyID, ownerID, subPath, dryRun)
 }
@@ -936,12 +1059,19 @@ func (p *Policies) ScanListed(ctx context.Context, policyID, ownerID int64, keys
 	if err != nil {
 		return nil, err
 	}
-	if !adapter.Capabilities().Has(storage.CapRead) {
+	caps := adapter.Capabilities()
+	if !caps.Has(storage.CapRead) {
 		return nil, apperr.ErrInvalidRequest.WithMessage("该存储后端不支持读取能力, 无法扫描补录")
 	}
-	defaultURL, err := p.DefaultURL(policy.ID)
-	if err != nil {
-		return nil, err
+	spec, _ := storage.SpecOf(policy.Type)
+	defaultURL := ""
+	if !spec.URLFromBackend {
+		defaultURL, err = p.DefaultURL(policy.ID)
+		if err != nil {
+			return nil, err
+		}
+	} else if !caps.Has(storage.CapStat) {
+		return nil, apperr.ErrInvalidRequest.WithMessage("该存储后端需要对象查询能力才能扫描补录")
 	}
 
 	result := &ScanResult{Failed: []ScanFailure{}}
@@ -972,6 +1102,11 @@ func (p *Policies) ScanListed(ctx context.Context, policyID, ownerID int64, keys
 	}
 
 	if !dryRun {
+		removed, err := p.pruneOutsideRoot(policy, adapter)
+		if err != nil {
+			return nil, err
+		}
+		result.Removed = removed
 		if strings.Contains(policy.PathTemplate, "{seq}") {
 			if err := reconcilePolicySequence(p.db, policy); err != nil {
 				return nil, err
@@ -986,14 +1121,88 @@ func (p *Policies) ScanListed(ctx context.Context, policyID, ownerID int64, keys
 			Action:     "policy_scan",
 			TargetType: "policy",
 			TargetID:   &policy.ID,
-			Detail:     map[string]any{"images": result.Images, "files": result.Files, "skipped": result.Skipped, "failed": len(result.Failed)},
+			Detail:     map[string]any{"images": result.Images, "files": result.Files, "skipped": result.Skipped, "removed": result.Removed, "failed": len(result.Failed)},
 		})
 	}
 	return result, nil
 }
 
+// pruneOutsideRoot 删除策略内不在扫描根目录下的本地记录; 外部对象保留.
+func (p *Policies) pruneOutsideRoot(policy *model.StoragePolicy, adapter storage.Adapter) (int, error) {
+	provider, ok := adapter.(storage.ScanRootProvider)
+	if !ok {
+		return 0, nil
+	}
+	root := strings.Trim(provider.ScanRoot(), "/")
+	if root == "" {
+		return 0, nil
+	}
+	prefix := root + "/"
+	var rows []struct {
+		ID           int64
+		UserID       int64
+		Size         int64
+		QuotaCharged bool
+	}
+	if err := p.db.Model(&model.Image{}).
+		Select("id", "user_id", "size", "quota_charged").
+		Where("policy_id = ? AND substr(object_key, 1, ?) <> ?", policy.ID, len(prefix), prefix).
+		Find(&rows).Error; err != nil {
+		return 0, apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+
+	type usage struct {
+		images int64
+		bytes  int64
+	}
+	refunds := map[int64]*usage{}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+		if !row.QuotaCharged {
+			continue
+		}
+		entry := refunds[row.UserID]
+		if entry == nil {
+			entry = &usage{}
+			refunds[row.UserID] = entry
+		}
+		entry.images++
+		entry.bytes += row.Size
+	}
+	now := nowUTC()
+	if err := p.db.Transaction(func(tx *gorm.DB) error {
+		for userID, entry := range refunds {
+			if err := refundQuota(tx, userID, entry.images, entry.bytes, now); err != nil {
+				return err
+			}
+		}
+		return tx.Where("id IN ?", ids).Delete(&model.Image{}).Error
+	}); err != nil {
+		return 0, apperr.ErrInternal.WithMessage("清理目录外索引失败: " + err.Error())
+	}
+	p.log.Info("扫描清理目录外索引", "policy_id", policy.ID, "removed", len(ids))
+	return len(ids), nil
+}
+
 // scanObject 读取单个外部对象并入库; 返回入库记录.
 func (p *Policies) scanObject(ctx context.Context, adapter storage.Adapter, policy *model.StoragePolicy, key, defaultURL string, ownerID int64) (*model.Image, error) {
+	recordURL := ""
+	if defaultURL == "" {
+		info, err := adapter.Stat(ctx, key)
+		if err != nil {
+			return nil, fmt.Errorf("查询对象直链失败: %w", err)
+		}
+		recordURL = strings.TrimSpace(info.URL)
+		if recordURL == "" {
+			return nil, errors.New("存储后端未返回直链")
+		}
+	} else {
+		recordURL = storage.JoinURL(defaultURL, key)
+	}
 	reader, err := adapter.Read(ctx, key)
 	if err != nil {
 		return nil, err
@@ -1036,7 +1245,7 @@ func (p *Policies) scanObject(ctx context.Context, adapter storage.Adapter, poli
 	if imgdetect.IsImage(detected) {
 		kind = model.KindImage
 	}
-	relPath := key
+	relPath := recordPathForPolicy(policy, key)
 	ext := ExtensionOf(key)
 	if ext == "" {
 		ext = detected.Ext
@@ -1057,7 +1266,7 @@ func (p *Policies) scanObject(ctx context.Context, adapter storage.Adapter, poli
 		Ext:              ext,
 		MIME:             mime,
 		OriginalFilename: path.Base(key),
-		URL:              storage.JoinURL(defaultURL, relPath),
+		URL:              recordURL,
 		QuotaCharged:     false,
 		Source:           model.SourceScan,
 		CreatedAt:        now,
@@ -1076,11 +1285,14 @@ func (p *Policies) scanObject(ctx context.Context, adapter storage.Adapter, poli
 
 // enqueueInitialScan 在创建策略后入队首次扫描.
 func (p *Policies) enqueueInitialScan(policy *model.StoragePolicy, ownerID int64) {
-	if p.tasks == nil {
+	if p.tasks == nil || !policy.Enabled {
 		return
 	}
 	spec, ok := storage.SpecOf(policy.Type)
 	if !ok || !spec.Has(storage.CapList) || !spec.Has(storage.CapRead) {
+		return
+	}
+	if spec.URLFromBackend && !spec.Has(storage.CapStat) {
 		return
 	}
 	payload := map[string]any{"policy_id": policy.ID, "user_id": ownerID}
