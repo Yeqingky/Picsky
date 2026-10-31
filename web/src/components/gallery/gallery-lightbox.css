@@ -1,0 +1,14 @@
+/* 桌面查看器右侧固定信息栏 400px, PhotoSwipe 的右侧控件需要避让 */
+@media (min-width: 768px) {
+  .pswp__button--arrow--next {
+    right: 400px;
+  }
+
+  .pswp__top-bar {
+    padding-right: 400px;
+  }
+
+  .pswp__button--close {
+    display: none;
+  }
+}

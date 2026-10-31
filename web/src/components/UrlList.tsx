@@ -6,7 +6,7 @@ import { CopyButton } from './CopyButton';
 import { Badge } from './ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
-/** 别名 URL 列表 (上传结果卡 / 详情抽屉 / 策略对照表共用) */
+/** 别名 URL 列表 (上传结果卡 / 图片详情信息栏 / 策略对照表共用) */
 export function UrlList({
   urls,
   filename,

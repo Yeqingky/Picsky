@@ -106,7 +106,7 @@ Picsky/
 - 更新/删除用户组或覆盖其策略白名单前校验目标组当前权限, 超出调用者权限返回 403; 组 PATCH 未出现的字段保持不变, 显式 `null` 清除可空字段, 移除 `upload` 权限时自动清除配额与上传限额.
 - 前端样式只使用 Tailwind CSS v4 与 `src/index.css` 的语义令牌 (`background`, `card`, `muted`, `primary`, `destructive`, `success`, `warning`, `info`, `border`, `ring`, `chart-*`), 禁止硬编码色值与 CSS-in-JS.
 - 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示; 注册邮箱白名单按完整域名精确匹配, 留空时不限制; 列表输入复用 `TagsInput`.
-- 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 不引入 MUI, Emotion, 其它 UI 库或图标库, 图标统一 lucide-react, 全局提示统一 sonner.
+- 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 禁止 MUI, Emotion 与 CSS-in-JS; 在成熟专用库明显优于自研且已登记到 `docs/tech-stack.md` 时可以引入其他组件库 (当前: 图片查看使用 `photoswipe`), 图标统一 lucide-react, 全局提示统一 sonner.
 - 表格统一用 `src/components/DataTable.tsx`, 日期选择统一用 `src/components/DatePicker.tsx`, 空/错状态统一用 `src/components/States.tsx`; 需要新交互时先扩展这些共享组件.
 - 加载骨架必须贴合实际页面结构; 表格首屏与局部刷新复用 `DataTable` 的列定义, 表头和行高, 瀑布流骨架复用 `MasonryGrid` 排布; 已知页面不得用通用表单/卡片骨架替代真实布局.
 - 移动端与低高度视口下的对话框最大高度为 `100dvh - 2rem`, 内容超出时在弹窗内纵向滚动, 不得裁切表单或底部操作按钮.
@@ -121,7 +121,10 @@ Picsky/
 - Cloudreve 策略连接页只使用账号密码登录, 提供登录按钮; 账号密码需要关闭 Cloudreve 登录人机验证, 2FA 使用二级对话框输入动态口令; 登录成功或凭据变化时同步更新表单登录状态, 未登录保存时提交 `enabled=false`; 编辑页保留魔法路径标签.
 - 维护队列表格与类型筛选必须覆盖后端支持的全部任务类型, 并使用中文名称显示.
 - 图库筛选使用原始文件名, 格式与存储策略; 不提供开始时间和结束时间筛选; 仅存在筛选条件时渲染清空筛选按钮.
-- 图库瀑布流多选模式下, 点击卡片任意位置切换选中状态, 不打开图片详情; 左上角选中框保留, 点击它只切换一次.
+- 图库瀑布流多选模式下, 点击卡片任意位置切换选中状态, 不打开图片查看器; 左上角选中框保留, 点击它只切换一次.
+- 图库图片查看器使用 `photoswipe`: 桌面端左侧大图 + 右侧 400px 信息栏, 移动端全屏图片 + 底部 "图片详情" 面板; 背景为模糊后的图库网页 (全屏 `backdrop-filter`), 不使用图片放大模糊; 预加载当前图片前面两张与后面两张 (共四张, 不含当前图); 信息栏加载态使用居中旋转圆环, 不使用骨架屏; 切换图片时保留上一张详情直到新数据到达, 避免加载态闪烁; PhotoSwipe 的右侧控件必须避让信息栏; 关闭后不得残留 `.pswp` 节点.
+- 图库瀑布流卡片外层使用 `content-visibility: auto` 与 `contain-intrinsic-block-size`, 离屏卡片跳过布局与绘制; 不得卸载 `<img>` 节点, 避免滚动回看时重新加载.
+- 弹层遮罩不使用 `backdrop-filter` 模糊, 只使用半透明背景与透明度动画; 全屏模糊会在图库上方每帧重算, 导致抽屉展开掉帧. 图片查看器背景例外: 按要求模糊图库网页, 使用全屏 `backdrop-filter`, 不叠加图片放大背景.
 - `LazyImage` 的加载与失败状态必须绑定当前图片直链; 直链变化时应同步派生 `loading` 状态, 不依赖 effect 异步重置.
 - 复制 HTML 格式时必须对 URL 与文件名执行 HTML 属性上下文转义; 其他复制格式保持各自的原始格式.
 - 个人设置账户信息按昵称, 用户名, 邮箱, 用户组, 配额排列, 配额显示在账户信息卡中; 昵称标签, 输入框和保存按钮保持同行; 昵称与密码输入限宽.

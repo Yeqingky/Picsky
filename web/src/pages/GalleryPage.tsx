@@ -24,7 +24,7 @@ import { GalleryFilters } from '../components/gallery/GalleryFilters';
 import type { GalleryFiltersValue } from '../components/gallery/GalleryFilters';
 import { GalleryListView } from '../components/gallery/GalleryListView';
 import { GalleryBatchBar } from '../components/gallery/GalleryBatchBar';
-import { ImageDetailDrawer } from '../components/gallery/ImageDetailDrawer';
+import { GalleryLightbox } from '../components/gallery/GalleryLightbox';
 import { useConfirm } from '../components/ConfirmDialog';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
@@ -104,7 +104,7 @@ export default function GalleryPage() {
   });
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [detailId, setDetailId] = useState<number | null>(null);
+  const [viewer, setViewer] = useState<{ items: ImageRecord[]; index: number } | null>(null);
   const { hasPermission } = useAuth();
   const canDelete = hasPermission('delete_own') || hasPermission('delete_all');
   const canViewAll = hasPermission('view_all');
@@ -181,17 +181,7 @@ export default function GalleryPage() {
     if (inView && hasNextPage && !fetchingNext) void fetchNext();
   }, [view, inView, hasNextPage, fetchingNext, fetchNext, items.length]);
 
-  // 详情大图: 按需加载原图并预加载相邻图片 (docs/webui.md 4.2)
-  useEffect(() => {
-    if (detailId === null) return;
-    const index = items.findIndex((record) => record.id === detailId);
-    if (index === -1) return;
-    for (const neighbor of [items[index - 1], items[index + 1]]) {
-      if (!neighbor) continue;
-      const preload = new Image();
-      preload.src = neighbor.url;
-    }
-  }, [detailId, items]);
+  // 详情大图由 PhotoSwipe 预加载相邻图片 (docs/webui.md 4.2)
 
   const batchDelete = useMutation({
     mutationFn: (ids: number[]) => imagesApi.batchDelete(ids),
@@ -215,6 +205,14 @@ export default function GalleryPage() {
     () => (view === 'masonry' ? items : (listQuery.data?.items ?? [])),
     [view, items, listQuery.data],
   );
+  const openViewer = useCallback(
+    (record: ImageRecord) => {
+      const index = records.findIndex((item) => item.id === record.id);
+      if (index >= 0) setViewer({ items: records, index });
+    },
+    [records],
+  );
+
   const selectedRecords = useMemo(
     () =>
       selectedIds
@@ -264,10 +262,10 @@ export default function GalleryPage() {
         selectionMode={selectionMode}
         selected={selectedIds.includes(record.id)}
         onToggleSelect={toggleSelected}
-        onOpen={(next) => setDetailId(next.id)}
+        onOpen={openViewer}
       />
     ),
-    [selectionMode, selectedIds, toggleSelected],
+    [openViewer, selectionMode, selectedIds, toggleSelected],
   );
 
   const appendedSkeletons = useMemo(
@@ -372,7 +370,7 @@ export default function GalleryPage() {
           selectionMode={selectionMode}
           selection={selectedIds}
           onSelectionChange={setSelectedIds}
-          onOpen={(record) => setDetailId(record.id)}
+          onOpen={openViewer}
         />
       )}
 
@@ -470,19 +468,21 @@ export default function GalleryPage() {
         </Alert>
       )}
 
-      <ImageDetailDrawer
-        imageId={detailId}
-        open={detailId !== null}
-        onClose={() => setDetailId(null)}
-        onFilterUser={
-          canViewAll
-            ? (email) => {
-                setFilters({ keyword: '', format: '', policyId: null, user: email });
-                setDetailId(null);
-              }
-            : undefined
-        }
-      />
+      {viewer && (
+        <GalleryLightbox
+          items={viewer.items}
+          initialIndex={viewer.index}
+          onClose={() => setViewer(null)}
+          onFilterUser={
+            canViewAll
+              ? (email) => {
+                  setFilters({ keyword: '', format: '', policyId: null, user: email });
+                  setViewer(null);
+                }
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }
