@@ -333,6 +333,7 @@ func (u *Users) Update(id int64, in UserInput, actor *Principal, ip, userAgent s
 			return nil, apperr.ErrInternal.WithMessage("密码散列失败: " + err.Error())
 		}
 		updates["password_hash"] = string(hashed)
+		updates["session_version"] = gorm.Expr("session_version + 1")
 	}
 
 	result := u.db.Model(&model.User{}).Where("id = ? AND status = ?", user.ID, user.Status).Updates(updates)
