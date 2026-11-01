@@ -17,8 +17,11 @@ func TestOversizedLoginEmailIsRejectedWithoutAudit(t *testing.T) {
 		"identifier": email,
 		"password":   "password123",
 	}, nil)
-	if result.Status != http.StatusBadRequest {
-		t.Fatalf("超长邮箱应返回 400, 实际 %d %s", result.Status, string(result.Body))
+	if result.Status != http.StatusUnauthorized {
+		t.Fatalf("超长邮箱应返回统一 401, 实际 %d %s", result.Status, string(result.Body))
+	}
+	if s.decode(result)["message"] != "邮箱或密码错误" {
+		t.Errorf("超长邮箱应返回通用凭据错误: %s", string(result.Body))
 	}
 
 	var count int64

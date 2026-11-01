@@ -295,7 +295,7 @@ func (a *Auth) Login(ctx context.Context, in LoginInput, ip, userAgent string) (
 		return nil, apperr.ErrInvalidRequest.WithMessage("请输入邮箱与密码")
 	}
 	if len(email) > maxEmailLength {
-		return nil, apperr.ErrInvalidRequest.WithMessage("邮箱过长")
+		return nil, apperr.ErrUnauthorized.WithMessage("邮箱或密码错误")
 	}
 
 	ipKey := "login:ip:" + ip
