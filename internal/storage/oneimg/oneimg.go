@@ -25,6 +25,8 @@ const (
 	// uploadPath 与 bucketsPath 是单张图片上传与存储桶列表接口, 站点地址由策略配置提供.
 	uploadPath  = "/api/upload/images"
 	bucketsPath = "/api/buckets/list"
+	// imagesPath 用于按文件名反查图片 ID, 删除接口只接受 ID.
+	imagesPath = "/api/images"
 
 	bucketsTimeout = 15 * time.Second
 )
@@ -46,7 +48,7 @@ func init() {
 	storage.Register(storage.Spec{
 		Type:         driverType,
 		Label:        "初春图床",
-		Capabilities: []string{"upload"},
+		Capabilities: []string{"upload", "thumbnail"},
 		ConfigFields: []storage.Field{
 			{Name: "endpoint", Label: "站点地址", Required: true, Placeholder: "https://img.example.com"},
 			{Name: "bucket_id", Label: "存储桶", Placeholder: "留空使用系统默认存储"},
@@ -56,12 +58,14 @@ func init() {
 		},
 		URLFromBackend:    true,
 		URLPrefixOverride: true,
+		Thumbnail:         thumbnailURL,
 	}, newAdapter)
 }
 
 type adapter struct {
 	endpoint       string
 	bucketEndpoint string
+	imagesEndpoint string
 	publicURL      *url.URL
 	token          string
 	bucketID       string
@@ -97,6 +101,10 @@ func newAdapter(opts storage.Options) (storage.Adapter, error) {
 	bucketEndpoint.Path = basePath + bucketsPath
 	bucketEndpoint.RawQuery = ""
 	bucketEndpoint.Fragment = ""
+	imagesEndpoint := *parsed
+	imagesEndpoint.Path = basePath + imagesPath
+	imagesEndpoint.RawQuery = ""
+	imagesEndpoint.Fragment = ""
 	publicURL := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host}
 
 	bucketID := strings.TrimSpace(opts.Config["bucket_id"])
@@ -110,6 +118,7 @@ func newAdapter(opts storage.Options) (storage.Adapter, error) {
 	return &adapter{
 		endpoint:       uploadEndpoint.String(),
 		bucketEndpoint: bucketEndpoint.String(),
+		imagesEndpoint: imagesEndpoint.String(),
 		publicURL:      publicURL,
 		token:          token,
 		bucketID:       bucketID,
@@ -121,8 +130,10 @@ func newAdapter(opts storage.Options) (storage.Adapter, error) {
 
 func (a *adapter) Type() string { return driverType }
 
-// Capabilities 只声明上传能力: OneImg API 不提供删除与直链查询.
-func (a *adapter) Capabilities() storage.Capability { return storage.CapUpload }
+// Capabilities 只声明上传能力; 删除实现保留, 待初春 API 删除权限完善后再声明 delete.
+func (a *adapter) Capabilities() storage.Capability {
+	return storage.CapUpload
+}
 
 // Put 以 multipart 上传单张图片; 后端返回相对路径, 使用站点地址补全.
 func (a *adapter) Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) (storage.PutResult, error) {
@@ -296,8 +307,122 @@ func (a *adapter) Stat(context.Context, string) (storage.ObjectInfo, error) {
 	return storage.ObjectInfo{}, storage.ErrNotSupported
 }
 
-func (a *adapter) Delete(context.Context, string) error {
-	return storage.ErrNotSupported
+// Delete 按图片 ID 删除; 记录键可能是 URL 路径或文件名, 先用图片列表反查 ID.
+func (a *adapter) Delete(ctx context.Context, key string) error {
+	key = strings.Trim(strings.TrimSpace(key), "/")
+	if key == "" || key == "." {
+		return errors.New("缺少图片 ID 或文件名")
+	}
+	if id, err := strconv.ParseInt(key, 10, 64); err == nil && id > 0 {
+		return a.deleteImageByID(ctx, id)
+	}
+	filename := path.Base(key)
+	id, err := a.imageIDByFilename(ctx, filename)
+	if err != nil {
+		return err
+	}
+	return a.deleteImageByID(ctx, id)
+}
+
+// imageIDByFilename 通过图片列表的 search 参数按文件名精确匹配图片 ID.
+func (a *adapter) imageIDByFilename(ctx context.Context, filename string) (int64, error) {
+	endpoint, err := url.Parse(a.imagesEndpoint)
+	if err != nil {
+		return 0, err
+	}
+	query := endpoint.Query()
+	query.Set("search", filename)
+	query.Set("page", "1")
+	query.Set("limit", "50")
+	if a.bucketID != "" {
+		query.Set("bucket_id", a.bucketID)
+	}
+	endpoint.RawQuery = query.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+a.token)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("查询初春图床图片失败: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return 0, fmt.Errorf("读取初春图床图片列表失败: %w", err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return 0, storage.ErrNotFound
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return 0, fmt.Errorf("查询初春图床图片失败: HTTP %d: %s", resp.StatusCode, snippet(data))
+	}
+	var result struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Images []struct {
+				ID       int64  `json:"id"`
+				Filename string `json:"filename"`
+			} `json:"images"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return 0, fmt.Errorf("解析初春图床图片列表失败: %w", err)
+	}
+	if result.Code == http.StatusNotFound {
+		return 0, storage.ErrNotFound
+	}
+	if result.Code != http.StatusOK {
+		return 0, fmt.Errorf("查询初春图床图片失败: code=%d: %s", result.Code, apiMessage(result.Message, data))
+	}
+	for _, image := range result.Data.Images {
+		if image.ID > 0 && image.Filename == filename {
+			return image.ID, nil
+		}
+	}
+	return 0, storage.ErrNotFound
+}
+
+// deleteImageByID 调用删除接口; 不存在视为成功.
+func (a *adapter) deleteImageByID(ctx context.Context, id int64) error {
+	target := strings.TrimRight(a.imagesEndpoint, "/") + "/" + strconv.FormatInt(id, 10)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+a.token)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("初春图床删除失败: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return fmt.Errorf("读取初春图床删除响应失败: %w", err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return storage.ErrNotFound
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("初春图床删除失败: HTTP %d: %s", resp.StatusCode, snippet(data))
+	}
+	var result struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Errorf("解析初春图床删除响应失败: %w", err)
+	}
+	if result.Code == http.StatusNotFound {
+		return storage.ErrNotFound
+	}
+	if result.Code != http.StatusOK {
+		return fmt.Errorf("初春图床删除失败: code=%d: %s", result.Code, apiMessage(result.Message, data))
+	}
+	return nil
 }
 
 func (a *adapter) List(context.Context, string) ([]storage.ObjectInfo, error) {
@@ -308,7 +433,7 @@ func (a *adapter) Read(context.Context, string) (io.ReadCloser, error) {
 	return nil, storage.ErrNotSupported
 }
 
-// Test 上传一张探测图片; 后端不支持删除, 探测对象会保留.
+// Test 上传一张探测图片; 删除能力关闭期间探测对象会保留.
 func (a *adapter) Test(ctx context.Context, prefix string) error {
 	suffix, err := storage.RandomString(8)
 	if err != nil {
@@ -317,6 +442,26 @@ func (a *adapter) Test(ctx context.Context, prefix string) error {
 	key := storage.NormalizeObjectKey(prefix, "picsky-probe-"+suffix+".png")
 	_, err = a.Put(ctx, key, bytes.NewReader(probePNG), int64(len(probePNG)), "image/png")
 	return err
+}
+
+// thumbnailURL 把 OneImg 原图路径转换为同目录 thumbnails 子目录下的缩略图直链.
+func thumbnailURL(original string) (string, bool) {
+	parsed, err := url.Parse(original)
+	if err != nil || parsed.Host == "" || parsed.Path == "" {
+		return "", false
+	}
+	if !strings.Contains(parsed.Path, "/uploads/") {
+		return "", false
+	}
+	dir, file := path.Split(parsed.Path)
+	if file == "" || file == "." || file == "/" || strings.Contains(dir, "thumbnails/") {
+		return "", false
+	}
+	parsed.Path = dir + "thumbnails/" + file
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), true
 }
 
 // sanitizeFilename 去掉会破坏 multipart 头的字符.
@@ -337,6 +482,15 @@ func validateLink(parsed *url.URL) error {
 		return errors.New("直链缺少主机名")
 	}
 	return nil
+}
+
+// apiMessage 返回接口错误消息, 空消息回退到响应片段.
+func apiMessage(message string, data []byte) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return snippet(data)
+	}
+	return message
 }
 
 // snippet 截断响应体, 用于错误信息.

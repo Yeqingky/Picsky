@@ -107,7 +107,11 @@ const NEW_TYPE_TRAITS: Record<
   sobot: { capabilities: ['upload'], urlFromBackend: true },
   celine: { capabilities: ['upload'], urlFromBackend: true },
   metaso: { capabilities: ['upload'], urlFromBackend: true },
-  oneimg: { capabilities: ['upload'], urlFromBackend: true, urlPrefixOverride: true },
+  oneimg: {
+    capabilities: ['upload', 'thumbnail'],
+    urlFromBackend: true,
+    urlPrefixOverride: true,
+  },
   cloudreve: { capabilities: ['upload'], urlFromBackend: true },
   colorful: { capabilities: ['upload'], urlFromBackend: true },
   littlepan: { capabilities: ['upload'], urlFromBackend: true },

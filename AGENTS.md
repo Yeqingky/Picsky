@@ -44,7 +44,7 @@ Picsky/
 |   |   |-- colorful/  彩虹外链网盘驱动 (站点地址, 公开上传, 仅上传)
 |   |   |-- littlepan/ LittlePan 驱动 (站点地址, 公开上传与删除)
 |   |   |-- metaso/    秘塔驱动 (固定地址与公开前缀, 无配置, 仅上传)
-|   |   |-- oneimg/    初春图床驱动 (站点地址与 Token, 可选存储桶, 仅上传)
+|   |   |-- oneimg/    初春图床驱动 (站点地址与 Token, 可选存储桶, 上传与远端缩略图)
 |   |   |-- sobot/     Sobot 驱动 (固定租户, 无配置, 仅上传)
 |   |   `-- webdav/    WebDAV 驱动 (v1)
 |   `-- web/        go:embed 前端产物 (build/ 由 scripts/build.sh 生成)
@@ -76,7 +76,7 @@ Picsky/
 - `sobot` 驱动固定租户与上传地址, 无配置项, 只接受图片, 由后端返回直链 (`url_from_backend`), 只声明 `upload` 能力; 策略不配置分发域名, 记录 `rel_path` / `object_key` 取返回 URL 的路径.
 - `celine` 驱动固定思琳中国上传地址与公开路径, 无鉴权与配置项, 只接受图片且仅支持 PNG / JPEG / GIF, 由后端返回直链 (`url_from_backend`), 只声明 `upload` 能力; 单文件上限 20,971,326 字节 (20 MiB 扣除 multipart 开销), 服务端会重编码图片并清理元数据, 记录的哈希与大小仍按原始上传内容计算.
 - `metaso` 驱动固定秘塔上传地址与公开前缀, 无鉴权与配置项, 只接受图片, 由后端返回直链 (`url_from_backend`), 只声明 `upload` 能力; 请求体上限 200 MiB (209,715,200 字节), 驱动文件上限 209,715,000 字节 (扣除 multipart 开销), 超限请求不会提前返回 413, 而是收完整个请求后返回 `errCode` 500; 错误一律 HTTP 200 + `errCode`, 必须按 `errCode` 判定失败; 服务端会把图片转码为 WebP, 并把最长边超过 2048 px 的图片等比缩小到最长边 2048 px, 但图片响应仍声明 `image/png;charset=UTF-8`, 记录的尺寸, 哈希与大小按原始上传内容计算.
-- `oneimg` 驱动对接初春图床 (OneImg): `config` 保存 `endpoint` 与可选 `bucket_id`, `secrets` 保存 `token`; 上传 `POST /api/upload/images`, multipart 字段为 `images[]`, 未选择存储桶时不发送 `bucket_id`, 后端返回的 `/uploads/...` 相对路径按站点地址补全为绝对直链; 只声明 `upload`, `url_from_backend` 与 `url_prefix_override`; 策略可选配置分发域名, 配置默认域名时记录直链为默认域名拼接后端返回路径, 未配置时使用站点直链; 单文件上限与允许格式以实例 `/api/uploadConfig` 为准, 驱动不写死. 存储桶列表通过独立管理接口 `POST /admin/policies/buckets` 按需读取, 不并入策略详情或列表; 新建策略首次展开下拉框时请求, 编辑页加载后预取, 请求超时 15 秒, 站点地址或 Token 变化时清空已选存储桶; 远端查询失败只影响该字段提示, 不得阻塞页面其他数据.
+- `oneimg` 驱动对接初春图床 (OneImg): `config` 保存 `endpoint` 与可选 `bucket_id`, `secrets` 保存 `token`; 上传 `POST /api/upload/images`, multipart 字段为 `images[]`, 未选择存储桶时不发送 `bucket_id`, 后端返回的 `/uploads/...` 相对路径按站点地址补全为绝对直链; 声明 `upload`, `thumbnail`, `url_from_backend` 与 `url_prefix_override`; 策略可选配置分发域名, 配置默认域名时记录直链为默认域名拼接后端返回路径, 未配置时使用站点直链; 缩略图直链由原图同目录追加 `thumbnails/` 得到, 图库卡片与列表使用该地址, 查看器与详情使用原图; 初春 API 删除权限尚未完善, 当前不声明删除能力; 单文件上限与允许格式以实例 `/api/uploadConfig` 为准, 驱动不写死. 存储桶列表通过独立管理接口 `POST /admin/policies/buckets` 按需读取, 不并入策略详情或列表; 新建策略首次展开下拉框时请求, 编辑页加载后预取, 请求超时 15 秒, 站点地址或 Token 变化时清空已选存储桶; 远端查询失败只影响该字段提示, 不得阻塞页面其他数据.
 - `colorful` 驱动对接彩虹外链网盘 5.6 的公开上传接口: `config` 保存 `endpoint`; 上传 `POST {endpoint}/api.php`, multipart 字段为 `file`, 文件名取魔法路径文件名; 站点必须开启上传 API, 无需登录; 响应 `code=0` 为成功, 优先使用 `viewurl` (inline), 缺失时回退 `downurl`; 只声明 `upload` 与 `url_from_backend`, 不支持扫描, 删除与分发域名.
 - `littlepan` 驱动对接 LittlePan_v2 的公开上传接口: `config` 保存 `endpoint`; 上传 `POST {endpoint}/api.php`, multipart 字段 `file`, `format=json`, `show=0`; 无需登录; 响应 `code=0` 为成功, 优先使用 `viewurl`, 缺失时回退 `downurl`; 只声明 `upload` 与 `url_from_backend`, 不支持删除, 扫描, 状态查询与分发域名. 公开 API 的 DELETE 对已存在文件返回 5xx 且无授权模型; 前端删除依赖登录会话, CSRF 与 `$_SESSION['fileids']`, 只允许删除同一浏览器会话上传的文件, 无法由无状态 API 复用. 连接测试只上传探测图, 探测对象会保留.
 - `cloudreve` 驱动对接 Cloudreve v4: `config` 保存 `endpoint`, `directory` (默认 `/picsky`), `auto_login` (`true` / `false`, 默认 `false`), `secrets` 保存账号邮箱, 密码与 `refresh_token` / `refresh_expires` / `access_expires`; 自动登录关闭时只显示手填 Refresh Token 并调用刷新接口显示两个到期时间, 开启时显示账号密码并强制登录获取 Refresh Token, 输入框只读; 开启自动登录后 Refresh Token 刷新失败可回退账号密码登录; 账号密码登录支持 2FA; 登录成功后保存 RefreshToken 并默认启用策略, 未登录可保存但必须禁用, 列表启用开关在有令牌时才可用. 登录响应缺少 `direct_link_batch_size` 或为 0 时拒绝登录; 上传通过创建目录, 上传会话, 分片与 `PUT /file/source` 直链接口完成, 只支持本机, relay 或 remote 中转策略, 其他存储策略明确报错; 驱动声明 `upload`, `stat`, 由后端返回直链; 魔法路径默认 `{md5:2}/{md5}.{ext}`, 实际对象键为目录加魔法路径, 记录 `rel_path` 不含目录而 `object_key` 含目录.
@@ -126,10 +126,11 @@ Picsky/
 - 维护队列表格与类型筛选必须覆盖后端支持的全部任务类型, 并使用中文名称显示.
 - 图库筛选使用原始文件名, 格式与存储策略; 不提供开始时间和结束时间筛选; 仅存在筛选条件时渲染清空筛选按钮.
 - 图库瀑布流多选模式下, 点击卡片任意位置切换选中状态, 不打开图片查看器; 左上角选中框保留, 点击它只切换一次.
-- 图库图片查看器使用 `photoswipe`: 桌面端左侧大图 + 右侧 400px 信息栏, 移动端全屏图片 + 底部 "图片详情" 面板; 背景为模糊后的图库网页 (全屏 `backdrop-filter`), 不使用图片放大模糊; 预加载当前图片前面两张与后面两张 (共四张, 不含当前图); 信息栏加载态使用居中旋转圆环, 不使用骨架屏; 切换图片时保留上一张详情直到新数据到达, 避免加载态闪烁; PhotoSwipe 的右侧控件必须避让信息栏; 关闭后不得残留 `.pswp` 节点.
+- 图库图片查看器使用 `photoswipe`: 桌面端左侧大图 + 右侧 400px 信息栏, 移动端全屏图片 + 底部 "图片详情" 面板; 背景为模糊后的图库网页 (全屏 `backdrop-filter`), 不使用图片放大模糊; 预加载当前图片前面两张与后面两张 (共四张, 不含当前图); 信息栏加载态使用居中旋转圆环, 不使用骨架屏; 切换图片时保留上一张详情直到新数据到达, 避免加载态闪烁; PhotoSwipe 的右侧控件必须避让信息栏; 删除确认等 `AlertDialog` 层级必须高于查看器, 否则确认框不可见; 关闭后不得残留 `.pswp` 节点.
 - 图库瀑布流卡片外层使用 `content-visibility: auto` 与 `contain-intrinsic-block-size`, 离屏卡片跳过布局与绘制; 不得卸载 `<img>` 节点, 避免滚动回看时重新加载.
 - 弹层遮罩不使用 `backdrop-filter` 模糊, 只使用半透明背景与透明度动画; 全屏模糊会在图库上方每帧重算, 导致抽屉展开掉帧. 图片查看器背景例外: 按要求模糊图库网页, 使用全屏 `backdrop-filter`, 不叠加图片放大背景.
 - `LazyImage` 的加载与失败状态必须绑定当前图片直链; 直链变化时应同步派生 `loading` 状态, 不依赖 effect 异步重置.
+- 驱动可声明 `thumbnail` 能力并提供缩略图转换函数; 图库瀑布流与列表优先使用 `thumbnail_url`, 图片查看器与详情始终使用原图.
 - 复制 HTML 格式时必须对 URL 与文件名执行 HTML 属性上下文转义; 其他复制格式保持各自的原始格式.
 - 个人设置账户信息按昵称, 用户名, 邮箱, 用户组, 配额排列, 配额显示在账户信息卡中; 昵称标签, 输入框和保存按钮保持同行; 昵称与密码输入限宽.
 - 桌面侧栏占位宽度必须与固定侧栏共用 `DRAWER_WIDTH`; 侧栏标题行在定高容器内绘制下边框, 与顶栏下边框共线.

@@ -305,9 +305,10 @@ type urlDTO struct {
 	IsDefault bool   `json:"is_default"`
 }
 
-// policyMeta 缓存策略的名称, 驱动能力与分发域名.
+// policyMeta 缓存策略的名称, 驱动类型, 能力与分发域名.
 type policyMeta struct {
 	Name         string
+	Type         string
 	Capabilities []string
 	URLs         []model.PolicyURL
 	DefaultURL   string
@@ -324,6 +325,7 @@ type imageDTO struct {
 	RelPath            string    `json:"rel_path"`
 	ObjectKey          string    `json:"object_key"`
 	URL                string    `json:"url"`
+	ThumbnailURL       string    `json:"thumbnail_url,omitempty"`
 	URLs               []urlDTO  `json:"urls"`
 	MD5                string    `json:"md5"`
 	SHA1               string    `json:"sha1"`
@@ -395,7 +397,7 @@ func (s *Server) metaFor(policyIDs []int64) (map[int64]*policyMeta, error) {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
 	for _, policy := range policies {
-		meta := &policyMeta{Name: policy.Name, Capabilities: []string{}, URLs: []model.PolicyURL{}}
+		meta := &policyMeta{Name: policy.Name, Type: policy.Type, Capabilities: []string{}, URLs: []model.PolicyURL{}}
 		if spec, ok := storage.SpecOf(policy.Type); ok {
 			meta.Capabilities = spec.Capabilities
 		}
@@ -467,6 +469,11 @@ func (s *Server) toImageDTO(record *model.Image, meta *policyMeta, userEmail str
 			}
 			if relPath != "" {
 				dto.URL = storage.JoinURL(meta.DefaultURL, relPath)
+			}
+		}
+		if spec, ok := storage.SpecOf(meta.Type); ok && spec.Has(storage.CapThumbnail) && spec.Thumbnail != nil {
+			if thumbnail, ok := spec.Thumbnail(dto.URL); ok {
+				dto.ThumbnailURL = thumbnail
 			}
 		}
 	}

@@ -34,6 +34,7 @@ const (
 	CapMkdir                            // 自动创建父目录
 	CapPresign                          // 生成预签名 URL
 	CapMultipart                        // 分片上传
+	CapThumbnail                        // 提供远端缩略图直链
 )
 
 // capabilityNames 按位序保存能力名称.
@@ -50,6 +51,7 @@ var capabilityNames = []struct {
 	{CapMkdir, "mkdir"},
 	{CapPresign, "presign"},
 	{CapMultipart, "multipart"},
+	{CapThumbnail, "thumbnail"},
 }
 
 // Has 判断是否包含给定能力.
@@ -143,7 +145,9 @@ type Spec struct {
 	MaxFileSize int64 `json:"max_file_size_bytes"`
 	// Formats 是驱动支持的图片格式 (imgdetect 格式名); 空表示不额外限制.
 	Formats []string `json:"formats"`
-	caps    Capability
+	// Thumbnail 由声明 thumbnail 能力的驱动提供: 输入记录直链, 返回远端缩略图直链.
+	Thumbnail func(originalURL string) (string, bool) `json:"-"`
+	caps      Capability
 }
 
 // Has 判断驱动是否声明某能力.
@@ -203,6 +207,12 @@ func Register(spec Spec, factory Factory) {
 	caps, err := CapabilitiesFromNames(spec.Capabilities)
 	if err != nil {
 		panic("storage: 驱动能力名非法: " + err.Error())
+	}
+	if caps.Has(CapThumbnail) && spec.Thumbnail == nil {
+		panic("storage: 声明 thumbnail 能力必须提供缩略图转换函数: " + spec.Type)
+	}
+	if !caps.Has(CapThumbnail) && spec.Thumbnail != nil {
+		panic("storage: 提供缩略图转换函数必须声明 thumbnail 能力: " + spec.Type)
 	}
 	spec.caps = caps
 	for i := range spec.ConfigFields {

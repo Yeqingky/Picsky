@@ -40,7 +40,11 @@ export function GalleryListView({
       className: 'w-20',
       cell: (row) => (
         <div className="h-12 w-12 overflow-hidden rounded">
-          <LazyImage src={row.url} alt={row.original_filename} hash={row.sha256} />
+          <LazyImage
+            src={row.thumbnail_url || row.url}
+            alt={row.original_filename}
+            hash={row.sha256}
+          />
         </div>
       ),
     },

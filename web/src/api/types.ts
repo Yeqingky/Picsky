@@ -189,6 +189,8 @@ export interface ImageRecord {
   rel_path: string;
   object_key: string;
   url: string;
+  /** 驱动声明远端缩略图能力时提供的预览直链, 缺失时使用原图 */
+  thumbnail_url?: string | null;
   urls: UploadUrlAlias[];
   md5: string;
   sha1: string;

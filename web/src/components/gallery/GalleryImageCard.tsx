@@ -41,7 +41,11 @@ export function GalleryImageCard({
       style={{ height }}
       onClick={activate}
     >
-      <LazyImage src={record.url} alt={record.original_filename} hash={record.sha256} />
+      <LazyImage
+        src={record.thumbnail_url || record.url}
+        alt={record.original_filename}
+        hash={record.sha256}
+      />
 
       <div className="pointer-events-none absolute inset-x-1 top-1 flex items-start justify-between">
         {selectionMode ? (

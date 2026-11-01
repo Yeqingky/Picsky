@@ -62,6 +62,7 @@ export const adminPolicies = {
     mkdir: '创建目录',
     presign: '预签名',
     multipart: '分片上传',
+    thumbnail: '远端缩略图',
   },
 
   edit: {

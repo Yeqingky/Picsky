@@ -38,14 +38,65 @@ func TestDriverSpec(t *testing.T) {
 	if !spec.URLPrefixOverride {
 		t.Error("初春图床驱动应允许分发域名覆盖后端直链前缀")
 	}
-	if len(spec.Capabilities) != 1 || spec.Capabilities[0] != "upload" {
-		t.Errorf("初春图床驱动应只声明上传能力: %v", spec.Capabilities)
+	if len(spec.Capabilities) != 2 || spec.Capabilities[0] != "upload" || spec.Capabilities[1] != "thumbnail" {
+		t.Errorf("初春图床驱动应声明上传与远端缩略图能力: %v", spec.Capabilities)
+	}
+	if spec.Thumbnail == nil {
+		t.Error("初春图床驱动应提供缩略图转换函数")
+	}
+	if spec.Has(storage.CapDelete) {
+		t.Error("初春图床当前不应声明删除能力")
 	}
 	if len(spec.ConfigFields) != 2 || spec.ConfigFields[0].Name != "endpoint" || spec.ConfigFields[1].Name != "bucket_id" {
 		t.Errorf("配置字段 = %+v, 期望 endpoint 与 bucket_id", spec.ConfigFields)
 	}
 	if len(spec.SecretFields) != 1 || spec.SecretFields[0].Name != "token" {
 		t.Errorf("敏感字段 = %+v, 期望只有 token", spec.SecretFields)
+	}
+}
+
+func TestThumbnailURL(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+		ok   bool
+	}{
+		{
+			name: "标准上传路径",
+			in:   "https://img.example.com/uploads/2026/10/foo.webp",
+			want: "https://img.example.com/uploads/2026/10/thumbnails/foo.webp",
+			ok:   true,
+		},
+		{
+			name: "子目录并清理查询参数",
+			in:   "http://example.com/pan/uploads/2026/01/foo.png?x=1",
+			want: "http://example.com/pan/uploads/2026/01/thumbnails/foo.png",
+			ok:   true,
+		},
+		{
+			name: "不在 uploads 下",
+			in:   "https://img.example.com/files/foo.webp",
+			ok:   false,
+		},
+		{
+			name: "已是缩略图",
+			in:   "https://img.example.com/uploads/2026/10/thumbnails/foo.webp",
+			ok:   false,
+		},
+		{
+			name: "无效地址",
+			in:   "not-a-url",
+			ok:   false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := thumbnailURL(test.in)
+			if ok != test.ok || got != test.want {
+				t.Fatalf("thumbnailURL(%q) = %q, %v; want %q, %v", test.in, got, ok, test.want, test.ok)
+			}
+		})
 	}
 }
 
@@ -242,9 +293,6 @@ func TestPutRejectsNonImage(t *testing.T) {
 
 func TestUnsupportedOperations(t *testing.T) {
 	adapter := &adapter{}
-	if err := adapter.Delete(context.Background(), "foo.png"); err != storage.ErrNotSupported {
-		t.Errorf("Delete 错误 = %v", err)
-	}
 	if _, err := adapter.Stat(context.Background(), "foo.png"); err != storage.ErrNotSupported {
 		t.Errorf("Stat 错误 = %v", err)
 	}
@@ -253,5 +301,84 @@ func TestUnsupportedOperations(t *testing.T) {
 	}
 	if _, err := adapter.Read(context.Background(), "foo.png"); err != storage.ErrNotSupported {
 		t.Errorf("Read 错误 = %v", err)
+	}
+}
+
+func TestDeleteByFilenameLooksUpID(t *testing.T) {
+	var search, deletePath, auth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/images":
+			search = r.URL.Query().Get("search")
+			_, _ = io.WriteString(w, `{"code":200,"message":"ok","data":{"images":[{"id":42,"filename":"foo.webp"}]}}`)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/images/"):
+			deletePath = r.URL.Path
+			_, _ = io.WriteString(w, `{"code":200,"message":"删除成功","data":null}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := testAdapter(t, server.URL)
+	if err := adapter.Delete(context.Background(), "uploads/2026/01/foo.webp"); err != nil {
+		t.Fatalf("Delete 失败: %v", err)
+	}
+	if search != "foo.webp" {
+		t.Errorf("search = %q, 期望 foo.webp", search)
+	}
+	if deletePath != "/api/images/42" {
+		t.Errorf("删除路径 = %q, 期望 /api/images/42", deletePath)
+	}
+	if auth != "Bearer test-token" {
+		t.Errorf("Authorization = %q", auth)
+	}
+}
+
+func TestDeleteByNumericID(t *testing.T) {
+	var deletePath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deletePath = r.URL.Path
+		_, _ = io.WriteString(w, `{"code":200,"message":"删除成功"}`)
+	}))
+	defer server.Close()
+
+	adapter := testAdapter(t, server.URL)
+	if err := adapter.Delete(context.Background(), "42"); err != nil {
+		t.Fatalf("Delete 失败: %v", err)
+	}
+	if deletePath != "/api/images/42" {
+		t.Errorf("删除路径 = %q", deletePath)
+	}
+}
+
+func TestDeleteReturnsNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_, _ = io.WriteString(w, `{"code":200,"data":{"images":[]}}`)
+		default:
+			_, _ = io.WriteString(w, `{"code":404,"message":"图片不存在"}`)
+		}
+	}))
+	defer server.Close()
+
+	adapter := testAdapter(t, server.URL)
+	if err := adapter.Delete(context.Background(), "missing.webp"); err != storage.ErrNotFound {
+		t.Fatalf("Delete 错误 = %v, 期望 ErrNotFound", err)
+	}
+}
+
+func TestDeleteReturnsBackendError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"code":500,"message":"删除失败"}`)
+	}))
+	defer server.Close()
+
+	adapter := testAdapter(t, server.URL)
+	err := adapter.Delete(context.Background(), "42")
+	if err == nil || !strings.Contains(err.Error(), "删除失败") {
+		t.Fatalf("错误 = %v, 期望包含接口错误信息", err)
 	}
 }
