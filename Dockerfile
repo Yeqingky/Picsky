@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npm run build
 
 # ---------- 后端构建 (内嵌前端产物) ----------
-FROM golang:1.27-alpine AS build
+FROM golang:1.27.3-alpine AS build
 ARG VERSION=0.1.0
 WORKDIR /src
 RUN apk add --no-cache git

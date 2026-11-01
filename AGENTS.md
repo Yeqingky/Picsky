@@ -147,7 +147,7 @@ Picsky/
 
 ## 构建与运行
 
-后端 (Go 1.27):
+后端 (Go 1.27.3):
 
 ```sh
 go run ./cmd/picsky                  # 开发启动 (需 PICSKY_SECRET_KEY)
