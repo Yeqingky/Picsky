@@ -94,6 +94,7 @@ type Auth struct {
 	passwordResetLimiter      *RateLimiter
 	verificationResendLimiter *RateLimiter
 	dummyPasswordHash         []byte
+	registerMu                sync.Mutex
 	loginChallengesMu         sync.Mutex
 	loginChallenges           map[string]loginChallenge
 }
@@ -186,6 +187,10 @@ func (a *Auth) Register(ctx context.Context, in RegisterInput, ip, userAgent str
 	if existing > 0 {
 		return nil, ErrDuplicateRegistration
 	}
+
+	// 首个用户判定与创建必须在同一进程内串行, 避免并发注册都进入管理员组.
+	a.registerMu.Lock()
+	defer a.registerMu.Unlock()
 
 	var userCount int64
 	if err := a.db.Model(&model.User{}).Count(&userCount).Error; err != nil {
