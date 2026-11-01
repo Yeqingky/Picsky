@@ -86,6 +86,10 @@ func (s *Server) createKey(c *gin.Context) {
 			return
 		}
 		scopes = &bits
+	} else if principal.APIKeyID != nil {
+		// API 密钥调用者未指定 scopes 时继承当前有效权限, 避免重新签发出未裁剪的密钥.
+		bits := principal.Permissions
+		scopes = &bits
 	}
 
 	var expiresAt *time.Time
