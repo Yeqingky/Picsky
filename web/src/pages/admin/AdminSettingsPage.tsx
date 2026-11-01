@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import {
   Globe,
   HardDrive,
+  EyeOff,
   LoaderCircle,
   Mail,
   ShieldCheck,
@@ -38,9 +39,11 @@ import {
 import { Skeleton } from '../../components/ui/skeleton';
 import { Switch } from '../../components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
+import { Textarea } from '../../components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { cn } from '../../lib/utils';
 import { formatBytes } from '../../utils/format';
+import { normalizeReferrerDomain } from '../../utils/referrer';
 
 const DEFAULT_CLIENT_IP_SOURCE = 'REMOTE_ADDR';
 /** 系统设置项 (docs/database.md 第 7 节); 全部以字符串与后端交互 */
@@ -52,6 +55,7 @@ const SETTING_KEYS = [
   'register_enabled',
   'email_verification_enabled',
   'registration_email_allowlist',
+  'referrer_allowlist',
   'captcha_provider',
   'captcha_site_key',
   'captcha_endpoint',
@@ -83,6 +87,7 @@ const DEFAULTS: Record<SettingKey, string> = {
   register_enabled: 'true',
   email_verification_enabled: 'false',
   registration_email_allowlist: '',
+  referrer_allowlist: '',
   captcha_provider: 'none',
   captcha_site_key: '',
   captcha_endpoint: '',
@@ -158,6 +163,7 @@ const SETTING_TABS = [
   { id: 'register', labelKey: 'register', icon: <UserPlus className={TAB_ICON_CLASS} /> },
   { id: 'captcha', labelKey: 'captcha', icon: <ShieldCheck className={TAB_ICON_CLASS} /> },
   { id: 'email', labelKey: 'email', icon: <Mail className={TAB_ICON_CLASS} /> },
+  { id: 'privacy', labelKey: 'privacy', icon: <EyeOff className={TAB_ICON_CLASS} /> },
   { id: 'quota', labelKey: 'quota', icon: <HardDrive className={TAB_ICON_CLASS} /> },
   { id: 'other', labelKey: 'other', icon: <SlidersHorizontal className={TAB_ICON_CLASS} /> },
 ] as const;
@@ -246,6 +252,14 @@ function validateSettings(values: Draft, t: TFunction): Errors {
   const emailDomains = splitTags(values.registration_email_allowlist);
   if (emailDomains.some((domain) => !isEmailDomain(domain))) {
     errors.registration_email_allowlist = t('adminSystem.settings.validation.emailDomains');
+  }
+
+  const referrerDomains = values.referrer_allowlist
+    .split(/\r?\n/)
+    .map(normalizeReferrerDomain)
+    .filter((domain) => domain.length > 0);
+  if (referrerDomains.some((domain) => !isEmailDomain(domain))) {
+    errors.referrer_allowlist = t('adminSystem.settings.validation.referrerDomains');
   }
 
   const pathTemplate = values.default_path_template.trim();
@@ -384,6 +398,7 @@ function SettingsSkeleton({ tab }: { tab: SettingTabId }) {
     register: 4,
     captcha: 4,
     email: 6,
+    privacy: 1,
     quota: 2,
     other: 5,
   };
@@ -399,6 +414,7 @@ function SettingsSkeleton({ tab }: { tab: SettingTabId }) {
       'sm:max-w-sm',
       'sm:max-w-[220px]',
     ],
+    privacy: ['sm:max-w-lg'],
     quota: ['sm:max-w-lg', 'sm:max-w-40'],
     other: ['sm:max-w-[220px]', 'sm:max-w-lg', '', 'sm:max-w-40', 'sm:max-w-40'],
   };
@@ -427,6 +443,7 @@ function SettingsSkeleton({ tab }: { tab: SettingTabId }) {
             tab === 'register' ||
             (tab === 'captcha' && index > 0) ||
             (tab === 'email' && (index === 3 || index === 4)) ||
+            tab === 'privacy' ||
             tab === 'quota' ||
             (tab === 'other' && (index === 1 || index === 2));
 
@@ -995,6 +1012,25 @@ export default function AdminSettingsPage() {
                 ))}
               </SelectContent>
             </Select>
+          </Field>
+        </TabsContent>
+
+        <TabsContent value="privacy" className={TAB_PANEL_CLASS}>
+          <Field
+            id="setting-referrer-allowlist"
+            label={t('adminSystem.settings.field.referrerAllowlist')}
+            className={SETTING_FIELD_WIDTH.wide}
+            hint={t('adminSystem.settings.field.referrerAllowlistHint')}
+            error={errors.referrer_allowlist}
+          >
+            <Textarea
+              id="setting-referrer-allowlist"
+              rows={6}
+              value={draft.referrer_allowlist}
+              placeholder={'example.com\ncdn.example.com'}
+              aria-invalid={Boolean(errors.referrer_allowlist)}
+              onChange={(event) => setField('referrer_allowlist', event.target.value)}
+            />
           </Field>
         </TabsContent>
 

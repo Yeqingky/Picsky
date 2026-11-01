@@ -212,6 +212,7 @@ func (s *Server) publicSite(c *gin.Context) {
 		"password_reset_enabled":     s.svc.Mailer.Configured(),
 		"captcha":                    s.svc.Captcha.Public(),
 		"registration_email_domains": splitEmailDomains(s.svc.Settings.String("registration_email_allowlist")),
+		"referrer_allowlist":         splitReferrerAllowlist(s.svc.Settings.String("referrer_allowlist")),
 	})
 }
 
@@ -230,6 +231,18 @@ func splitEmailDomains(raw string) []string {
 		}
 		seen[key] = struct{}{}
 		domains = append(domains, domain)
+	}
+	return domains
+}
+
+// splitReferrerAllowlist 将按行保存的 Referrer 白名单转为去空, 小写的域名列表.
+func splitReferrerAllowlist(raw string) []string {
+	domains := make([]string, 0)
+	for _, line := range strings.Split(raw, "\n") {
+		domain := strings.ToLower(strings.TrimSpace(line))
+		if domain != "" {
+			domains = append(domains, domain)
+		}
 	}
 	return domains
 }

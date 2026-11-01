@@ -34,6 +34,7 @@ import type {
   PolicyScanResult,
 } from '../../api/types';
 import { CopyButton } from '../../components/CopyButton';
+import { ExternalLink } from '../../components/ExternalLink';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorState } from '../../components/States';
 import {
@@ -1512,40 +1513,25 @@ export default function AdminPolicyEditPage() {
                 hint={
                   isCloudreve ? (
                     <>
-                      <a
-                        className="text-primary hover:underline"
-                        href="https://github.com/netcccyun/pan"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <ExternalLink href="https://github.com/netcccyun/pan">
                         {t('adminPolicies.type.cloudreve')}
-                      </a>{' '}
+                      </ExternalLink>{' '}
                       {t('adminPolicies.edit.field.cloudreveEndpointHintSuffix')}
                     </>
                   ) : isOneImg ? (
                     t('adminPolicies.edit.field.oneimgEndpointHint')
                   ) : isColorful ? (
                     <>
-                      <a
-                        className="text-primary hover:underline"
-                        href="https://github.com/netcccyun/pan"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <ExternalLink href="https://github.com/netcccyun/pan">
                         {t('adminPolicies.type.colorful')}
-                      </a>{' '}
+                      </ExternalLink>{' '}
                       {t('adminPolicies.edit.field.colorfulEndpointHintSuffix')}
                     </>
                   ) : isLittlePan ? (
                     <>
-                      <a
-                        className="text-primary hover:underline"
-                        href="https://github.com/FirgtZhong/LittlePan_v2"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
+                      <ExternalLink href="https://github.com/FirgtZhong/LittlePan_v2">
                         {t('adminPolicies.type.littlepan')}
-                      </a>{' '}
+                      </ExternalLink>{' '}
                       {t('adminPolicies.edit.field.littlepanEndpointHintSuffix')}
                     </>
                   ) : (

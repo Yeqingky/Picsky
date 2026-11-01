@@ -26,6 +26,8 @@ export interface SiteInfo {
   captcha: CaptchaConfig;
   /** 注册邮箱域名白名单; 空数组表示不限制 */
   registration_email_domains: string[];
+  /** Referrer 白名单; 命中域名后缀时发送 Referer, 空数组表示全部禁止 */
+  referrer_allowlist: string[];
 }
 
 /* ------------------------------------------------------------------ 认证 */

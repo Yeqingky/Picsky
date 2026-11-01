@@ -220,6 +220,14 @@ func (s *Settings) Update(values map[string]string) error {
 				return err
 			}
 		}
+		if key == "referrer_allowlist" {
+			normalized, err := normalizeReferrerAllowlist(value)
+			if err != nil {
+				return err
+			}
+			prepared[key] = normalized
+			continue
+		}
 		if migrations.IsSecretSetting(key) {
 			encrypted, err := s.cipher.Encrypt(strings.TrimSpace(value))
 			if err != nil {
@@ -258,6 +266,34 @@ func validateEmailDomainAllowlist(raw string) error {
 		}
 		remaining = rest
 	}
+}
+
+// normalizeReferrerAllowlist 规范 Referrer 白名单: 一行一个域名, 小写去空白,
+// 去除前导 *. 或 ., 去重后以换行保存; 最多 100 个.
+func normalizeReferrerAllowlist(raw string) (string, error) {
+	entries := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
+		domain := strings.ToLower(strings.TrimSpace(line))
+		domain = strings.TrimSpace(strings.TrimPrefix(domain, "*."))
+		domain = strings.TrimSpace(strings.TrimPrefix(domain, "."))
+		domain = strings.TrimSuffix(domain, ".")
+		if domain == "" {
+			continue
+		}
+		if !validEmailDomain(domain) {
+			return "", apperr.ErrInvalidRequest.WithMessage("Referrer 白名单包含无效的域名: " + domain)
+		}
+		if _, duplicate := seen[domain]; duplicate {
+			continue
+		}
+		seen[domain] = struct{}{}
+		entries = append(entries, domain)
+		if len(entries) > 100 {
+			return "", apperr.ErrInvalidRequest.WithMessage("Referrer 白名单最多 100 个域名")
+		}
+	}
+	return strings.Join(entries, "\n"), nil
 }
 
 func validEmailDomain(domain string) bool {

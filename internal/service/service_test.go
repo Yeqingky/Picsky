@@ -2333,6 +2333,20 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	}
 }
 
+func TestReferrerAllowlistNormalized(t *testing.T) {
+	f := newFixture(t)
+	raw := "*.Example.com\r\n. cdn.a.com \nExample.com\n\n"
+	if err := f.svc.Settings.Update(map[string]string{"referrer_allowlist": raw}); err != nil {
+		t.Fatalf("写入 Referrer 白名单失败: %v", err)
+	}
+	if got := f.svc.Settings.String("referrer_allowlist"); got != "example.com\ncdn.a.com" {
+		t.Fatalf("Referrer 白名单 = %q, 期望规范化并去重", got)
+	}
+	if err := f.svc.Settings.Update(map[string]string{"referrer_allowlist": "example.com/path"}); err == nil {
+		t.Fatal("非法 Referrer 白名单应被拒绝")
+	}
+}
+
 func TestSettingsSecretsEncrypted(t *testing.T) {
 	f := newFixture(t)
 	if err := f.svc.Settings.Update(map[string]string{"captcha_secret": "super-secret-value", "site_name": "Picsky 测试"}); err != nil {

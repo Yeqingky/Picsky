@@ -6,6 +6,8 @@ import PhotoSwipe from 'photoswipe';
 import 'photoswipe/style.css';
 import './gallery-lightbox.css';
 import type { DeleteResult, ImageRecord } from '../../api/types';
+import { useSiteInfo } from '../../hooks/useSite';
+import { referrerPolicyFor } from '../../utils/referrer';
 import { Button } from '../ui/button';
 import { ImageDetailPanel } from './ImageDetailPanel';
 
@@ -32,6 +34,9 @@ export function GalleryLightbox({
   onFilterUser,
 }: GalleryLightboxProps) {
   const { t } = useTranslation();
+  const { data: siteInfo } = useSiteInfo();
+  const referrerAllowlistRef = useRef<string[]>([]);
+  referrerAllowlistRef.current = siteInfo?.referrer_allowlist ?? [];
   const viewerItems = useRef(items).current;
   const initial = useRef({
     index: Math.min(Math.max(initialIndex, 0), Math.max(viewerItems.length - 1, 0)),
@@ -75,13 +80,24 @@ export function GalleryLightbox({
 
     const handleChange = () => setCurrentIndex(pswp.currIndex);
     const handleClose = () => onCloseRef.current();
+    const handleContentLoadImage = (event: {
+      content: { element?: HTMLElement; data?: { src?: unknown } };
+    }) => {
+      const element = event.content.element;
+      if (element instanceof HTMLImageElement) {
+        const source = typeof event.content.data?.src === 'string' ? event.content.data.src : '';
+        element.referrerPolicy = referrerPolicyFor(source, referrerAllowlistRef.current);
+      }
+    };
     pswp.on('change', handleChange);
     pswp.on('close', handleClose);
+    pswp.on('contentLoadImage', handleContentLoadImage);
     pswp.init();
 
     return () => {
       pswp.off('change', handleChange);
       pswp.off('close', handleClose);
+      pswp.off('contentLoadImage', handleContentLoadImage);
       const element = pswp.element;
       // PhotoSwipe 的 destroy 第一次只触发关闭, 关闭态下再调用一次才会移除 DOM
       pswp.destroy();

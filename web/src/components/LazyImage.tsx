@@ -3,6 +3,7 @@ import { Loader2, RotateCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useThemeMode } from '../theme/ThemeModeProvider';
 import { placeholderColor } from '../utils/image';
+import { useReferrerPolicy } from '../hooks/useSite';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -41,6 +42,7 @@ export function LazyImage({
 }: LazyImageProps) {
   const { t } = useTranslation();
   const { resolvedMode } = useThemeMode();
+  const referrerPolicy = useReferrerPolicy(src);
   const [attempt, setAttempt] = useState(0);
   const [imageState, setImageState] = useState<{
     src: string;
@@ -96,6 +98,7 @@ export function LazyImage({
           alt={alt}
           loading={eager ? 'eager' : 'lazy'}
           decoding="async"
+          referrerPolicy={referrerPolicy}
           onClick={onClick}
           onLoad={() => setImageState({ src: resolvedSrc, status: 'loaded' })}
           onError={() => setImageState({ src: resolvedSrc, status: 'error' })}

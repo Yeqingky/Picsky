@@ -127,7 +127,13 @@ export function UploadFileRow({
             <FileImage className="size-4" />
           </span>
         ) : (
-          <img src={preview} alt={item.name} className="size-full object-cover" draggable={false} />
+          <img
+            src={preview}
+            alt={item.name}
+            className="size-full object-cover"
+            draggable={false}
+            referrerPolicy="no-referrer"
+          />
         )}
       </button>
       <div className="min-w-0 flex-1">
@@ -216,6 +222,7 @@ export function UploadFileRow({
               src={preview}
               alt={item.name}
               className="mx-auto max-h-[80vh] w-auto max-w-full rounded-md object-contain"
+              referrerPolicy="no-referrer"
             />
           )}
         </DialogContent>
