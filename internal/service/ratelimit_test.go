@@ -18,6 +18,16 @@ func TestRateLimiterRejectsNewKeysAtCapacity(t *testing.T) {
 	if allowed, _ := limiter.Allow("overflow", 10); allowed {
 		t.Error("表满且无过期项时应拒绝新键")
 	}
+	firstSweep := limiter.lastSweep
+	if firstSweep.IsZero() {
+		t.Fatal("首次满表请求应执行一次 sweep")
+	}
+	if allowed, _ := limiter.Allow("overflow-2", 10); allowed {
+		t.Error("表满且无过期项时应继续拒绝新键")
+	}
+	if !limiter.lastSweep.Equal(firstSweep) {
+		t.Error("同一窗口内不应为每个新键重复全表 sweep")
+	}
 	if got := len(limiter.windows); got != maxRateLimitKeys {
 		t.Errorf("拒绝新键后表大小不应增长: %d", got)
 	}

@@ -7,9 +7,10 @@ import (
 
 // RateLimiter 是按 key 的固定窗口计数限流器.
 type RateLimiter struct {
-	mu      sync.Mutex
-	windows map[string]*rateWindow
-	window  time.Duration
+	mu        sync.Mutex
+	windows   map[string]*rateWindow
+	window    time.Duration
+	lastSweep time.Time
 }
 
 const maxRateLimitKeys = 10000
@@ -81,7 +82,9 @@ func (r *RateLimiter) windowLocked(key string, now time.Time) (*rateWindow, bool
 		delete(r.windows, key)
 	}
 	if len(r.windows) >= maxRateLimitKeys {
-		r.sweep(now)
+		if r.lastSweep.IsZero() || now.Sub(r.lastSweep) >= r.window {
+			r.sweep(now)
+		}
 		if len(r.windows) >= maxRateLimitKeys {
 			return nil, false
 		}
@@ -98,11 +101,12 @@ func (r *RateLimiter) Reset(key string) {
 	delete(r.windows, key)
 }
 
-// sweep 清理过期窗口.
+// sweep 清理过期窗口; 仅在持有锁时调用.
 func (r *RateLimiter) sweep(now time.Time) {
 	for key, window := range r.windows {
 		if now.Sub(window.start) >= r.window {
 			delete(r.windows, key)
 		}
 	}
+	r.lastSweep = now
 }
