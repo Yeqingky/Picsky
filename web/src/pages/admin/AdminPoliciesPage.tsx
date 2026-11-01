@@ -49,8 +49,8 @@ export default function AdminPoliciesPage() {
 
   const reorderMutation = useMutation({
     mutationFn: (ids: number[]) => adminPoliciesApi.reorder(ids),
-    onMutate: async (ids) => {
-      await queryClient.cancelQueries({ queryKey: ['admin', 'policies'] });
+    onMutate: (ids) => {
+      void queryClient.cancelQueries({ queryKey: ['admin', 'policies'] });
       const previous = queryClient.getQueryData<AdminPolicy[]>(['admin', 'policies']);
       if (previous !== undefined) {
         const byId = new Map(previous.map((policy) => [policy.id, policy]));

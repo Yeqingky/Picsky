@@ -1,5 +1,6 @@
-import type { JSX, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { JSX, ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
@@ -9,6 +10,24 @@ import {
   ChevronUp,
   GripVertical,
 } from 'lucide-react';
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { cn } from '../lib/utils';
 import { EmptyState } from './States';
 import { Button } from './ui/button';
@@ -16,6 +35,86 @@ import { Checkbox } from './ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Skeleton } from './ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+
+interface DataTableRowProps {
+  rowId: string | number;
+  rowHeight: number;
+  selected: boolean;
+  children: ReactNode;
+}
+
+function StaticDataTableRow({ rowId, rowHeight, selected, children }: DataTableRowProps) {
+  return (
+    <TableRow
+      data-row-id={String(rowId)}
+      style={{ height: rowHeight }}
+      className={cn('hover:bg-muted/40', selected && 'bg-muted/60')}
+    >
+      {children}
+    </TableRow>
+  );
+}
+
+interface SortableDataTableRowProps extends DataTableRowProps {
+  disabled: boolean;
+  reorderLabel: string;
+  dragActive: boolean;
+}
+
+function SortableDataTableRow({
+  rowId,
+  rowHeight,
+  selected,
+  disabled,
+  reorderLabel,
+  dragActive,
+  children,
+}: SortableDataTableRowProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: rowId, disabled });
+
+  return (
+    <TableRow
+      ref={setNodeRef}
+      data-row-id={String(rowId)}
+      style={{
+        height: rowHeight,
+        transform: CSS.Transform.toString(transform),
+        // 释放后数据顺序与 transform 会同时归位, 关闭过渡避免非活动行先回弹再归位
+        transition: dragActive && !isDragging ? transition : undefined,
+        position: isDragging ? 'relative' : undefined,
+        zIndex: isDragging ? 1 : undefined,
+      }}
+      className={cn('hover:bg-muted/40', selected && 'bg-muted/60', isDragging && 'opacity-50')}
+    >
+      <TableCell className="w-10 pr-0">
+        <button
+          ref={setActivatorNodeRef}
+          type="button"
+          {...attributes}
+          {...listeners}
+          className={cn(
+            'text-muted-foreground hover:text-foreground inline-flex size-8 touch-none items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-50',
+            isDragging ? 'cursor-grabbing' : 'cursor-grab',
+          )}
+          aria-label={reorderLabel}
+          title={reorderLabel}
+          disabled={disabled}
+        >
+          <GripVertical className="size-4" />
+        </button>
+      </TableCell>
+      {children}
+    </TableRow>
+  );
+}
 
 export interface DataTableColumn<T> {
   /** React key */
@@ -112,6 +211,20 @@ export function DataTable<T>({
   const rawSelected = selectedIds ?? [];
   const isSelected = (row: T) => rawSelected.some((id) => String(id) === String(resolveId(row)));
 
+  const [optimisticOrder, setOptimisticOrder] = useState<(string | number)[] | null>(null);
+  useEffect(() => {
+    // 父组件数据更新后交给真实顺序接管
+    setOptimisticOrder(null);
+  }, [rows, resolveId]);
+
+  const rowById = new Map(rows.map((row) => [String(resolveId(row)), row]));
+  const orderedRows =
+    optimisticOrder === null
+      ? rows
+      : optimisticOrder
+          .map((id) => rowById.get(String(id)))
+          .filter((row): row is T => row !== undefined);
+
   const [sort, setSort] = useState<{ id: string; desc: boolean } | null>(null);
 
   const toggleSort = (column: DataTableColumn<T>) => {
@@ -125,8 +238,8 @@ export function DataTable<T>({
   const sortedRows = (() => {
     const column = sort ? columns.find((item) => item.id === sort.id) : undefined;
     const getValue = column?.sortValue;
-    if (!sort || !getValue) return rows;
-    return [...rows].sort((left, right) => {
+    if (!sort || !getValue) return orderedRows;
+    return [...orderedRows].sort((left, right) => {
       const a = getValue(left);
       const b = getValue(right);
       if (a === null || a === undefined) return b === null || b === undefined ? 0 : 1;
@@ -148,128 +261,110 @@ export function DataTable<T>({
       : sortedRows;
 
   const reorderable = onReorder !== undefined && !pagination?.serverSide;
-  const [draggingId, setDraggingId] = useState<string | number | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | number | null>(null);
-  const pressTimerRef = useRef<number | null>(null);
-  const pressRef = useRef<{
-    pointerId: number;
-    id: string | number;
-    startX: number;
-    startY: number;
-  } | null>(null);
-  const draggingRef = useRef<{ pointerId: number; id: string | number } | null>(null);
-  const dragOverRef = useRef<string | number | null>(null);
-
-  const idByKey = useMemo(
-    () => new Map(rows.map((row) => [String(resolveId(row)), resolveId(row)])),
-    [rows, resolveId],
+  const [dragActive, setDragActive] = useState(false);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  useEffect(
-    () => () => {
-      if (pressTimerRef.current !== null) window.clearTimeout(pressTimerRef.current);
-    },
-    [],
-  );
-
-  const cancelPress = useCallback(() => {
-    if (pressTimerRef.current !== null) {
-      window.clearTimeout(pressTimerRef.current);
-      pressTimerRef.current = null;
-    }
-    pressRef.current = null;
-  }, []);
-
-  const resetDrag = useCallback(() => {
-    draggingRef.current = null;
-    dragOverRef.current = null;
-    setDraggingId(null);
-    setDragOverId(null);
-  }, []);
-
-  /** 按住把手 300ms 后进入拖拽, 避免与普通点击和滚动冲突 */
-  const beginPress = (event: ReactPointerEvent<HTMLButtonElement>, id: string | number) => {
-    if (!reorderable || reorderDisabled) return;
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    pressRef.current = {
-      pointerId: event.pointerId,
-      id,
-      startX: event.clientX,
-      startY: event.clientY,
-    };
-    if (pressTimerRef.current !== null) window.clearTimeout(pressTimerRef.current);
-    pressTimerRef.current = window.setTimeout(() => {
-      pressTimerRef.current = null;
-      const pending = pressRef.current;
-      if (pending === null) return;
-      pressRef.current = null;
-      draggingRef.current = { pointerId: pending.pointerId, id: pending.id };
-      dragOverRef.current = pending.id;
-      setDraggingId(pending.id);
-      setDragOverId(pending.id);
-      // 进入拖拽后按数据顺序展示, 避免与表头排序冲突
-      setSort(null);
-    }, 300);
-  };
-
-  const movePress = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const pending = pressRef.current;
-    if (pending !== null) {
-      if (
-        Math.abs(event.clientX - pending.startX) > 8 ||
-        Math.abs(event.clientY - pending.startY) > 8
-      ) {
-        cancelPress();
-      }
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!reorderable || over === null || String(active.id) === String(over.id)) {
+      setDragActive(false);
       return;
     }
-    const active = draggingRef.current;
-    if (active === null || event.pointerId !== active.pointerId) return;
-    event.preventDefault();
-    const rowElement = document
-      .elementFromPoint(event.clientX, event.clientY)
-      ?.closest<HTMLElement>('[data-row-id]');
-    const key = rowElement?.dataset.rowId;
-    if (key === undefined) return;
-    const id = idByKey.get(key);
-    if (id === undefined || id === dragOverRef.current) return;
-    dragOverRef.current = id;
-    setDragOverId(id);
-  };
-
-  const endPress = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (pressRef.current !== null) {
-      cancelPress();
-      return;
-    }
-    const active = draggingRef.current;
-    if (active === null || event.pointerId !== active.pointerId) return;
-    const targetId = dragOverRef.current;
-    resetDrag();
-    if (targetId === null || String(targetId) === String(active.id)) return;
-
     const pageStart =
       pagination && !pagination.serverSide ? pagination.page * pagination.pageSize : 0;
     const sourceIndex = visibleRows.findIndex(
       (row) => String(resolveId(row)) === String(active.id),
     );
-    const targetIndex = visibleRows.findIndex((row) => String(resolveId(row)) === String(targetId));
-    if (sourceIndex < 0 || targetIndex < 0) return;
-    const nextPage = [...visibleRows];
-    const [moved] = nextPage.splice(sourceIndex, 1);
-    if (moved === undefined) return;
-    nextPage.splice(targetIndex, 0, moved);
+    const targetIndex = visibleRows.findIndex((row) => String(resolveId(row)) === String(over.id));
+    if (sourceIndex < 0 || targetIndex < 0) {
+      setDragActive(false);
+      return;
+    }
+    const nextPage = arrayMove(visibleRows, sourceIndex, targetIndex);
     const nextIds = rows.map((row) => resolveId(row));
     nextIds.splice(pageStart, nextPage.length, ...nextPage.map((row) => resolveId(row)));
+    flushSync(() => {
+      setDragActive(false);
+      setOptimisticOrder(nextIds);
+    });
     onReorder?.(nextIds);
   };
 
-  const cancelDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    cancelPress();
-    if (draggingRef.current?.pointerId === event.pointerId) resetDrag();
-  };
+  const reorderLabel = t('common.table.reorder');
+  const rowsContent = visibleRows.map((row) => {
+    const selected = isSelected(row);
+    const rowId = resolveId(row);
+    const cells = (
+      <>
+        {selectable && (
+          <TableCell>
+            <Checkbox
+              checked={selected}
+              onCheckedChange={() => toggleRow(row)}
+              aria-label={t('common.action.selectAll')}
+            />
+          </TableCell>
+        )}
+        {columns.map((column) => (
+          <TableCell
+            key={column.id}
+            className={cn(ALIGN_CLASS[column.align ?? 'left'], column.className)}
+          >
+            {column.cell(row)}
+          </TableCell>
+        ))}
+      </>
+    );
+    return reorderable ? (
+      <SortableDataTableRow
+        key={String(rowId)}
+        rowId={rowId}
+        rowHeight={rowHeight}
+        selected={selected}
+        disabled={reorderDisabled}
+        reorderLabel={reorderLabel}
+        dragActive={dragActive}
+      >
+        {cells}
+      </SortableDataTableRow>
+    ) : (
+      <StaticDataTableRow
+        key={String(rowId)}
+        rowId={rowId}
+        rowHeight={rowHeight}
+        selected={selected}
+      >
+        {cells}
+      </StaticDataTableRow>
+    );
+  });
+
+  const dragContext = reorderable ? (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      modifiers={[restrictToVerticalAxis]}
+      // 隐藏提示节点不能插入 tbody
+      accessibility={{ container: document.body }}
+      onDragStart={() => {
+        setSort(null);
+        setDragActive(true);
+      }}
+      onDragEnd={handleDragEnd}
+      onDragCancel={() => setDragActive(false)}
+    >
+      <SortableContext
+        items={visibleRows.map((row) => resolveId(row))}
+        strategy={verticalListSortingStrategy}
+      >
+        {rowsContent}
+      </SortableContext>
+    </DndContext>
+  ) : (
+    rowsContent
+  );
 
   const columnCount = columns.length + (selectable ? 1 : 0) + (reorderable ? 1 : 0);
   const selectedOnPage = visibleRows.filter(isSelected).length;
@@ -420,68 +515,7 @@ export function DataTable<T>({
               </TableCell>
             </TableRow>
           ) : (
-            visibleRows.map((row) => {
-              const selected = isSelected(row);
-              const rowId = resolveId(row);
-              const isDragging = String(draggingId) === String(rowId);
-              const isDragOver =
-                draggingId !== null && !isDragging && String(dragOverId) === String(rowId);
-              return (
-                <TableRow
-                  key={String(rowId)}
-                  data-row-id={String(rowId)}
-                  style={{ height: rowHeight }}
-                  className={cn(
-                    'hover:bg-muted/40',
-                    selected && 'bg-muted/60',
-                    draggingId !== null && 'select-none',
-                    isDragging && 'opacity-50',
-                    isDragOver && 'bg-muted/70',
-                  )}
-                >
-                  {reorderable && (
-                    <TableCell className="w-10 pr-0">
-                      <button
-                        type="button"
-                        className={cn(
-                          'text-muted-foreground hover:text-foreground inline-flex size-8 touch-none items-center justify-center rounded-md disabled:cursor-not-allowed disabled:opacity-50',
-                          draggingId === null ? 'cursor-grab' : 'cursor-grabbing',
-                        )}
-                        aria-label={t('common.table.reorder')}
-                        title={t('common.table.reorder')}
-                        disabled={reorderDisabled}
-                        onPointerDown={(event) => beginPress(event, rowId)}
-                        onPointerMove={movePress}
-                        onPointerUp={endPress}
-                        onPointerCancel={cancelDrag}
-                        onPointerLeave={() => {
-                          if (draggingRef.current === null) cancelPress();
-                        }}
-                      >
-                        <GripVertical className="size-4" />
-                      </button>
-                    </TableCell>
-                  )}
-                  {selectable && (
-                    <TableCell>
-                      <Checkbox
-                        checked={selected}
-                        onCheckedChange={() => toggleRow(row)}
-                        aria-label={t('common.action.selectAll')}
-                      />
-                    </TableCell>
-                  )}
-                  {columns.map((column) => (
-                    <TableCell
-                      key={column.id}
-                      className={cn(ALIGN_CLASS[column.align ?? 'left'], column.className)}
-                    >
-                      {column.cell(row)}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              );
-            })
+            dragContext
           )}
         </TableBody>
       </Table>
