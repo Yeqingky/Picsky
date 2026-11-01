@@ -42,6 +42,7 @@ Picsky/
 |   |   |-- celine/    思琳中国驱动 (固定地址, 无配置, 仅上传)
 |   |   |-- cloudreve/ Cloudreve v4 驱动 (账号密码登录, 上传)
 |   |   |-- colorful/  彩虹外链网盘驱动 (站点地址, 公开上传, 仅上传)
+|   |   |-- littlepan/ LittlePan 驱动 (站点地址, 公开上传与删除)
 |   |   |-- metaso/    秘塔驱动 (固定地址与公开前缀, 无配置, 仅上传)
 |   |   |-- oneimg/    初春图床驱动 (站点地址与 Token, 可选存储桶, 仅上传)
 |   |   |-- sobot/     Sobot 驱动 (固定租户, 无配置, 仅上传)
@@ -77,6 +78,7 @@ Picsky/
 - `metaso` 驱动固定秘塔上传地址与公开前缀, 无鉴权与配置项, 只接受图片, 由后端返回直链 (`url_from_backend`), 只声明 `upload` 能力; 请求体上限 200 MiB (209,715,200 字节), 驱动文件上限 209,715,000 字节 (扣除 multipart 开销), 超限请求不会提前返回 413, 而是收完整个请求后返回 `errCode` 500; 错误一律 HTTP 200 + `errCode`, 必须按 `errCode` 判定失败; 服务端会把图片转码为 WebP, 并把最长边超过 2048 px 的图片等比缩小到最长边 2048 px, 但图片响应仍声明 `image/png;charset=UTF-8`, 记录的尺寸, 哈希与大小按原始上传内容计算.
 - `oneimg` 驱动对接初春图床 (OneImg): `config` 保存 `endpoint` 与可选 `bucket_id`, `secrets` 保存 `token`; 上传 `POST /api/upload/images`, multipart 字段为 `images[]`, 未选择存储桶时不发送 `bucket_id`, 后端返回的 `/uploads/...` 相对路径按站点地址补全为绝对直链; 只声明 `upload`, `url_from_backend` 与 `url_prefix_override`; 策略可选配置分发域名, 配置默认域名时记录直链为默认域名拼接后端返回路径, 未配置时使用站点直链; 单文件上限与允许格式以实例 `/api/uploadConfig` 为准, 驱动不写死. 存储桶列表通过独立管理接口 `POST /admin/policies/buckets` 按需读取, 不并入策略详情或列表; 新建策略首次展开下拉框时请求, 编辑页加载后预取, 请求超时 15 秒, 站点地址或 Token 变化时清空已选存储桶; 远端查询失败只影响该字段提示, 不得阻塞页面其他数据.
 - `colorful` 驱动对接彩虹外链网盘 5.6 的公开上传接口: `config` 保存 `endpoint`; 上传 `POST {endpoint}/api.php`, multipart 字段为 `file`, 文件名取魔法路径文件名; 站点必须开启上传 API, 无需登录; 响应 `code=0` 为成功, 优先使用 `viewurl` (inline), 缺失时回退 `downurl`; 只声明 `upload` 与 `url_from_backend`, 不支持扫描, 删除与分发域名.
+- `littlepan` 驱动对接 LittlePan_v2 的公开上传接口: `config` 保存 `endpoint`; 上传 `POST {endpoint}/api.php`, multipart 字段 `file`, `format=json`, `show=0`; 无需登录; 响应 `code=0` 为成功, 优先使用 `viewurl`, 缺失时回退 `downurl`; 只声明 `upload` 与 `url_from_backend`, 不支持删除, 扫描, 状态查询与分发域名. 公开 API 的 DELETE 对已存在文件返回 5xx 且无授权模型; 前端删除依赖登录会话, CSRF 与 `$_SESSION['fileids']`, 只允许删除同一浏览器会话上传的文件, 无法由无状态 API 复用. 连接测试只上传探测图, 探测对象会保留.
 - `cloudreve` 驱动对接 Cloudreve v4: `config` 保存 `endpoint`, `directory` (默认 `/picsky`), `auto_login` (`true` / `false`, 默认 `false`), `secrets` 保存账号邮箱, 密码与 `refresh_token` / `refresh_expires` / `access_expires`; 自动登录关闭时只显示手填 Refresh Token 并调用刷新接口显示两个到期时间, 开启时显示账号密码并强制登录获取 Refresh Token, 输入框只读; 开启自动登录后 Refresh Token 刷新失败可回退账号密码登录; 账号密码登录支持 2FA; 登录成功后保存 RefreshToken 并默认启用策略, 未登录可保存但必须禁用, 列表启用开关在有令牌时才可用. 登录响应缺少 `direct_link_batch_size` 或为 0 时拒绝登录; 上传通过创建目录, 上传会话, 分片与 `PUT /file/source` 直链接口完成, 只支持本机, relay 或 remote 中转策略, 其他存储策略明确报错; 驱动声明 `upload`, `stat`, 由后端返回直链; 魔法路径默认 `{md5:2}/{md5}.{ext}`, 实际对象键为目录加魔法路径, 记录 `rel_path` 不含目录而 `object_key` 含目录.
 - 由后端下发直链 (`url_from_backend`) 的驱动不支持扫描补录, 扫描接口与列表按钮必须拒绝或禁用; 可扫描驱动在创建任务前执行可选预检 (`storage.ScanChecker`), WebDAV 使用根目录 PROPFIND 校验凭据, 预检失败不入队; 扫描任务最长运行 30 分钟.
 - 魔法路径模板必须包含内容哈希变量或单个 `{seq}`, 且必须以 `.{ext}` 结尾; `{seq}` 只允许 `rename`, 使用策略级原子计数器分配并跨输出格式共享, 已有匹配路径与扫描补录参与初始化与对账; 删除图片且外部对象确认删除后序号写入释放队列, 策略开关 `reuse_released_seq` 控制是否按先进先出复用, 关闭时仍记录; 模板变化时重置计数器并清空队列; 未使用 `{seq}` 时冲突重命名追加 `-N`, 其他生成变量在重试中固定.

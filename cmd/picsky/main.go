@@ -28,6 +28,7 @@ import (
 	_ "github.com/yeqingky/Picsky/internal/storage/celine"
 	_ "github.com/yeqingky/Picsky/internal/storage/cloudreve"
 	_ "github.com/yeqingky/Picsky/internal/storage/colorful"
+	_ "github.com/yeqingky/Picsky/internal/storage/littlepan"
 	_ "github.com/yeqingky/Picsky/internal/storage/metaso"
 	_ "github.com/yeqingky/Picsky/internal/storage/oneimg"
 	_ "github.com/yeqingky/Picsky/internal/storage/sobot"

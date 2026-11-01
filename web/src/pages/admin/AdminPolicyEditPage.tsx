@@ -90,6 +90,7 @@ const TYPE_OPTIONS = [
   'oneimg',
   'cloudreve',
   'colorful',
+  'littlepan',
 ] as const;
 
 const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
@@ -109,6 +110,7 @@ const NEW_TYPE_TRAITS: Record<
   oneimg: { capabilities: ['upload'], urlFromBackend: true, urlPrefixOverride: true },
   cloudreve: { capabilities: ['upload'], urlFromBackend: true },
   colorful: { capabilities: ['upload'], urlFromBackend: true },
+  littlepan: { capabilities: ['upload'], urlFromBackend: true },
 };
 
 /** 新建策略选择后端后自动填入的提示文字 (普通用户可见的简单限制) */
@@ -118,6 +120,7 @@ const DEFAULT_HINT_KEYS: Record<string, string> = {
   metaso: 'adminPolicies.edit.defaultHint.metaso',
   oneimg: 'adminPolicies.edit.defaultHint.oneimg',
   colorful: 'adminPolicies.edit.defaultHint.colorful',
+  littlepan: 'adminPolicies.edit.defaultHint.littlepan',
 };
 
 /** 由后端分配直链的驱动不显示路径, 域名, 冲突与扫描标签 */
@@ -131,6 +134,7 @@ const TYPE_HIDDEN_TABS: Record<string, readonly string[]> = {
   oneimg: ['path', 'conflict', 'scan'],
   cloudreve: ['urls', 'conflict', 'scan'],
   colorful: [...URL_BACKEND_HIDDEN_TABS],
+  littlepan: [...URL_BACKEND_HIDDEN_TABS],
 };
 
 const TAB_ICON_CLASS = 'size-4 shrink-0';
@@ -350,7 +354,7 @@ function FormField({
   label: string;
   labelAction?: ReactNode;
   error?: string;
-  hint?: string;
+  hint?: ReactNode;
   className?: string;
   children: ReactNode;
 }) {
@@ -728,7 +732,7 @@ export default function AdminPolicyEditPage() {
     } = {};
     if (isOneImg) {
       if (form.token.trim() !== '') secrets.token = form.token.trim();
-    } else if (!isCloudreve && form.type !== 'colorful') {
+    } else if (!isCloudreve && form.type !== 'colorful' && !isLittlePan) {
       if (form.username.trim() !== '') secrets.username = form.username.trim();
       if (form.password !== '') secrets.password = form.password;
     } else if (form.autoLogin) {
@@ -775,7 +779,7 @@ export default function AdminPolicyEditPage() {
                   endpoint: form.endpoint.trim(),
                   ...(form.bucketId !== '' ? { bucket_id: form.bucketId } : {}),
                 }
-              : form.type === 'colorful'
+              : form.type === 'colorful' || form.type === 'littlepan'
                 ? { endpoint: form.endpoint.trim() }
                 : {},
           urls: formURLPrefixOverride ? urlRows : [],
@@ -1237,6 +1241,7 @@ export default function AdminPolicyEditPage() {
   const isCloudreve = form.type === 'cloudreve';
   const isOneImg = form.type === 'oneimg';
   const isColorful = form.type === 'colorful';
+  const isLittlePan = form.type === 'littlepan';
 
   const credentialFields = (
     <>
@@ -1501,13 +1506,47 @@ export default function AdminPolicyEditPage() {
                 label={t('adminPolicies.edit.field.endpoint')}
                 error={errorFor('endpoint')}
                 hint={
-                  isCloudreve
-                    ? t('adminPolicies.edit.field.cloudreveEndpointHint')
-                    : isOneImg
-                      ? t('adminPolicies.edit.field.oneimgEndpointHint')
-                      : isColorful
-                        ? t('adminPolicies.edit.field.colorfulEndpointHint')
-                        : t('adminPolicies.edit.field.endpointHint')
+                  isCloudreve ? (
+                    <>
+                      <a
+                        className="text-primary hover:underline"
+                        href="https://github.com/netcccyun/pan"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t('adminPolicies.type.cloudreve')}
+                      </a>{' '}
+                      {t('adminPolicies.edit.field.cloudreveEndpointHintSuffix')}
+                    </>
+                  ) : isOneImg ? (
+                    t('adminPolicies.edit.field.oneimgEndpointHint')
+                  ) : isColorful ? (
+                    <>
+                      <a
+                        className="text-primary hover:underline"
+                        href="https://github.com/netcccyun/pan"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t('adminPolicies.type.colorful')}
+                      </a>{' '}
+                      {t('adminPolicies.edit.field.colorfulEndpointHintSuffix')}
+                    </>
+                  ) : isLittlePan ? (
+                    <>
+                      <a
+                        className="text-primary hover:underline"
+                        href="https://github.com/FirgtZhong/LittlePan_v2"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t('adminPolicies.type.littlepan')}
+                      </a>{' '}
+                      {t('adminPolicies.edit.field.littlepanEndpointHintSuffix')}
+                    </>
+                  ) : (
+                    t('adminPolicies.edit.field.endpointHint')
+                  )
                 }
               >
                 <Input
@@ -1528,7 +1567,9 @@ export default function AdminPolicyEditPage() {
                         ? t('adminPolicies.edit.field.oneimgEndpointPlaceholder')
                         : isColorful
                           ? t('adminPolicies.edit.field.colorfulEndpointPlaceholder')
-                          : t('adminPolicies.edit.field.endpointPlaceholder')
+                          : isLittlePan
+                            ? t('adminPolicies.edit.field.littlepanEndpointPlaceholder')
+                            : t('adminPolicies.edit.field.endpointPlaceholder')
                   }
                   aria-invalid={errorFor('endpoint') !== undefined}
                   required
@@ -1692,7 +1733,11 @@ export default function AdminPolicyEditPage() {
                   </Select>
                 </FormField>
               )}
-              {!isCloudreve && !isOneImg && form.type !== 'colorful' && credentialFields}
+              {!isCloudreve &&
+                !isOneImg &&
+                form.type !== 'colorful' &&
+                !isLittlePan &&
+                credentialFields}
               {isCloudreve && (
                 <FormField
                   id="policy-refresh-token"
