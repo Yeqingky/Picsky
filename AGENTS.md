@@ -130,7 +130,7 @@ Picsky/
 - 图库瀑布流卡片外层使用 `content-visibility: auto` 与 `contain-intrinsic-block-size`, 离屏卡片跳过布局与绘制; 不得卸载 `<img>` 节点, 避免滚动回看时重新加载.
 - 弹层遮罩不使用 `backdrop-filter` 模糊, 只使用半透明背景与透明度动画; 全屏模糊会在图库上方每帧重算, 导致抽屉展开掉帧. 图片查看器背景例外: 按要求模糊图库网页, 使用全屏 `backdrop-filter`, 不叠加图片放大背景.
 - `LazyImage` 的加载与失败状态必须绑定当前图片直链; 直链变化时应同步派生 `loading` 状态, 不依赖 effect 异步重置.
-- 所有外部链接必须使用 `components/ExternalLink.tsx`; 组件按站点隐私白名单决定策略: 未命中使用 `rel="noreferrer"` 与 `referrerPolicy="no-referrer"`, 命中使用 `rel="noopener"` 与 `referrerPolicy="strict-origin-when-cross-origin"`; 内部路由链接不使用该组件.
+- `TabsTrigger` 的指针焦点环由 `ui/tabs.tsx` 统一处理: `pointerdown` 设置 `data-pointer-focus`, `keydown` 与 `blur` 清除; 指针点击不显示焦点环, 键盘导航保留焦点环; 页面不得重复实现该逻辑.
 - 所有外部图片必须设置 `referrerPolicy`: `LazyImage` 统一处理图库卡片, 列表与预览, PhotoSwipe 在 `contentLoadImage` 事件中设置动态创建的图片; 命中 Referrer 白名单时发送 Referer, 否则 `no-referrer`.
 - `referrer_allowlist` 按行保存, 一行一个域名, 后端规范化并去重 (最多 100 个); 匹配使用域名后缀, 例如 `a.com` 命中 `x.a.com`; 留空表示全部禁止 Referer.
 - 复制 HTML 格式时必须对 URL 与文件名执行 HTML 属性上下文转义; 其他复制格式保持各自的原始格式.

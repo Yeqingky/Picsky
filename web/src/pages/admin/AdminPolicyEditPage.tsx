@@ -1366,22 +1366,7 @@ export default function AdminPolicyEditPage() {
           className="group-data-horizontal/tabs:h-auto border-border w-full flex-wrap justify-start rounded-none border-b p-0 pb-[5px]"
         >
           {visibleTabs.map((item) => (
-            <TabsTrigger
-              key={item.id}
-              value={item.id}
-              className="data-[pointer-focus=true]:focus-visible:border-transparent data-[pointer-focus=true]:focus-visible:ring-0 data-[pointer-focus=true]:focus-visible:outline-none h-9 flex-none gap-2 px-3"
-              onPointerDown={(event) => {
-                // Radix 在 mousedown 中主动 focus, 刷新后首次点击会被判定为 focus-visible;
-                // 仅对指针操作隐藏焦点环, 键盘导航仍然保留.
-                event.currentTarget.setAttribute('data-pointer-focus', 'true');
-              }}
-              onKeyDown={(event) => {
-                event.currentTarget.removeAttribute('data-pointer-focus');
-              }}
-              onBlur={(event) => {
-                event.currentTarget.removeAttribute('data-pointer-focus');
-              }}
-            >
+            <TabsTrigger key={item.id} value={item.id} className="h-9 flex-none gap-2 px-3">
               {item.icon}
               {t(`adminPolicies.edit.section.${item.labelKey}`)}
             </TabsTrigger>

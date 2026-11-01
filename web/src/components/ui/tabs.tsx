@@ -56,6 +56,9 @@ function TabsList({
 
 function TabsTrigger({
   className,
+  onPointerDown,
+  onKeyDown,
+  onBlur,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
   return (
@@ -66,8 +69,23 @@ function TabsTrigger({
         "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
         "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
         "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
+        "data-[pointer-focus=true]:focus-visible:border-transparent data-[pointer-focus=true]:focus-visible:ring-0 data-[pointer-focus=true]:focus-visible:outline-none",
         className
       )}
+      onPointerDown={(event) => {
+        // Radix 在 pointerdown 中主动 focus; 刷新后首次指针点击会误判为 focus-visible.
+        // 仅指针操作隐藏焦点环, 键盘导航仍由 onKeyDown 清除标记后保留焦点环.
+        event.currentTarget.setAttribute("data-pointer-focus", "true")
+        onPointerDown?.(event)
+      }}
+      onKeyDown={(event) => {
+        event.currentTarget.removeAttribute("data-pointer-focus")
+        onKeyDown?.(event)
+      }}
+      onBlur={(event) => {
+        event.currentTarget.removeAttribute("data-pointer-focus")
+        onBlur?.(event)
+      }}
       {...props}
     />
   )
