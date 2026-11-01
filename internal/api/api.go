@@ -3,6 +3,7 @@ package api
 
 import (
 	"log/slog"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -158,20 +159,38 @@ func (s *Server) requireAdminArea() gin.HandlerFunc {
 // maxJSONBodyBytes 是默认的 JSON 请求体上限.
 const maxJSONBodyBytes = 1 << 20
 
-// limitBody 限制非 multipart 请求体大小: 上传接口自行按策略上限限制, 其余接口使用固定上限.
+// limitBody 按路径限制请求体: 上传接口自行按策略上限限制, 其余接口使用固定上限并要求 JSON.
 func (s *Server) limitBody() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		contentType := c.GetHeader("Content-Type")
 		path := c.Request.URL.Path
-		if strings.HasPrefix(contentType, "multipart/form-data") || strings.HasSuffix(path, "/upload/base64") {
+		if isUploadPath(path) {
 			c.Next()
 			return
 		}
 		if c.Request.Body != nil {
+			if c.Request.ContentLength != 0 && !isJSONContentType(c.GetHeader("Content-Type")) {
+				err := apperr.ErrUnsupportedMediaType.WithMessage("请求体 Content-Type 必须为 application/json")
+				c.AbortWithStatusJSON(err.Status, err)
+				return
+			}
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxJSONBodyBytes)
 		}
 		c.Next()
 	}
+}
+
+// isUploadPath 判断上传接口: 只有这些路径豁免通用 JSON 请求体限制.
+func isUploadPath(path string) bool {
+	return strings.HasSuffix(path, "/upload") || strings.HasSuffix(path, "/upload/base64")
+}
+
+// isJSONContentType 判断 Content-Type 是否为 JSON 媒体类型.
+func isJSONContentType(value string) bool {
+	mediaType, _, err := mime.ParseMediaType(value)
+	if err != nil {
+		return false
+	}
+	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
 }
 
 // recoverer 捕获 panic 并返回内部错误.

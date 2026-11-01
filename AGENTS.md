@@ -90,6 +90,7 @@ Picsky/
 - 对外错误响应必须通过 `apperr.From` 归一; 所有 5xx 与 `backend_error` 对普通用户使用通用消息并移除 `Details`, 原始错误仅写服务端日志; 管理员请求 (任一管理权限) 返回未清洗的原始消息与 `Details` 便于排查; Lsky 5xx 返回实际状态码, 后端错误使用 502, 不按业务失败返回 HTTP 200.
 - Lsky 上传在 multipart 文件缓冲前完成认证, 上传权限与限流预检; 仅使用表单 `token` 的请求要求它是首个 multipart 字段, 通过认证后按用户组文件大小上限读取.
 - 原生 multipart 上传必须在解析请求体前完成认证, 上传权限与限流预检; 所有 multipart 非文件字段值每项最多 4 KiB, 最多 64 项, 字段名和值合计最多 64 KiB (Lsky `token` 计入预算).
+- 非上传接口按路径限制 JSON 请求体 1 MiB, 不按 `Content-Type` 豁免; 携带请求体的非上传接口只接受 `application/json` (含 `application/*+json`), 其他媒体类型返回 415 `unsupported_media_type`; 上传接口按路径豁免并自行限额.
 - Base64 JSON 上传必须在读取请求体前完成认证, 上传权限与限流预检, 并流式读取 `data` 直接解码到共用上传缓冲, 禁止在内存完整保留编码字符串或解码副本; 不限组仍受 2 GiB 单次硬上限约束, `data` 字段前后区段各最多 32 KiB, data URL 头最多 4 KiB, 解码缓冲遵循 `PICSKY_UPLOAD_MEMORY_LIMIT`.
 - 驱动可声明单对象体积上限 (`max_file_size_bytes`, `0` 表示不限); 上传先校验用户组单文件上限, 通过后再校验策略驱动上限, 仅策略上限触发时返回 `file_too_large` 与 "此存储策略最大支持xxMB"; Sobot 固定 50 MiB (52,428,800 字节), Celine 20,971,326 字节 (20 MiB 扣除 multipart 开销), Metaso 209,715,000 字节 (200 MiB 扣除 multipart 开销), 异次元店铺系统 10,485,760 字节 (10 MiB), WebUI 以右下角 toast 提示.
 - 驱动可声明支持的图片格式 (`formats`, 空表示不限); 上传在系统格式白名单后校验策略格式, 不匹配返回 `unsupported_format`; Celine 仅支持 `png` / `jpeg` / `gif`, 异次元店铺系统仅支持 `png` / `jpeg` / `webp`; 前端压缩对受限策略自动改用 JPEG, 未压缩原图的格式不支持时直接提示失败且不发请求.
