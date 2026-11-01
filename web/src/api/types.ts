@@ -386,6 +386,8 @@ export interface AdminPolicy {
     username?: string;
     password?: string;
     token?: string;
+    cookie?: string;
+    cookie_expires?: string;
     refresh_token?: string;
     refresh_expires?: string;
     access_expires?: string;
@@ -414,11 +416,13 @@ export interface AdminPolicyWriteRequest {
   conflict_policy: ConflictPolicy;
   reuse_released_seq?: boolean;
   config: Record<string, unknown>;
-  /** 仅写: {"username","password","refresh_token","refresh_expires","access_expires"} */
+  /** 仅写: {"username","password","token","cookie","cookie_expires","refresh_token","refresh_expires","access_expires"} */
   secrets?: {
     username?: string;
     password?: string;
     token?: string;
+    cookie?: string;
+    cookie_expires?: string;
     refresh_token?: string;
     refresh_expires?: string;
     access_expires?: string;
@@ -457,6 +461,25 @@ export interface CloudreveLoginResult {
   refresh_token?: string;
   refresh_expires?: string;
   access_expires?: string;
+}
+
+export interface AcgFakaLoginRequest {
+  endpoint: string;
+  username: string;
+  password: string;
+}
+
+export interface AcgFakaLoginResult {
+  status: 'ok' | '2fa';
+  session_cookie?: string;
+  cookie?: string;
+  cookie_expires?: string;
+}
+
+export interface AcgFakaTwoFactorRequest {
+  endpoint: string;
+  session_cookie: string;
+  otp: string;
 }
 
 export interface CloudreveRefreshRequest {

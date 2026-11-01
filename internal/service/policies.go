@@ -374,6 +374,23 @@ func (p *Policies) Resolve(principal *Principal, requestedID *int64) (*model.Sto
 	return &allowed[0], nil
 }
 
+// policySecretValue 读取入参或已有策略中的凭据值; 入参优先.
+func (p *Policies) policySecretValue(in PolicyInput, policy *model.StoragePolicy, name string) (string, error) {
+	if in.Secrets != nil {
+		if raw, ok := in.Secrets[name]; ok {
+			return raw, nil
+		}
+	}
+	if policy == nil {
+		return "", nil
+	}
+	secrets, err := p.SecretsMap(policy)
+	if err != nil {
+		return "", apperr.ErrInternal.WithMessage(err.Error())
+	}
+	return secrets[name], nil
+}
+
 // cloudreveTokenPresent 判断入参或已有策略中是否保存了 Cloudreve 登录令牌.
 func (p *Policies) cloudreveTokenPresent(in PolicyInput, policy *model.StoragePolicy) (bool, error) {
 	if in.Secrets != nil {
@@ -489,6 +506,33 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 			id, err := strconv.Atoi(bucketID)
 			if err != nil || id <= 0 {
 				return apperr.ErrInvalidRequest.WithMessage("存储桶 ID 必须是正整数")
+			}
+		}
+	}
+	if in.Type == "acgfaka" {
+		if in.Config == nil {
+			in.Config = map[string]string{}
+		}
+		switch strings.TrimSpace(in.Config["auto_login"]) {
+		case "", "true", "false":
+		default:
+			return apperr.ErrInvalidRequest.WithMessage("异次元店铺系统自动登录配置无效")
+		}
+		if strings.EqualFold(strings.TrimSpace(in.Config["auto_login"]), "true") {
+			for _, field := range []struct {
+				name    string
+				message string
+			}{
+				{"username", "异次元店铺系统自动登录需要账号"},
+				{"password", "异次元店铺系统自动登录需要密码"},
+			} {
+				value, err := p.policySecretValue(*in, policy, field.name)
+				if err != nil {
+					return err
+				}
+				if strings.TrimSpace(value) == "" {
+					return apperr.ErrInvalidRequest.WithMessage(field.message)
+				}
 			}
 		}
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/yeqingky/Picsky/migrations"
 
 	// 注册存储驱动.
+	_ "github.com/yeqingky/Picsky/internal/storage/acgfaka"
 	_ "github.com/yeqingky/Picsky/internal/storage/celine"
 	_ "github.com/yeqingky/Picsky/internal/storage/cloudreve"
 	_ "github.com/yeqingky/Picsky/internal/storage/colorful"

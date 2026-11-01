@@ -1,5 +1,8 @@
 import { ApiError, api } from './client';
 import type {
+  AcgFakaLoginRequest,
+  AcgFakaLoginResult,
+  AcgFakaTwoFactorRequest,
   AdminGroup,
   AdminGroupWriteRequest,
   AdminPolicy,
@@ -110,6 +113,17 @@ export const adminPoliciesApi = {
 
   cloudreveRefresh: (body: CloudreveRefreshRequest) =>
     api.post<CloudreveLoginResult>('/admin/policies/cloudreve/refresh', body).then((r) => r.data),
+
+  acgfakaLogin: (body: AcgFakaLoginRequest) =>
+    api.post<AcgFakaLoginResult>('/admin/policies/acgfaka/login', body).then((r) => r.data),
+
+  acgfakaTwoFactor: (body: AcgFakaTwoFactorRequest) =>
+    api.post<AcgFakaLoginResult>('/admin/policies/acgfaka/login/totp', body).then((r) => r.data),
+
+  acgfakaSession: (body: { endpoint: string; cookie: string }) =>
+    api
+      .post<{ cookie_expires: string }>('/admin/policies/acgfaka/session', body)
+      .then((r) => r.data),
 };
 
 export const adminSettingsApi = {

@@ -39,6 +39,7 @@ Picsky/
 |   |-- service/    业务逻辑 (上传, 图库, 策略, 用户组, 设置, 维护队列)
 |   |-- spool/      上传缓冲 (内存 / 临时文件)
 |   |-- storage/    适配器接口, 能力声明, 魔法路径渲染
+|   |   |-- acgfaka/   异次元店铺系统驱动 (站点地址, 手动 Cookie 或账号登录, 仅上传)
 |   |   |-- celine/    思琳中国驱动 (固定地址, 无配置, 仅上传)
 |   |   |-- cloudreve/ Cloudreve v4 驱动 (账号密码登录, 上传)
 |   |   |-- colorful/  彩虹外链网盘驱动 (站点地址, 公开上传, 仅上传)
@@ -79,6 +80,8 @@ Picsky/
 - `oneimg` 驱动对接初春图床 (OneImg): `config` 保存 `endpoint` 与可选 `bucket_id`, `secrets` 保存 `token`; 上传 `POST /api/upload/images`, multipart 字段为 `images[]`, 未选择存储桶时不发送 `bucket_id`, 后端返回的 `/uploads/...` 相对路径按站点地址补全为绝对直链; 声明 `upload`, `thumbnail`, `url_from_backend` 与 `url_prefix_override`; 策略可选配置分发域名, 配置默认域名时记录直链为默认域名拼接后端返回路径, 未配置时使用站点直链; 缩略图直链由原图同目录追加 `thumbnails/` 得到, 图库卡片与列表使用该地址, 查看器与详情使用原图; 初春 API 删除权限尚未完善, 当前不声明删除能力; 单文件上限与允许格式以实例 `/api/uploadConfig` 为准, 驱动不写死. 存储桶列表通过独立管理接口 `POST /admin/policies/buckets` 按需读取, 不并入策略详情或列表; 新建策略首次展开下拉框时请求, 编辑页加载后预取, 请求超时 15 秒, 站点地址或 Token 变化时清空已选存储桶; 远端查询失败只影响该字段提示, 不得阻塞页面其他数据.
 - `colorful` 驱动对接彩虹外链网盘 5.6 的公开上传接口: `config` 保存 `endpoint`; 上传 `POST {endpoint}/api.php`, multipart 字段为 `file`, 文件名取魔法路径文件名; 站点必须开启上传 API, 无需登录; 响应 `code=0` 为成功, 优先使用 `viewurl` (inline), 缺失时回退 `downurl`; 只声明 `upload` 与 `url_from_backend`, 不支持扫描, 删除与分发域名.
 - `littlepan` 驱动对接 LittlePan_v2 的公开上传接口: `config` 保存 `endpoint`; 上传 `POST {endpoint}/api.php`, multipart 字段 `file`, `format=json`, `show=0`; 无需登录; 响应 `code=0` 为成功, 优先使用 `viewurl`, 缺失时回退 `downurl`; 只声明 `upload` 与 `url_from_backend`, 不支持删除, 扫描, 状态查询与分发域名. 公开 API 的 DELETE 对已存在文件返回 5xx 且无授权模型; 前端删除依赖登录会话, CSRF 与 `$_SESSION['fileids']`, 只允许删除同一浏览器会话上传的文件, 无法由无状态 API 复用. 连接测试只上传探测图, 探测对象会保留.
+- `acgfaka` 驱动对接异次元店铺系统 (acg-faka): `config` 保存 `endpoint` 与 `auto_login` (`true` / `false`, 默认 `false`), `secrets` 保存 `cookie` (USER_SESSION 原值或完整 Cookie), 自动登录时另存 `username` / `password` / `cookie_expires`; 上传 `POST {endpoint}/user/api/ticket/upload?mime=image`, multipart 字段 `file`, 必须携带与站点同主机的 `Referer` 和 Cookie; 响应 `code=200` 时 `data.url` / `data.path` 为站点内相对路径, 驱动按站点地址补全为绝对直链; 只声明 `upload` 与 `url_from_backend`, 不支持扫描, 删除, 状态查询与分发域名. 单文件上限 10 MiB (10,485,760 字节), 仅支持 PNG / JPEG / WebP.
+- `acgfaka` 自动登录使用 `POST /user/api/authentication/login` (账号支持用户名, 邮箱或手机号), 支持 `42001` 两步验证并通过 `POST /user/api/authentication/totp` 完成; 登录后调用 `POST /user/api/security/deviceSessions` 读取 `current=true` 的 `expires_time` 作为 Cookie 到期时间. 站点必须关闭登录人机验证, 否则只能手动填写 Cookie. 上传返回会话失效时使用保存的账号密码重新登录并重试一次, 刷新后的 Cookie 在进程内缓存供后续请求复用; 两步验证账号在 Cookie 过期后无法自动刷新, 需重新登录. 管理后台手动模式提供 Cookie 验证按钮, 自动登录模式登录后 Cookie 输入框只读.
 - `cloudreve` 驱动对接 Cloudreve v4: `config` 保存 `endpoint`, `directory` (默认 `/picsky`), `auto_login` (`true` / `false`, 默认 `false`), `secrets` 保存账号邮箱, 密码与 `refresh_token` / `refresh_expires` / `access_expires`; 自动登录关闭时只显示手填 Refresh Token 并调用刷新接口显示两个到期时间, 开启时显示账号密码并强制登录获取 Refresh Token, 输入框只读; 开启自动登录后 Refresh Token 刷新失败可回退账号密码登录; 账号密码登录支持 2FA; 登录成功后保存 RefreshToken 并默认启用策略, 未登录可保存但必须禁用, 列表启用开关在有令牌时才可用. 登录响应缺少 `direct_link_batch_size` 或为 0 时拒绝登录; 上传通过创建目录, 上传会话, 分片与 `PUT /file/source` 直链接口完成, 只支持本机, relay 或 remote 中转策略, 其他存储策略明确报错; 驱动声明 `upload`, `stat`, `delete`, 由后端返回直链; 删除通过 `DELETE /file` 将对象移入 Cloudreve 回收站 (`skip_soft_delete: false`), 文件不存在或已在回收站视为已删除, 不做物理删除; 魔法路径默认 `{md5:2}/{md5}.{ext}`, 实际对象键为目录加魔法路径, 记录 `rel_path` 不含目录而 `object_key` 含目录.
 - 由后端下发直链 (`url_from_backend`) 的驱动不支持扫描补录, 扫描接口与列表按钮必须拒绝或禁用; 可扫描驱动在创建任务前执行可选预检 (`storage.ScanChecker`), WebDAV 使用根目录 PROPFIND 校验凭据, 预检失败不入队; 扫描任务最长运行 30 分钟.
 - 魔法路径模板必须包含内容哈希变量或单个 `{seq}`, 且必须以 `.{ext}` 结尾; `{seq}` 只允许 `rename`, 使用策略级原子计数器分配并跨输出格式共享, 已有匹配路径与扫描补录参与初始化与对账; 删除图片且外部对象确认删除后序号写入释放队列, 策略开关 `reuse_released_seq` 控制是否按先进先出复用, 关闭时仍记录; 模板变化时重置计数器并清空队列; 未使用 `{seq}` 时冲突重命名追加 `-N`, 其他生成变量在重试中固定.
@@ -88,8 +91,8 @@ Picsky/
 - Lsky 上传在 multipart 文件缓冲前完成认证, 上传权限与限流预检; 仅使用表单 `token` 的请求要求它是首个 multipart 字段, 通过认证后按用户组文件大小上限读取.
 - 原生 multipart 上传必须在解析请求体前完成认证, 上传权限与限流预检; 所有 multipart 非文件字段值每项最多 4 KiB, 最多 64 项, 字段名和值合计最多 64 KiB (Lsky `token` 计入预算).
 - Base64 JSON 上传必须在读取请求体前完成认证, 上传权限与限流预检, 并流式读取 `data` 直接解码到共用上传缓冲, 禁止在内存完整保留编码字符串或解码副本; 不限组仍受 2 GiB 单次硬上限约束, `data` 字段前后区段各最多 32 KiB, data URL 头最多 4 KiB, 解码缓冲遵循 `PICSKY_UPLOAD_MEMORY_LIMIT`.
-- 驱动可声明单对象体积上限 (`max_file_size_bytes`, `0` 表示不限); 上传先校验用户组单文件上限, 通过后再校验策略驱动上限, 仅策略上限触发时返回 `file_too_large` 与 "此存储策略最大支持xxMB"; Sobot 固定 50 MiB (52,428,800 字节), Celine 20,971,326 字节 (20 MiB 扣除 multipart 开销), Metaso 209,715,000 字节 (200 MiB 扣除 multipart 开销), WebUI 以右下角 toast 提示.
-- 驱动可声明支持的图片格式 (`formats`, 空表示不限); 上传在系统格式白名单后校验策略格式, 不匹配返回 `unsupported_format`; Celine 仅支持 `png` / `jpeg` / `gif`; 前端压缩对受限策略自动改用 JPEG, 未压缩原图的格式不支持时直接提示失败且不发请求.
+- 驱动可声明单对象体积上限 (`max_file_size_bytes`, `0` 表示不限); 上传先校验用户组单文件上限, 通过后再校验策略驱动上限, 仅策略上限触发时返回 `file_too_large` 与 "此存储策略最大支持xxMB"; Sobot 固定 50 MiB (52,428,800 字节), Celine 20,971,326 字节 (20 MiB 扣除 multipart 开销), Metaso 209,715,000 字节 (200 MiB 扣除 multipart 开销), 异次元店铺系统 10,485,760 字节 (10 MiB), WebUI 以右下角 toast 提示.
+- 驱动可声明支持的图片格式 (`formats`, 空表示不限); 上传在系统格式白名单后校验策略格式, 不匹配返回 `unsupported_format`; Celine 仅支持 `png` / `jpeg` / `gif`, 异次元店铺系统仅支持 `png` / `jpeg` / `webp`; 前端压缩对受限策略自动改用 JPEG, 未压缩原图的格式不支持时直接提示失败且不发请求.
 - 未设置 `PICSKY_TEMP_DIR` 时, spool 可将处理期溢出文件写入系统临时目录, 但 `CleanupStale` 必须跳过目录扫描; 仅对应用专用且隔离的临时目录执行启动残留清理.
 - `/upload/check` 必须按当前 `user_id` 查询记录; 相同哈希仅由其他用户持有时返回 `exists: false` 且不包含记录 ID, URL 或大小; `/upload` 跨用户复用只返回当前用户自己的新记录.
 - 注册页启用注册邮箱域名白名单时, 邮箱字段由左侧本地部分输入框与右侧域名下拉框组成, 提交时拼接为完整邮箱; 未启用白名单时为完整邮箱输入框; 白名单域名由 `GET /site` 的 `registration_email_domains` 提供.

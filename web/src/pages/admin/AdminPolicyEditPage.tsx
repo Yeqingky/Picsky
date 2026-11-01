@@ -28,6 +28,7 @@ import { adminPoliciesApi, adminSettingsApi } from '../../api';
 import type {
   AdminPolicy,
   AdminPolicyWriteRequest,
+  AcgFakaLoginResult,
   CloudreveLoginResult,
   ConflictPolicy,
   PolicyScanRequest,
@@ -90,6 +91,7 @@ const TYPE_OPTIONS = [
   'metaso',
   'oneimg',
   'cloudreve',
+  'acgfaka',
   'colorful',
   'littlepan',
 ] as const;
@@ -114,6 +116,7 @@ const NEW_TYPE_TRAITS: Record<
     urlPrefixOverride: true,
   },
   cloudreve: { capabilities: ['upload', 'stat', 'delete'], urlFromBackend: true },
+  acgfaka: { capabilities: ['upload'], urlFromBackend: true },
   colorful: { capabilities: ['upload'], urlFromBackend: true },
   littlepan: { capabilities: ['upload'], urlFromBackend: true },
 };
@@ -126,6 +129,7 @@ const DEFAULT_HINT_KEYS: Record<string, string> = {
   oneimg: 'adminPolicies.edit.defaultHint.oneimg',
   colorful: 'adminPolicies.edit.defaultHint.colorful',
   littlepan: 'adminPolicies.edit.defaultHint.littlepan',
+  acgfaka: 'adminPolicies.edit.defaultHint.acgfaka',
 };
 
 /** 由后端分配直链的驱动不显示路径, 域名, 冲突与扫描标签 */
@@ -138,6 +142,7 @@ const TYPE_HIDDEN_TABS: Record<string, readonly string[]> = {
   metaso: ['connection', ...URL_BACKEND_HIDDEN_TABS],
   oneimg: ['path', 'conflict', 'scan'],
   cloudreve: ['urls', 'conflict', 'scan'],
+  acgfaka: [...URL_BACKEND_HIDDEN_TABS],
   colorful: [...URL_BACKEND_HIDDEN_TABS],
   littlepan: [...URL_BACKEND_HIDDEN_TABS],
 };
@@ -221,6 +226,9 @@ interface FormState {
   cloudreveRefreshToken: string;
   cloudreveRefreshExpires: string;
   cloudreveAccessExpires: string;
+  acgfakaCookie: string;
+  acgfakaCookieExpires: string;
+  acgfakaLoggedIn: boolean;
   pathTemplate: string;
   conflictPolicy: ConflictPolicy;
   reuseReleasedSeq: boolean;
@@ -273,6 +281,9 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     cloudreveRefreshToken: policy.secrets?.refresh_token ?? '',
     cloudreveRefreshExpires: policy.secrets?.refresh_expires ?? '',
     cloudreveAccessExpires: policy.secrets?.access_expires ?? '',
+    acgfakaCookie: policy.secrets?.cookie ?? '',
+    acgfakaCookieExpires: policy.secrets?.cookie_expires ?? '',
+    acgfakaLoggedIn: (policy.secrets?.cookie ?? '') !== '',
     pathTemplate: policy.path_template,
     conflictPolicy: policy.conflict_policy,
     reuseReleasedSeq: policy.reuse_released_seq,
@@ -487,6 +498,11 @@ export default function AdminPolicyEditPage() {
   const [dryRun, setDryRun] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showRefreshToken, setShowRefreshToken] = useState(false);
+  const [showCookie, setShowCookie] = useState(false);
+  const [acgfakaTwoFactorOpen, setAcgfakaTwoFactorOpen] = useState(false);
+  const [acgfakaSessionCookie, setAcgfakaSessionCookie] = useState('');
+  const [acgfakaTwoFactorCode, setAcgfakaTwoFactorCode] = useState('');
+  const [acgfakaTwoFactorError, setAcgfakaTwoFactorError] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [twoFactorOpen, setTwoFactorOpen] = useState(false);
@@ -580,6 +596,9 @@ export default function AdminPolicyEditPage() {
       cloudreveRefreshToken: '',
       cloudreveRefreshExpires: '',
       cloudreveAccessExpires: '',
+      acgfakaCookie: '',
+      acgfakaCookieExpires: '',
+      acgfakaLoggedIn: false,
       pathTemplate:
         typeof rawTemplate === 'string' && rawTemplate.trim() !== ''
           ? rawTemplate
@@ -644,7 +663,10 @@ export default function AdminPolicyEditPage() {
     }
 
     if (
-      (!formURLFromBackend || form.type === 'cloudreve' || form.type === 'oneimg') &&
+      (!formURLFromBackend ||
+        form.type === 'cloudreve' ||
+        form.type === 'oneimg' ||
+        form.type === 'acgfaka') &&
       form.endpoint.trim() === ''
     ) {
       next.endpoint = t('adminPolicies.edit.error.endpointRequired');
@@ -652,6 +674,22 @@ export default function AdminPolicyEditPage() {
 
     if (form.type === 'oneimg' && form.token.trim() === '') {
       next.token = t('adminPolicies.edit.error.tokenRequired');
+    }
+
+    if (form.type === 'acgfaka') {
+      if (form.autoLogin) {
+        if (!form.acgfakaLoggedIn) {
+          next.acgfakaCookie = t('adminPolicies.edit.error.acgfakaCookieRequired');
+        }
+        if (form.username.trim() === '') {
+          next.username = t('adminPolicies.edit.error.acgfakaUsernameRequired');
+        }
+        if (form.password === '') {
+          next.password = t('adminPolicies.edit.error.acgfakaPasswordRequired');
+        }
+      } else if (form.acgfakaCookie.trim() === '') {
+        next.acgfakaCookie = t('adminPolicies.edit.error.acgfakaCookieRequired');
+      }
     }
 
     if (form.type === 'cloudreve' && form.autoLogin && !form.cloudreveLoggedIn) {
@@ -726,17 +764,31 @@ export default function AdminPolicyEditPage() {
 
     const isCloudreve = form.type === 'cloudreve';
     const isOneImg = form.type === 'oneimg';
+    const isAcgFaka = form.type === 'acgfaka';
 
     const secrets: {
       username?: string;
       password?: string;
       token?: string;
+      cookie?: string;
+      cookie_expires?: string;
       refresh_token?: string;
       refresh_expires?: string;
       access_expires?: string;
     } = {};
     if (isOneImg) {
       if (form.token.trim() !== '') secrets.token = form.token.trim();
+    } else if (isAcgFaka) {
+      secrets.cookie = form.acgfakaCookie.trim();
+      secrets.cookie_expires = form.acgfakaCookieExpires;
+      if (form.autoLogin) {
+        secrets.username = form.username.trim();
+        secrets.password = form.password;
+      } else {
+        // 手动 Cookie 模式不保存账号密码.
+        secrets.username = '';
+        secrets.password = '';
+      }
     } else if (!isCloudreve && form.type !== 'colorful' && !isLittlePan) {
       if (form.username.trim() !== '') secrets.username = form.username.trim();
       if (form.password !== '') secrets.password = form.password;
@@ -784,9 +836,14 @@ export default function AdminPolicyEditPage() {
                   endpoint: form.endpoint.trim(),
                   ...(form.bucketId !== '' ? { bucket_id: form.bucketId } : {}),
                 }
-              : form.type === 'colorful' || form.type === 'littlepan'
-                ? { endpoint: form.endpoint.trim() }
-                : {},
+              : isAcgFaka
+                ? {
+                    endpoint: form.endpoint.trim(),
+                    auto_login: form.autoLogin ? 'true' : 'false',
+                  }
+                : form.type === 'colorful' || form.type === 'littlepan'
+                  ? { endpoint: form.endpoint.trim() }
+                  : {},
           urls: formURLPrefixOverride ? urlRows : [],
         }
       : {
@@ -800,7 +857,10 @@ export default function AdminPolicyEditPage() {
           config: { endpoint: form.endpoint.trim() },
           urls: urlRows,
         };
-    if ((!formURLFromBackend || isCloudreve || isOneImg) && Object.keys(secrets).length > 0) {
+    if (
+      (!formURLFromBackend || isCloudreve || isOneImg || isAcgFaka) &&
+      Object.keys(secrets).length > 0
+    ) {
       body.secrets = secrets;
     }
     saveMutation.mutate(body);
@@ -916,6 +976,92 @@ export default function AdminPolicyEditPage() {
     );
   };
 
+  const applyAcgFakaLogin = (result: AcgFakaLoginResult): boolean => {
+    if (result.status !== 'ok' || result.cookie === undefined || result.cookie === '') {
+      toast.error(t('adminPolicies.edit.login.failed'));
+      return false;
+    }
+    setForm((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            acgfakaLoggedIn: true,
+            acgfakaCookie: result.cookie ?? '',
+            acgfakaCookieExpires: result.cookie_expires ?? '',
+          },
+    );
+    return true;
+  };
+
+  const acgfakaLoginMutation = useMutation({
+    mutationFn: () => {
+      if (form === null) throw new Error(t('adminPolicies.edit.login.formNotReady'));
+      return adminPoliciesApi.acgfakaLogin({
+        endpoint: form.endpoint.trim(),
+        username: form.username.trim(),
+        password: form.password,
+      });
+    },
+    onSuccess: (result) => {
+      if (result.status === '2fa') {
+        if (result.session_cookie === undefined || result.session_cookie === '') {
+          toast.error(t('adminPolicies.edit.login.failed'));
+          return;
+        }
+        setAcgfakaSessionCookie(result.session_cookie);
+        setAcgfakaTwoFactorCode('');
+        setAcgfakaTwoFactorError(null);
+        setAcgfakaTwoFactorOpen(true);
+        return;
+      }
+      if (applyAcgFakaLogin(result)) {
+        toast.success(t('adminPolicies.edit.login.success'));
+      }
+    },
+  });
+
+  const acgfakaTwoFactorMutation = useMutation({
+    mutationFn: (vars: { sessionCookie: string; otp: string }) =>
+      adminPoliciesApi.acgfakaTwoFactor({
+        endpoint: form?.endpoint.trim() ?? '',
+        session_cookie: vars.sessionCookie,
+        otp: vars.otp,
+      }),
+    onSuccess: (result) => {
+      if (!applyAcgFakaLogin(result)) return;
+      setAcgfakaTwoFactorOpen(false);
+      setAcgfakaTwoFactorCode('');
+      setAcgfakaTwoFactorError(null);
+      toast.success(t('adminPolicies.edit.login.success'));
+    },
+    onError: (error) => {
+      setAcgfakaTwoFactorError(errorText(error, t('adminPolicies.edit.login.twoFactorFailed')));
+    },
+  });
+
+  const acgfakaSessionMutation = useMutation({
+    mutationFn: () => {
+      if (form === null) throw new Error(t('adminPolicies.edit.login.formNotReady'));
+      if (form.endpoint.trim() === '' || form.acgfakaCookie.trim() === '') {
+        throw new Error(t('adminPolicies.edit.error.acgfakaCookieRequired'));
+      }
+      return adminPoliciesApi.acgfakaSession({
+        endpoint: form.endpoint.trim(),
+        cookie: form.acgfakaCookie.trim(),
+      });
+    },
+    onSuccess: (result) => {
+      setForm((current) =>
+        current === null ? current : { ...current, acgfakaCookieExpires: result.cookie_expires },
+      );
+      toast.success(t('adminPolicies.edit.login.acgfakaCookieValid'));
+    },
+    onError: (error) => {
+      toast.error(errorText(error, t('adminPolicies.edit.login.acgfakaCookieFailed')));
+    },
+  });
+
   const scanMutation = useMutation({
     mutationFn: (vars: { targetId: number; body: PolicyScanRequest }) =>
       adminPoliciesApi.scan(vars.targetId, vars.body),
@@ -966,6 +1112,19 @@ export default function AdminPolicyEditPage() {
           },
     );
   }, []);
+  const updateAcgFakaCredentials = useCallback((patch: Partial<FormState>) => {
+    setForm((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            ...patch,
+            acgfakaLoggedIn: false,
+            acgfakaCookie: '',
+            acgfakaCookieExpires: '',
+          },
+    );
+  }, []);
   const driverDefaultHint = (type: string) => {
     const key = DEFAULT_HINT_KEYS[type];
     return key === undefined ? '' : t(key);
@@ -999,6 +1158,9 @@ export default function AdminPolicyEditPage() {
         cloudreveRefreshToken: '',
         cloudreveRefreshExpires: '',
         cloudreveAccessExpires: '',
+        acgfakaCookie: '',
+        acgfakaCookieExpires: '',
+        acgfakaLoggedIn: false,
       };
     });
   };
@@ -1027,6 +1189,8 @@ export default function AdminPolicyEditPage() {
               autoLogin: form.autoLogin,
               username: form.username,
               password: form.password,
+              cookie: form.acgfakaCookie,
+              cookieExpires: form.acgfakaCookieExpires,
               cloudreveRefreshToken: form.cloudreveRefreshToken,
               cloudreveRefreshExpires: form.cloudreveRefreshExpires,
               cloudreveAccessExpires: form.cloudreveAccessExpires,
@@ -1079,8 +1243,18 @@ export default function AdminPolicyEditPage() {
         next.cloudreveRefreshToken = '';
         next.cloudreveRefreshExpires = '';
         next.cloudreveAccessExpires = '';
+        next.acgfakaLoggedIn = false;
+        next.acgfakaCookie = '';
+        next.acgfakaCookieExpires = '';
       }
       if (patch.token !== undefined) next.token = patch.token;
+      if (patch.cookie !== undefined) {
+        next.acgfakaCookie = patch.cookie;
+        next.acgfakaLoggedIn = patch.cookie.trim() !== '';
+        next.acgfakaCookieExpires = patch.cookieExpires ?? '';
+      } else if (patch.cookieExpires !== undefined) {
+        next.acgfakaCookieExpires = patch.cookieExpires;
+      }
       if (patch.bucketId !== undefined) next.bucketId = patch.bucketId;
       if (patch.directory !== undefined) next.directory = patch.directory;
       if (patch.autoLogin !== undefined) next.autoLogin = patch.autoLogin;
@@ -1245,6 +1419,7 @@ export default function AdminPolicyEditPage() {
 
   const isCloudreve = form.type === 'cloudreve';
   const isOneImg = form.type === 'oneimg';
+  const isAcgFaka = form.type === 'acgfaka';
   const isColorful = form.type === 'colorful';
   const isLittlePan = form.type === 'littlepan';
 
@@ -1505,6 +1680,13 @@ export default function AdminPolicyEditPage() {
                     </>
                   ) : isOneImg ? (
                     t('adminPolicies.edit.field.oneimgEndpointHint')
+                  ) : isAcgFaka ? (
+                    <>
+                      <ExternalLink href="https://github.com/lizhipay/acg-faka">
+                        {t('adminPolicies.type.acgfaka')}
+                      </ExternalLink>{' '}
+                      {t('adminPolicies.edit.field.acgfakaEndpointHintSuffix')}
+                    </>
                   ) : isColorful ? (
                     <>
                       <ExternalLink href="https://github.com/netcccyun/pan">
@@ -1530,21 +1712,25 @@ export default function AdminPolicyEditPage() {
                   onChange={(event) =>
                     isCloudreve
                       ? updateCloudreveCredentials({ endpoint: event.target.value })
-                      : updateForm({
-                          endpoint: event.target.value,
-                          ...(isOneImg ? { bucketId: '' } : {}),
-                        })
+                      : isAcgFaka
+                        ? updateAcgFakaCredentials({ endpoint: event.target.value })
+                        : updateForm({
+                            endpoint: event.target.value,
+                            ...(isOneImg ? { bucketId: '' } : {}),
+                          })
                   }
                   placeholder={
                     isCloudreve
                       ? t('adminPolicies.edit.field.cloudreveEndpointPlaceholder')
                       : isOneImg
                         ? t('adminPolicies.edit.field.oneimgEndpointPlaceholder')
-                        : isColorful
-                          ? t('adminPolicies.edit.field.colorfulEndpointPlaceholder')
-                          : isLittlePan
-                            ? t('adminPolicies.edit.field.littlepanEndpointPlaceholder')
-                            : t('adminPolicies.edit.field.endpointPlaceholder')
+                        : isAcgFaka
+                          ? t('adminPolicies.edit.field.acgfakaEndpointPlaceholder')
+                          : isColorful
+                            ? t('adminPolicies.edit.field.colorfulEndpointPlaceholder')
+                            : isLittlePan
+                              ? t('adminPolicies.edit.field.littlepanEndpointPlaceholder')
+                              : t('adminPolicies.edit.field.endpointPlaceholder')
                   }
                   aria-invalid={errorFor('endpoint') !== undefined}
                   required
@@ -1636,6 +1822,194 @@ export default function AdminPolicyEditPage() {
                   </div>
                 </>
               )}
+              {isAcgFaka && (
+                <>
+                  <div className="flex flex-col rounded-lg border p-4">
+                    <SwitchRow
+                      id="policy-acgfaka-auto-login"
+                      label={t('adminPolicies.edit.field.autoLogin')}
+                      hint={t('adminPolicies.edit.field.acgfakaAutoLoginHint')}
+                      checked={form.autoLogin}
+                      onCheckedChange={(checked) => {
+                        acgfakaLoginMutation.reset();
+                        acgfakaSessionMutation.reset();
+                        updateForm(
+                          checked
+                            ? {
+                                autoLogin: true,
+                                acgfakaLoggedIn: false,
+                                acgfakaCookie: '',
+                                acgfakaCookieExpires: '',
+                              }
+                            : { autoLogin: false },
+                        );
+                      }}
+                    />
+                    <div
+                      className={cn(
+                        'grid transition-[grid-template-rows,opacity] duration-300 ease-out',
+                        form.autoLogin
+                          ? 'grid-rows-[1fr] opacity-100'
+                          : 'grid-rows-[0fr] opacity-0',
+                      )}
+                      aria-hidden={!form.autoLogin}
+                      inert={!form.autoLogin}
+                    >
+                      <div className="min-h-0 overflow-hidden">
+                        <div className="flex flex-col gap-4 pt-4">
+                          <Alert className="border-transparent bg-warning/10 text-warning">
+                            <AlertDescription>
+                              {t('adminPolicies.edit.field.acgfakaCaptchaHint')}
+                            </AlertDescription>
+                          </Alert>
+                          {acgfakaLoginMutation.isError && (
+                            <Alert variant="destructive">
+                              <AlertDescription>
+                                {errorText(
+                                  acgfakaLoginMutation.error,
+                                  t('adminPolicies.edit.login.failed'),
+                                )}
+                              </AlertDescription>
+                            </Alert>
+                          )}
+                          <FormField
+                            id="policy-acgfaka-username"
+                            label={t('adminPolicies.edit.field.acgfakaUsername')}
+                            error={errorFor('username')}
+                            hint={t('adminPolicies.edit.field.acgfakaUsernameHint')}
+                          >
+                            <Input
+                              id="policy-acgfaka-username"
+                              value={form.username}
+                              onChange={(event) =>
+                                updateAcgFakaCredentials({ username: event.target.value })
+                              }
+                              autoComplete="username"
+                            />
+                          </FormField>
+                          <FormField
+                            id="policy-acgfaka-password"
+                            label={t('adminPolicies.edit.field.password')}
+                            error={errorFor('password')}
+                            hint={t('adminPolicies.edit.field.acgfakaPasswordHint')}
+                          >
+                            <div className="relative">
+                              <Input
+                                id="policy-acgfaka-password"
+                                type={showPassword ? 'text' : 'password'}
+                                value={form.password}
+                                onChange={(event) =>
+                                  updateAcgFakaCredentials({ password: event.target.value })
+                                }
+                                autoComplete="current-password"
+                                className="pr-9"
+                              />
+                              <button
+                                type="button"
+                                aria-label={t(
+                                  showPassword
+                                    ? 'adminPolicies.edit.field.passwordHide'
+                                    : 'adminPolicies.edit.field.passwordShow',
+                                )}
+                                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 transition-colors"
+                                onClick={() => setShowPassword((current) => !current)}
+                              >
+                                {showPassword ? (
+                                  <EyeOff className="size-4" />
+                                ) : (
+                                  <Eye className="size-4" />
+                                )}
+                              </button>
+                            </div>
+                          </FormField>
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={
+                                acgfakaLoginMutation.isPending ||
+                                form.endpoint.trim() === '' ||
+                                form.username.trim() === '' ||
+                                form.password === ''
+                              }
+                              onClick={() => acgfakaLoginMutation.mutate()}
+                            >
+                              {acgfakaLoginMutation.isPending
+                                ? t('adminPolicies.edit.login.running')
+                                : form.acgfakaLoggedIn
+                                  ? t('adminPolicies.edit.login.relogin')
+                                  : t('adminPolicies.edit.login.button')}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <FormField
+                    id="policy-acgfaka-cookie"
+                    label={t('adminPolicies.edit.field.acgfakaCookie')}
+                    error={errorFor('acgfakaCookie')}
+                    hint={t('adminPolicies.edit.field.acgfakaCookieHint')}
+                  >
+                    <div className="relative">
+                      <Input
+                        id="policy-acgfaka-cookie"
+                        type={showCookie ? 'text' : 'password'}
+                        value={form.acgfakaCookie}
+                        readOnly={form.autoLogin}
+                        onChange={(event) =>
+                          updateForm({
+                            acgfakaCookie: event.target.value,
+                            acgfakaCookieExpires: '',
+                          })
+                        }
+                        autoComplete="off"
+                        spellCheck={false}
+                        className={cn('pr-9', form.autoLogin && 'bg-muted')}
+                      />
+                      <button
+                        type="button"
+                        aria-label={t(
+                          showCookie
+                            ? 'adminPolicies.edit.field.acgfakaCookieHide'
+                            : 'adminPolicies.edit.field.acgfakaCookieShow',
+                        )}
+                        className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 transition-colors"
+                        onClick={() => setShowCookie((current) => !current)}
+                      >
+                        {showCookie ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </button>
+                    </div>
+                    {form.acgfakaCookieExpires !== '' && (
+                      <p className="text-muted-foreground text-xs">
+                        {t('adminPolicies.edit.field.acgfakaCookieExpires', {
+                          time: form.acgfakaCookieExpires,
+                        })}
+                      </p>
+                    )}
+                    {!form.autoLogin && (
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            acgfakaSessionMutation.isPending ||
+                            form.endpoint.trim() === '' ||
+                            form.acgfakaCookie.trim() === ''
+                          }
+                          onClick={() => acgfakaSessionMutation.mutate()}
+                        >
+                          {acgfakaSessionMutation.isPending
+                            ? t('adminPolicies.edit.field.acgfakaValidating')
+                            : t('adminPolicies.edit.field.acgfakaValidateCookie')}
+                        </Button>
+                      </div>
+                    )}
+                  </FormField>
+                </>
+              )}
               {isOneImg && (
                 <FormField
                   id="policy-token"
@@ -1710,6 +2084,7 @@ export default function AdminPolicyEditPage() {
               )}
               {!isCloudreve &&
                 !isOneImg &&
+                !isAcgFaka &&
                 form.type !== 'colorful' &&
                 !isLittlePan &&
                 credentialFields}
@@ -2407,6 +2782,70 @@ export default function AdminPolicyEditPage() {
               }
             >
               {twoFactorMutation.isPending
+                ? t('adminPolicies.edit.login.twoFactorRunning')
+                : t('adminPolicies.edit.login.twoFactorSubmit')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={acgfakaTwoFactorOpen}
+        onOpenChange={(open) => {
+          setAcgfakaTwoFactorOpen(open);
+          if (!open) {
+            setAcgfakaTwoFactorCode('');
+            setAcgfakaTwoFactorError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('adminPolicies.edit.login.twoFactorTitle')}</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <p className="text-muted-foreground text-sm">
+              {t('adminPolicies.edit.login.acgfakaTwoFactorHint')}
+            </p>
+            <Input
+              value={acgfakaTwoFactorCode}
+              onChange={(event) => setAcgfakaTwoFactorCode(event.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={10}
+              autoFocus
+              placeholder={t('adminPolicies.edit.login.twoFactorPlaceholder')}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !acgfakaTwoFactorMutation.isPending) {
+                  event.preventDefault();
+                  acgfakaTwoFactorMutation.mutate({
+                    sessionCookie: acgfakaSessionCookie,
+                    otp: acgfakaTwoFactorCode.trim(),
+                  });
+                }
+              }}
+            />
+            {acgfakaTwoFactorError !== null && (
+              <Alert variant="destructive">
+                <AlertDescription>{acgfakaTwoFactorError}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAcgfakaTwoFactorOpen(false)}>
+              {t('common.action.cancel')}
+            </Button>
+            <Button
+              type="button"
+              disabled={acgfakaTwoFactorMutation.isPending || acgfakaTwoFactorCode.trim() === ''}
+              onClick={() =>
+                acgfakaTwoFactorMutation.mutate({
+                  sessionCookie: acgfakaSessionCookie,
+                  otp: acgfakaTwoFactorCode.trim(),
+                })
+              }
+            >
+              {acgfakaTwoFactorMutation.isPending
                 ? t('adminPolicies.edit.login.twoFactorRunning')
                 : t('adminPolicies.edit.login.twoFactorSubmit')}
             </Button>

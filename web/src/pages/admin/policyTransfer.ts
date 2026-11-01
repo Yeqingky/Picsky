@@ -21,6 +21,8 @@ export interface PolicyTransferSource {
   username: string;
   password: string;
   token: string;
+  cookie: string;
+  cookieExpires: string;
   cloudreveRefreshToken: string;
   cloudreveRefreshExpires: string;
   cloudreveAccessExpires: string;
@@ -43,6 +45,8 @@ export interface PolicyTransferPayload {
     username?: string;
     password?: string;
     token?: string;
+    cookie?: string;
+    cookie_expires?: string;
     refresh_token?: string;
     refresh_expires?: string;
     access_expires?: string;
@@ -63,6 +67,8 @@ export interface PolicyTransferResult {
   username?: string;
   password?: string;
   token?: string;
+  cookie?: string;
+  cookieExpires?: string;
   cloudreveRefreshToken?: string;
   cloudreveRefreshExpires?: string;
   cloudreveAccessExpires?: string;
@@ -113,12 +119,21 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
     username?: string;
     password?: string;
     token?: string;
+    cookie?: string;
+    cookie_expires?: string;
     refresh_token?: string;
     refresh_expires?: string;
     access_expires?: string;
   } = {};
   if (source.type === 'oneimg') {
     if (source.token.trim() !== '') secrets.token = source.token.trim();
+  } else if (source.type === 'acgfaka') {
+    if (source.autoLogin) {
+      if (source.username.trim() !== '') secrets.username = source.username.trim();
+      if (source.password !== '') secrets.password = source.password;
+    }
+    if (source.cookie.trim() !== '') secrets.cookie = source.cookie.trim();
+    if (source.cookieExpires !== '') secrets.cookie_expires = source.cookieExpires;
   } else if (source.type !== 'cloudreve' || source.autoLogin) {
     if (source.username.trim() !== '') secrets.username = source.username.trim();
     if (source.password !== '') secrets.password = source.password;
@@ -147,6 +162,9 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
   };
   if (source.type === 'cloudreve') {
     payload.config.directory = source.directory;
+    payload.config.auto_login = source.autoLogin ? 'true' : 'false';
+  }
+  if (source.type === 'acgfaka') {
     payload.config.auto_login = source.autoLogin ? 'true' : 'false';
   }
   if (source.type === 'oneimg' && source.bucketId.trim() !== '') {
@@ -275,6 +293,8 @@ export function parsePolicyTransfer(
   let username = readString(root, 'username', 'username');
   let password = readString(root, 'password', 'password');
   let token = readString(root, 'token', 'token');
+  let cookie = readString(root, 'cookie', 'cookie');
+  let cookieExpires = readString(root, 'cookie_expires', 'cookie_expires');
   let refreshToken = readString(root, 'refresh_token', 'refresh_token');
   let refreshExpires = readString(root, 'refresh_expires', 'refresh_expires');
   let accessExpires = readString(root, 'access_expires', 'access_expires');
@@ -284,6 +304,12 @@ export function parsePolicyTransfer(
     const secretUsername = readString(secretRecord, 'username', 'secrets.username');
     const secretPassword = readString(secretRecord, 'password', 'secrets.password');
     const secretToken = readString(secretRecord, 'token', 'secrets.token');
+    const secretCookie = readString(secretRecord, 'cookie', 'secrets.cookie');
+    const secretCookieExpires = readString(
+      secretRecord,
+      'cookie_expires',
+      'secrets.cookie_expires',
+    );
     const secretRefreshToken = readString(secretRecord, 'refresh_token', 'secrets.refresh_token');
     const secretRefreshExpires = readString(
       secretRecord,
@@ -298,6 +324,8 @@ export function parsePolicyTransfer(
     if (secretUsername !== undefined) username = secretUsername;
     if (secretPassword !== undefined) password = secretPassword;
     if (secretToken !== undefined) token = secretToken;
+    if (secretCookie !== undefined) cookie = secretCookie;
+    if (secretCookieExpires !== undefined) cookieExpires = secretCookieExpires;
     if (secretRefreshToken !== undefined) refreshToken = secretRefreshToken;
     if (secretRefreshExpires !== undefined) refreshExpires = secretRefreshExpires;
     if (secretAccessExpires !== undefined) accessExpires = secretAccessExpires;
@@ -312,6 +340,14 @@ export function parsePolicyTransfer(
   }
   if (token !== undefined) {
     result.token = token;
+    recognized += 1;
+  }
+  if (cookie !== undefined) {
+    result.cookie = cookie;
+    recognized += 1;
+  }
+  if (cookieExpires !== undefined) {
+    result.cookieExpires = cookieExpires;
     recognized += 1;
   }
   if (refreshToken !== undefined) {

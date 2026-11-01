@@ -29,6 +29,8 @@
 
 ## 新增
 
+- 新增 `acgfaka` (异次元店铺系统) 存储驱动: 策略配置站点地址与 USER_SESSION Cookie, 支持粘贴 Cookie 原值或完整 Cookie; 上传 `POST /user/api/ticket/upload?mime=image`, multipart 字段 `file`, 驱动自动携带同主机 `Referer`; 后端返回的站点内相对路径补全为绝对直链, 记录 `rel_path` / `object_key` 取该路径; 只声明 `upload` 与 `url_from_backend`, 单文件上限 10 MiB, 仅支持 PNG / JPEG / WebP.
+- 异次元店铺系统支持账号密码登录与 Cookie 自动刷新: 管理后台可开启自动登录, 登录 `/user/api/authentication/login` 获取 USER_SESSION, 支持两步验证; 登录后通过 `/user/api/security/deviceSessions` 读取当前会话到期时间; Cookie 失效时使用保存的账号密码重新登录并重试上传, 刷新结果在进程内缓存; 手动模式提供 Cookie 验证按钮与到期时间显示.
 - 新增 `oneimg` (初春图床) 存储驱动: 策略配置站点地址与 API Token, 可选存储桶; 上传 `POST /api/upload/images`, multipart 字段为 `images[]`, 默认不发送 `bucket_id`; 后端返回的相对路径按站点地址补全为直链, 记录 `rel_path` / `object_key` 取该路径; 只声明 `upload` 与 `url_from_backend`.
 - 初春图床支持可选分发域名: 未配置时记录直链使用站点地址; 配置默认域名后由默认域名拼接后端返回路径, 已有记录也按当前默认域名生成直链.
 - 存储策略编辑页支持初春图床: 新建时首次展开存储桶下拉框读取远端列表, 编辑页加载后预取; 存储桶列表使用独立管理接口, 不阻塞策略详情与其他数据; 站点地址或 Token 变化时清空已选存储桶.

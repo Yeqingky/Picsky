@@ -15,6 +15,7 @@ import (
 	"github.com/yeqingky/Picsky/internal/model"
 	"github.com/yeqingky/Picsky/internal/service"
 	"github.com/yeqingky/Picsky/internal/storage"
+	"github.com/yeqingky/Picsky/internal/storage/acgfaka"
 	"github.com/yeqingky/Picsky/internal/storage/cloudreve"
 )
 
@@ -244,6 +245,89 @@ func (s *Server) adminCloudreveTwoFactor(c *gin.Context) {
 		RefreshExpires: result.RefreshExpires,
 		AccessExpires:  cloudreveExpiryText(result.AccessExpires),
 	})
+}
+
+// acgfakaLoginPayload 是异次元店铺系统登录接口响应.
+type acgfakaLoginPayload struct {
+	Status        string `json:"status"`
+	SessionCookie string `json:"session_cookie,omitempty"`
+	Cookie        string `json:"cookie,omitempty"`
+	CookieExpires string `json:"cookie_expires,omitempty"`
+}
+
+func acgfakaLoginError(err error) error {
+	return apperr.New(http.StatusBadRequest, "acgfaka_login_failed", err.Error())
+}
+
+// adminAcgFakaLogin 使用会员账号密码登录异次元店铺系统.
+func (s *Server) adminAcgFakaLogin(c *gin.Context) {
+	var payload struct {
+		Endpoint string `json:"endpoint"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	result, err := acgfaka.LoginPassword(c.Request.Context(), payload.Endpoint, payload.Username, payload.Password)
+	if err != nil {
+		s.fail(c, acgfakaLoginError(err))
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	if result.TwoFactor {
+		c.JSON(http.StatusOK, acgfakaLoginPayload{Status: "2fa", SessionCookie: result.SessionCookie})
+		return
+	}
+	c.JSON(http.StatusOK, acgfakaLoginPayload{
+		Status:        "ok",
+		Cookie:        result.Cookie,
+		CookieExpires: result.CookieExpires,
+	})
+}
+
+// adminAcgFakaTwoFactor 完成异次元店铺系统两步验证登录.
+func (s *Server) adminAcgFakaTwoFactor(c *gin.Context) {
+	var payload struct {
+		Endpoint      string `json:"endpoint"`
+		SessionCookie string `json:"session_cookie"`
+		OTP           string `json:"otp"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	result, err := acgfaka.CompleteTwoFactor(c.Request.Context(), payload.Endpoint, payload.SessionCookie, payload.OTP)
+	if err != nil {
+		s.fail(c, acgfakaLoginError(err))
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, acgfakaLoginPayload{
+		Status:        "ok",
+		Cookie:        result.Cookie,
+		CookieExpires: result.CookieExpires,
+	})
+}
+
+// adminAcgFakaSession 读取手动填写 Cookie 的当前会话到期时间.
+func (s *Server) adminAcgFakaSession(c *gin.Context) {
+	var payload struct {
+		Endpoint string `json:"endpoint"`
+		Cookie   string `json:"cookie"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
+		return
+	}
+	expires, err := acgfaka.SessionExpiry(c.Request.Context(), payload.Endpoint, payload.Cookie)
+	if err != nil {
+		s.fail(c, acgfakaLoginError(err))
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"cookie_expires": expires})
 }
 
 // adminPreviewPolicy 路径与 URL 预览.
