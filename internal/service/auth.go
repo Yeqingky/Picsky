@@ -52,6 +52,7 @@ const (
 	minPasswordRuneLength = 8
 	maxPasswordRuneLength = 128
 	maxUsernameRuneLength = 64
+	maxEmailLength        = 255
 )
 
 // Principal 是认证后的主体.
@@ -287,6 +288,9 @@ func (a *Auth) Login(ctx context.Context, in LoginInput, ip, userAgent string) (
 	email := normalizeEmail(in.Email)
 	if email == "" || in.Password == "" {
 		return nil, apperr.ErrInvalidRequest.WithMessage("请输入邮箱与密码")
+	}
+	if len(email) > maxEmailLength {
+		return nil, apperr.ErrInvalidRequest.WithMessage("邮箱过长")
 	}
 
 	ipKey := "login:ip:" + ip
@@ -1130,7 +1134,7 @@ func validateEmail(email string) error {
 	if email == "" {
 		return apperr.ErrInvalidRequest.WithMessage("邮箱不能为空")
 	}
-	if len(email) > 255 {
+	if len(email) > maxEmailLength {
 		return apperr.ErrInvalidRequest.WithMessage("邮箱过长")
 	}
 	parsed, err := mail.ParseAddress(email)

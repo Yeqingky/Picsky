@@ -2,12 +2,18 @@ package service
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"gorm.io/gorm"
 
 	"github.com/yeqingky/Picsky/internal/apperr"
 	"github.com/yeqingky/Picsky/internal/model"
+)
+
+const (
+	maxAuditDetailBytes   = 16 << 10
+	maxAuditFilenameBytes = 255
 )
 
 // Audit 写入审计日志.
@@ -40,6 +46,9 @@ func (a *Audit) Record(entry Entry) error {
 			return err
 		}
 		detail = string(encoded)
+		if len(detail) > maxAuditDetailBytes {
+			detail = `{"truncated":true,"original_bytes":` + strconv.Itoa(len(detail)) + `}`
+		}
 	}
 	row := model.AuditLog{
 		UserID:     entry.UserID,
