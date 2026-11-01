@@ -184,12 +184,31 @@ func (s *Settings) validateDefaultGroupPermissions(value string, actor *Principa
 	return nil
 }
 
+// secretEndpointSettings 列出会改变凭据发送目标的设置; 这些设置变化时必须清空对应密钥.
+var secretEndpointSettings = map[string][]string{
+	"smtp_password":  {"smtp_host", "smtp_port", "smtp_encryption"},
+	"captcha_secret": {"captcha_provider", "captcha_endpoint"},
+}
+
 // Update 批量写入设置: 秘密字段自动加密, 空串表示清空.
 func (s *Settings) Update(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
-	prepared := make(map[string]string, len(values))
+	clearSecrets := map[string]bool{}
+	for secret, endpoints := range secretEndpointSettings {
+		if _, supplied := values[secret]; supplied {
+			continue
+		}
+		for _, endpoint := range endpoints {
+			next, supplied := values[endpoint]
+			if supplied && next != s.String(endpoint) {
+				clearSecrets[secret] = true
+				break
+			}
+		}
+	}
+	prepared := make(map[string]string, len(values)+len(clearSecrets))
 	for key, value := range values {
 		if _, known := migrations.DefaultSettings[key]; !known {
 			return apperr.ErrInvalidRequest.WithMessage("未知设置项: " + key)
@@ -237,6 +256,9 @@ func (s *Settings) Update(values map[string]string) error {
 			continue
 		}
 		prepared[key] = value
+	}
+	for secret := range clearSecrets {
+		prepared[secret] = ""
 	}
 	now := nowUTC()
 	rows := make([]model.Setting, 0, len(prepared))

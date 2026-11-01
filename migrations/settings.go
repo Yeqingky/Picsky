@@ -66,14 +66,14 @@ var SettingDefinitions = []SettingDefinition{
 	{Key: "captcha_provider", Label: "人机验证", Type: "select", Group: "注册与安全", Options: []string{"none", "cap", "turnstile"}},
 	{Key: "captcha_endpoint", Label: "人机验证服务地址", Type: "string", Group: "注册与安全", Help: "Cap 自建实例地址, 例如 https://cap.example.com; Turnstile 留空"},
 	{Key: "captcha_site_key", Label: "人机验证站点 Key", Type: "string", Group: "注册与安全"},
-	{Key: "captcha_secret", Label: "人机验证秘钥", Type: "password", Group: "注册与安全", Help: "加密存储; 留空表示不修改"},
+	{Key: "captcha_secret", Label: "人机验证秘钥", Type: "password", Group: "注册与安全", Help: "加密存储; 留空表示不修改; 提供方或服务地址变化时清空, 需重新填写"},
 
 	{Key: "referrer_allowlist", Label: "Referrer 白名单", Type: "text", Group: "隐私", Help: "一行一个域名; 命中域名后缀时发送 Referer; 留空全部禁止"},
 
 	{Key: "smtp_host", Label: "SMTP 服务器", Type: "string", Group: "邮箱"},
 	{Key: "smtp_port", Label: "SMTP 端口", Type: "int", Group: "邮箱"},
 	{Key: "smtp_username", Label: "SMTP 用户名", Type: "string", Group: "邮箱"},
-	{Key: "smtp_password", Label: "SMTP 密码", Type: "password", Group: "邮箱", Help: "加密存储; 留空表示不修改"},
+	{Key: "smtp_password", Label: "SMTP 密码", Type: "password", Group: "邮箱", Help: "加密存储; 留空表示不修改; SMTP 服务器, 端口或加密方式变化时清空, 需重新填写"},
 	{Key: "smtp_from", Label: "发件人地址", Type: "string", Group: "邮箱"},
 	{Key: "smtp_encryption", Label: "SMTP 加密方式", Type: "select", Group: "邮箱", Options: []string{"starttls", "ssl", "none"}},
 

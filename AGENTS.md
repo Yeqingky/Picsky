@@ -117,6 +117,7 @@ Picsky/
 - 更新/删除用户组或覆盖其策略白名单前校验目标组当前权限, 超出调用者权限返回 403; 组 PATCH 未出现的字段保持不变, 显式 `null` 清除可空字段, 移除 `upload` 权限时自动清除配额与上传限额.
 - 前端样式只使用 Tailwind CSS v4 与 `src/index.css` 的语义令牌 (`background`, `card`, `muted`, `primary`, `destructive`, `success`, `warning`, `info`, `border`, `ring`, `chart-*`), 禁止硬编码色值与 CSS-in-JS.
 - 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示; 注册邮箱白名单按完整域名精确匹配, 留空时不限制; 列表输入复用 `TagsInput`.
+- 保存系统设置时, SMTP 服务器, 端口或加密方式, 以及人机验证提供方或服务地址发生变化且未同时提交对应密钥时, 必须清空旧密钥; 端点未变化时不得误清空.
 - 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 禁止 MUI, Emotion 与 CSS-in-JS; 在成熟专用库明显优于自研且已登记到 `docs/tech-stack.md` 时可以引入其他组件库 (当前: 图片查看使用 `photoswipe`), 图标统一 lucide-react, 全局提示统一 sonner.
 - 表格统一用 `src/components/DataTable.tsx`, 日期选择统一用 `src/components/DatePicker.tsx`, 空/错状态统一用 `src/components/States.tsx`; 需要新交互时先扩展这些共享组件.
 - 加载骨架必须贴合实际页面结构; 表格首屏与局部刷新复用 `DataTable` 的列定义, 表头和行高, 瀑布流骨架复用 `MasonryGrid` 排布; 已知页面不得用通用表单/卡片骨架替代真实布局.

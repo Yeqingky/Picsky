@@ -48,14 +48,16 @@ export const adminSystem = {
       captchaSiteKey: '站点 Key',
       captchaSiteKeyHint: '前端公开, 用于渲染验证控件',
       captchaSecret: '秘钥',
-      captchaSecretHint: '出于安全考虑不回显; 输入新值即替换',
+      captchaSecretHint:
+        '出于安全考虑不回显; 输入新值即替换; 提供方或服务地址变化时会清空, 需重新填写',
       defaultGroup: '新用户默认组',
       defaultGroupHint: '留空表示使用系统默认组',
       smtpHost: 'SMTP 服务器',
       smtpPort: '端口',
       smtpUsername: '用户名',
       smtpPassword: '密码',
-      smtpPasswordHint: '出于安全考虑不回显; 输入新值即替换',
+      smtpPasswordHint:
+        '出于安全考虑不回显; 输入新值即替换; SMTP 服务器, 端口或加密方式变化时会清空, 需重新填写',
       smtpFrom: '发件人地址',
       smtpFromHint: '例如 Picsky <no-reply@example.com>',
       smtpEncryption: '加密方式',
