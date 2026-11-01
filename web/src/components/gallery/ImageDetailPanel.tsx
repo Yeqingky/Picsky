@@ -98,15 +98,7 @@ export function ImageDetailPanel({
       onClose();
       await invalidateGallery();
       onDeleted?.(result);
-      if (result.object_deleted) {
-        toast.success(t('gallery.delete.successSingle'));
-      } else {
-        toast.warning(
-          t('gallery.delete.objectRetained', {
-            reason: t(`gallery.delete.reason.${result.reason}`),
-          }),
-        );
-      }
+      toast.success(t('gallery.delete.successSingle'));
     },
   });
 

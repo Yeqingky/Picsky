@@ -113,7 +113,7 @@ const NEW_TYPE_TRAITS: Record<
     urlFromBackend: true,
     urlPrefixOverride: true,
   },
-  cloudreve: { capabilities: ['upload'], urlFromBackend: true },
+  cloudreve: { capabilities: ['upload', 'stat', 'delete'], urlFromBackend: true },
   colorful: { capabilities: ['upload'], urlFromBackend: true },
   littlepan: { capabilities: ['upload'], urlFromBackend: true },
 };

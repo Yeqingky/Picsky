@@ -44,7 +44,7 @@ func init() {
 	storage.Register(storage.Spec{
 		Type:         driverType,
 		Label:        "Cloudreve",
-		Capabilities: []string{"upload", "stat"},
+		Capabilities: []string{"upload", "stat", "delete"},
 		ConfigFields: []storage.Field{
 			{Name: "endpoint", Label: "服务地址", Required: true, Placeholder: "https://cloudreve.example.com"},
 			{Name: "directory", Label: "目录", Placeholder: "/picsky"},
@@ -143,9 +143,9 @@ func apiBaseFromEndpoint(raw string) (string, error) {
 
 func (a *adapter) Type() string { return driverType }
 
-// Capabilities 声明上传与对象查询能力; 扫描补录不适用于后端下发直链的驱动.
+// Capabilities 声明上传, 对象查询与删除能力; 扫描补录不适用于后端下发直链的驱动.
 func (a *adapter) Capabilities() storage.Capability {
-	return storage.CapUpload | storage.CapStat
+	return storage.CapUpload | storage.CapStat | storage.CapDelete
 }
 
 // Put 创建上传会话并分片上传 Cloudreve 文件, 最后创建公开直链.
@@ -414,8 +414,69 @@ func (a *adapter) Stat(ctx context.Context, key string) (storage.ObjectInfo, err
 	}, nil
 }
 
-func (a *adapter) Delete(context.Context, string) error {
-	return storage.ErrNotSupported
+// Delete 通过 Cloudreve 文件接口把对象移入回收站, 不直接物理删除.
+// 对象不存在或已在回收站时返回 ErrNotFound, 上层按已删除处理.
+func (a *adapter) Delete(ctx context.Context, key string) error {
+	if err := storage.ValidateObjectKey(key); err != nil {
+		return err
+	}
+	fileURI := a.fileURI(key)
+	payload, err := json.Marshal(map[string]any{
+		"uris":             []string{fileURI},
+		"skip_soft_delete": false,
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := a.authorizedRequest(ctx, http.MethodDelete, a.apiBase+"/file", bytes.NewReader(payload), int64(len(payload)), "application/json")
+	if err != nil {
+		return fmt.Errorf("删除 Cloudreve 文件失败: %w", err)
+	}
+	envelope, body, err := readEnvelope(resp)
+	if err != nil {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("删除 Cloudreve 文件失败: HTTP %d: %s", resp.StatusCode, snippet(body))
+		}
+		return fmt.Errorf("解析 Cloudreve 删除响应失败: %w", err)
+	}
+	if err := cloudreveDeleteError(fileURI, *envelope); err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("删除 Cloudreve 文件失败: HTTP %d: %s", resp.StatusCode, snippet(body))
+	}
+	return nil
+}
+
+// cloudreveDeleteError 解析删除响应; 文件不存在或已在回收站视为已删除.
+func cloudreveDeleteError(fileURI string, envelope responseEnvelope) error {
+	entry, ok := envelope.AggregatedError[fileURI]
+	if !ok && len(envelope.AggregatedError) == 1 {
+		for _, value := range envelope.AggregatedError {
+			entry, ok = value, true
+		}
+	}
+	if ok {
+		if entry.Code == 0 {
+			return nil
+		}
+		return cloudreveDeleteCodeError(entry)
+	}
+	if envelope.Code == 0 {
+		return nil
+	}
+	return cloudreveDeleteCodeError(envelope)
+}
+
+// cloudreveDeleteCodeError 把删除接口的错误码转换为存储层错误.
+func cloudreveDeleteCodeError(envelope responseEnvelope) error {
+	switch envelope.Code {
+	// 40016 父目录不存在: 目标路径必然不存在; 40044 文件不存在;
+	// 40077 实体不存在; 40078 文件已在回收站.
+	case http.StatusNotFound, 40016, 40044, 40077, 40078:
+		return storage.ErrNotFound
+	}
+	return cloudreveError("删除文件", envelope)
 }
 
 // List 不适用于后端下发直链的驱动.
@@ -467,7 +528,7 @@ func (a *adapter) fileInfo(ctx context.Context, fileURI string) (*cloudreveFile,
 	return &data.cloudreveFile, link, nil
 }
 
-// Test 登录并上传一张探测图片; 后端不支持删除, 探测对象会保留.
+// Test 登录并上传一张探测图片, 测试后删除探测对象.
 func (a *adapter) Test(ctx context.Context, prefix string) error {
 	key := strings.Trim(strings.TrimSpace(prefix), "/")
 	if key == "" {
@@ -480,8 +541,13 @@ func (a *adapter) Test(ctx context.Context, prefix string) error {
 		key += "/"
 	}
 	key += fmt.Sprintf("_probe/%d.png", time.Now().UnixNano())
-	_, err := a.Put(ctx, key, bytes.NewReader(probePNG), int64(len(probePNG)), "image/png")
-	return err
+	if _, err := a.Put(ctx, key, bytes.NewReader(probePNG), int64(len(probePNG)), "image/png"); err != nil {
+		return err
+	}
+	if err := a.Delete(ctx, key); err != nil {
+		return fmt.Errorf("清理 Cloudreve 探测对象失败: %w", err)
+	}
+	return nil
 }
 
 // fileURI 把魔法路径直接转换为 Cloudreve 文件 URI.
@@ -749,10 +815,11 @@ func parseCloudreveTime(raw string) time.Time {
 
 // responseEnvelope 是 Cloudreve 的统一响应结构.
 type responseEnvelope struct {
-	Code  int             `json:"code"`
-	Msg   string          `json:"msg"`
-	Error *string         `json:"error"`
-	Data  json.RawMessage `json:"data"`
+	Code            int                         `json:"code"`
+	Msg             string                      `json:"msg"`
+	Error           *string                     `json:"error"`
+	Data            json.RawMessage             `json:"data"`
+	AggregatedError map[string]responseEnvelope `json:"aggregated_error"`
 }
 
 // readEnvelope 读取 Cloudreve 响应体并解析统一结构.

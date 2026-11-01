@@ -65,17 +65,8 @@ export const gallery = {
   },
   delete: {
     title: '删除图片记录',
-    successSingle: '已删除记录',
-    successBatch: '已删除 {{count}} 条记录',
-    objectDeleted: '外部对象已删除',
-    objectRetained: '仅删除 Picsky 记录, 外部文件保留 ({{reason}})',
-    reason: {
-      last_reference: '引用归零且后端支持删除',
-      setting_disabled: '系统设置关闭了对象删除',
-      shared: '仍有其他用户的记录引用',
-      queued: '对象删除已进入维护队列',
-      backend_error: '外部存储出错, 未能删除外部对象',
-    },
+    successSingle: '已删除图片',
+    successBatch: '已删除选中的 {{count}} 条图片',
   },
   list: {
     thumbnail: '缩略图',

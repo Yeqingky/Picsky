@@ -186,18 +186,9 @@ export default function GalleryPage() {
   const batchDelete = useMutation({
     mutationFn: (ids: number[]) => imagesApi.batchDelete(ids),
     onSuccess: async (result) => {
-      const retained = result.items.filter((item) => !item.object_deleted);
       await queryClient.invalidateQueries({ queryKey: ['images'] });
       setSelectedIds([]);
       toast.success(t('gallery.delete.successBatch', { count: result.items.length }));
-      if (retained.length > 0) {
-        const reasons = [...new Set(retained.map((item) => item.reason))];
-        toast.warning(
-          t('gallery.delete.objectRetained', {
-            reason: reasons.map((reason) => t(`gallery.delete.reason.${reason}`)).join(', '),
-          }),
-        );
-      }
     },
   });
 

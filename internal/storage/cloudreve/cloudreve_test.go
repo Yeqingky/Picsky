@@ -3,6 +3,7 @@ package cloudreve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,11 +34,11 @@ func TestDriverSpec(t *testing.T) {
 	if spec.DefaultPathTemplate != "{md5:2}/{md5}.{ext}" {
 		t.Errorf("Cloudreve 默认路径 = %q", spec.DefaultPathTemplate)
 	}
-	if !spec.Has(storage.CapUpload) || !spec.Has(storage.CapStat) {
+	if !spec.Has(storage.CapUpload) || !spec.Has(storage.CapStat) || !spec.Has(storage.CapDelete) {
 		t.Errorf("Cloudreve 驱动能力声明不完整: %v", spec.Capabilities)
 	}
-	if spec.Has(storage.CapList) || spec.Has(storage.CapRead) || spec.Has(storage.CapDelete) {
-		t.Errorf("Cloudreve 不应声明扫描或删除能力: %v", spec.Capabilities)
+	if spec.Has(storage.CapList) || spec.Has(storage.CapRead) {
+		t.Errorf("Cloudreve 不应声明扫描能力: %v", spec.Capabilities)
 	}
 	if len(spec.ConfigFields) != 3 {
 		t.Fatalf("配置字段数量 = %d, 期望 3", len(spec.ConfigFields))
@@ -549,7 +550,122 @@ func TestPutUsesStoredRefreshToken(t *testing.T) {
 	}
 }
 
+func TestDeleteMovesFileToTrash(t *testing.T) {
+	var called bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v4/session/token":
+			writeEnvelope(t, w, 0, loginPayload(testToken))
+		case "/api/v4/file":
+			if r.Method != http.MethodDelete {
+				t.Errorf("删除方法 = %s, 期望 DELETE", r.Method)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer "+testToken {
+				t.Errorf("Authorization = %q", got)
+			}
+			var body struct {
+				URIs           []string `json:"uris"`
+				SkipSoftDelete *bool    `json:"skip_soft_delete"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("解析删除请求失败: %v", err)
+				return
+			}
+			if len(body.URIs) != 1 || body.URIs[0] != "cloudreve://my/picsky/0f/foo.png" {
+				t.Errorf("删除 URI = %v", body.URIs)
+			}
+			if body.SkipSoftDelete == nil || *body.SkipSoftDelete {
+				t.Errorf("skip_soft_delete = %v, 期望显式 false", body.SkipSoftDelete)
+			}
+			called = true
+			writeEnvelope(t, w, 0, nil)
+		default:
+			t.Errorf("未预期的请求: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := newTestAdapter(t, server.URL)
+	if err := adapter.Delete(context.Background(), "picsky/0f/foo.png"); err != nil {
+		t.Fatalf("Delete 失败: %v", err)
+	}
+	if !called {
+		t.Fatal("未调用删除接口")
+	}
+}
+
+func TestDeleteTreatsMissingAsDeleted(t *testing.T) {
+	const fileURI = "cloudreve://my/picsky/0f/foo.png"
+	cases := []struct {
+		name    string
+		payload map[string]any
+	}{
+		{"文件不存在", map[string]any{"code": 40044}},
+		{"父目录不存在", map[string]any{"code": 40016}},
+		{"已在回收站", map[string]any{"code": 40078}},
+		{"聚合错误", map[string]any{
+			"code": 40081,
+			"aggregated_error": map[string]any{
+				fileURI: map[string]any{"code": 40077, "msg": "entity not found"},
+			},
+		}},
+		{"顶层成功但聚合错误", map[string]any{
+			"code": 0,
+			"aggregated_error": map[string]any{
+				fileURI: map[string]any{"code": 40044, "msg": "file not found"},
+			},
+		}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v4/session/token":
+					writeEnvelope(t, w, 0, loginPayload(testToken))
+				case "/api/v4/file":
+					w.Header().Set("Content-Type", "application/json")
+					if err := json.NewEncoder(w).Encode(testCase.payload); err != nil {
+						t.Errorf("写入删除响应失败: %v", err)
+					}
+				default:
+					t.Errorf("未预期的请求: %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			adapter := newTestAdapter(t, server.URL)
+			err := adapter.Delete(context.Background(), "picsky/0f/foo.png")
+			server.Close()
+			if !errors.Is(err, storage.ErrNotFound) {
+				t.Fatalf("Delete 错误 = %v, 期望 ErrNotFound", err)
+			}
+		})
+	}
+}
+
+func TestDeleteReportsBackendError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v4/session/token":
+			writeEnvelope(t, w, 0, loginPayload(testToken))
+		case "/api/v4/file":
+			writeEnvelope(t, w, 50001, nil)
+		default:
+			t.Errorf("未预期的请求: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := newTestAdapter(t, server.URL)
+	err := adapter.Delete(context.Background(), "picsky/0f/foo.png")
+	if err == nil || !strings.Contains(err.Error(), "50001") {
+		t.Fatalf("Delete 错误 = %v, 期望包含 50001", err)
+	}
+}
+
 func TestTestUploadsProbePNG(t *testing.T) {
+	var deletedURI string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v4/session/token":
@@ -590,6 +706,20 @@ func TestTestUploadsProbePNG(t *testing.T) {
 			writeEnvelope(t, w, 0, map[string]any{})
 		case r.URL.Path == "/api/v4/file/source":
 			writeEnvelope(t, w, 0, []map[string]string{{"link": serverURL(r) + "/f/probe/probe.png"}})
+		case r.URL.Path == "/api/v4/file" && r.Method == http.MethodDelete:
+			var body struct {
+				URIs []string `json:"uris"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("解析探测删除请求失败: %v", err)
+				return
+			}
+			if len(body.URIs) != 1 {
+				t.Errorf("探测删除 URI = %v", body.URIs)
+				return
+			}
+			deletedURI = body.URIs[0]
+			writeEnvelope(t, w, 0, nil)
 		default:
 			t.Errorf("未预期的请求: %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -600,6 +730,9 @@ func TestTestUploadsProbePNG(t *testing.T) {
 	adapter := newTestAdapter(t, server.URL)
 	if err := adapter.Test(context.Background(), ""); err != nil {
 		t.Fatalf("Test 失败: %v", err)
+	}
+	if !strings.HasPrefix(deletedURI, "cloudreve://my/picsky/_probe/") {
+		t.Errorf("探测删除 URI = %q", deletedURI)
 	}
 }
 
@@ -641,9 +774,6 @@ func TestStatReturnsDirectLink(t *testing.T) {
 
 func TestUnsupportedOperations(t *testing.T) {
 	adapter := &adapter{}
-	if err := adapter.Delete(context.Background(), "foo.png"); err != storage.ErrNotSupported {
-		t.Errorf("Delete 错误 = %v", err)
-	}
 	if _, err := adapter.List(context.Background(), "picsky"); err != storage.ErrNotSupported {
 		t.Errorf("List 错误 = %v", err)
 	}
