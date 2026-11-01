@@ -72,7 +72,7 @@ Picsky/
 
 - Git 提交身份: 用户名 `YeqingKy`, 邮箱 `me@yeqing.im`.
 - GitHub Actions 容器工作流在所有分支 push 与 PR 上构建; 分支 push 发布 `ghcr.io/yeqingky/picsky:<短 hash>`, `vX.Y.Z` tag 发布版本 tag 与 `latest`; PR 仅构建不推送; GHCR 认证使用 `GITHUB_TOKEN`.
-- 不把 `README` 用作变更日志; 变更日志写入仓库根目录的 `CHANGELOG.md` 并随版本提交, 每次发布在文件顶部追加版本段落, 版本倒序排列; 版本数量较多或单文件过长时改用 `CHANGELOG/` 目录, 每个版本一个文件.
+- 不把 `README` 用作变更日志; 变更日志写入仓库根目录的 `CHANGELOG.md` 并随版本提交, 每次发布在文件顶部追加版本段落, 版本倒序排列; 未发布的修改写入顶部最新的 `vX.Y.Z-rc.N` 预发布段落, 不追加到已发布 tag 对应的版本段落; 版本数量较多或单文件过长时改用 `CHANGELOG/` 目录, 每个版本一个文件.
 - 存储适配器必须声明能力 (`upload`, `delete`, `overwrite`, `stat`, `presign`, `multipart`); 新增驱动不得假设后端支持删除或覆盖, 上层按能力降级. 驱动未声明 `delete` 时删除记录直接返回 403, 不删除记录与外部对象.
 - `sobot` 驱动固定租户与上传地址, 无配置项, 只接受图片, 由后端返回直链 (`url_from_backend`), 只声明 `upload` 能力; 策略不配置分发域名, 记录 `rel_path` / `object_key` 取返回 URL 的路径.
 - `celine` 驱动固定思琳中国上传地址与公开路径, 无鉴权与配置项, 只接受图片且仅支持 PNG / JPEG / GIF, 由后端返回直链 (`url_from_backend`), 只声明 `upload` 能力; 单文件上限 20,971,326 字节 (20 MiB 扣除 multipart 开销), 服务端会重编码图片并清理元数据, 记录的哈希与大小仍按原始上传内容计算.
