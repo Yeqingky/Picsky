@@ -12,6 +12,8 @@ type RateLimiter struct {
 	window  time.Duration
 }
 
+const maxRateLimitKeys = 10000
+
 type rateWindow struct {
 	count int
 	start time.Time
@@ -34,13 +36,9 @@ func (r *RateLimiter) Allow(key string, limit int) (bool, time.Duration) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if len(r.windows) > 10000 {
-		r.sweep(now)
-	}
-	window, ok := r.windows[key]
-	if !ok || now.Sub(window.start) >= r.window {
-		r.windows[key] = &rateWindow{count: 1, start: now}
-		return true, 0
+	window, ok := r.windowLocked(key, now)
+	if !ok {
+		return false, r.window
 	}
 	if window.count >= limit {
 		return false, r.window - now.Sub(window.start)
@@ -65,16 +63,32 @@ func (r *RateLimiter) Add(key string) (int, time.Duration) {
 	now := time.Now()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.windows) > 10000 {
-		r.sweep(now)
-	}
-	window, ok := r.windows[key]
-	if !ok || now.Sub(window.start) >= r.window {
-		r.windows[key] = &rateWindow{count: 1, start: now}
-		return 1, r.window
+	window, ok := r.windowLocked(key, now)
+	if !ok {
+		return 0, r.window
 	}
 	window.count++
 	return window.count, r.window - now.Sub(window.start)
+}
+
+// windowLocked 返回有效窗口; 新键在表满且无过期项时拒绝插入.
+// 调用方必须持有 r.mu.
+func (r *RateLimiter) windowLocked(key string, now time.Time) (*rateWindow, bool) {
+	if window, ok := r.windows[key]; ok {
+		if now.Sub(window.start) < r.window {
+			return window, true
+		}
+		delete(r.windows, key)
+	}
+	if len(r.windows) >= maxRateLimitKeys {
+		r.sweep(now)
+		if len(r.windows) >= maxRateLimitKeys {
+			return nil, false
+		}
+	}
+	window := &rateWindow{start: now}
+	r.windows[key] = window
+	return window, true
 }
 
 // Reset 清除某个键的窗口.

@@ -738,6 +738,16 @@ func (a *Auth) VerifyEmail(token string) error {
 	return nil
 }
 
+// allowPasswordReset 先检查来源 IP 限流; IP 已超限时不再为邮箱插入新的限流键.
+func (a *Auth) allowPasswordReset(ip, email string) bool {
+	allowed, _ := a.passwordResetLimiter.Allow("password-reset:ip:"+ip, passwordResetRequestLimit)
+	if !allowed {
+		return false
+	}
+	allowed, _ = a.passwordResetLimiter.Allow("password-reset:email:"+email, passwordResetRequestLimit)
+	return allowed
+}
+
 // RequestPasswordReset 对已注册邮箱发送找回链接; 对不存在或已封禁的账号保持相同响应.
 func (a *Auth) RequestPasswordReset(ctx context.Context, email, captchaToken, ip string) error {
 	if err := a.captcha.Verify(ctx, captchaToken, ip); err != nil {
@@ -748,17 +758,7 @@ func (a *Auth) RequestPasswordReset(ctx context.Context, email, captchaToken, ip
 		return err
 	}
 
-	limited := false
-	for _, key := range []string{
-		"password-reset:ip:" + ip,
-		"password-reset:email:" + email,
-	} {
-		allowed, _ := a.passwordResetLimiter.Allow(key, passwordResetRequestLimit)
-		if !allowed {
-			limited = true
-		}
-	}
-	if limited {
+	if !a.allowPasswordReset(ip, email) {
 		return nil
 	}
 	if !a.mailer.Configured() {
