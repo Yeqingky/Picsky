@@ -328,28 +328,13 @@ func TestUploadDedupAndQuota(t *testing.T) {
 
 	second := f.mustUpload(f.admin, &policy.ID, "photo-again.png", content)
 	if second.Status != 200 || !second.Dedup {
-		t.Fatalf("重复上传应命中秒传: %+v", second)
+		t.Fatalf("重复上传应命中服务端去重: %+v", second)
 	}
 	if second.Record.ID != record.ID {
 		t.Error("同用户重复上传应返回已有记录")
 	}
 	if f.recordsFor(policy.ID) != 1 {
-		t.Errorf("秒传不应新增记录, 当前 %d 条", f.recordsFor(policy.ID))
-	}
-
-	check, err := f.svc.Upload.Check(f.admin, record.SHA256, &policy.ID)
-	if err != nil {
-		t.Fatalf("秒传检查失败: %v", err)
-	}
-	if !check.Exists || check.Record == nil || check.Record.ID != record.ID {
-		t.Errorf("秒传检查结果不正确: %+v", check)
-	}
-	missing, err := f.svc.Upload.Check(f.admin, strings.Repeat("f", 64), &policy.ID)
-	if err != nil {
-		t.Fatalf("秒传检查失败: %v", err)
-	}
-	if missing.Exists {
-		t.Error("不存在的 sha256 不应返回 exists")
+		t.Errorf("服务端去重不应新增记录, 当前 %d 条", f.recordsFor(policy.ID))
 	}
 }
 
@@ -364,7 +349,7 @@ func TestCrossUserReuseIsFree(t *testing.T) {
 
 	reused := f.mustUpload(other, &policy.ID, "alice.png", content)
 	if !reused.Dedup || reused.QuotaCharged {
-		t.Fatalf("跨用户复用应免费且命中秒传: %+v", reused)
+		t.Fatalf("跨用户复用应免费且命中服务端去重: %+v", reused)
 	}
 	if reused.Record.ID == owner.Record.ID {
 		t.Error("跨用户复用的记录应独立")
@@ -1119,11 +1104,28 @@ func TestPolicyWhitelist(t *testing.T) {
 
 	_, err := f.upload(alice, &policy.ID, "a.png", pngBytes(t, 71, 4, 4))
 	var apiErr *apperr.Error
-	if !errors.As(err, &apiErr) || apiErr.Code != "policy_not_allowed" {
-		t.Fatalf("未授权策略应返回 policy_not_allowed, 实际 %v", err)
+	if !errors.As(err, &apiErr) || apiErr.Code != "not_found" || apiErr.Status != 404 {
+		t.Fatalf("未授权策略应返回 404 not_found, 实际 %v", err)
+	}
+
+	missing := int64(999999)
+	_, err = f.upload(alice, &missing, "missing.png", pngBytes(t, 73, 4, 4))
+	if !errors.As(err, &apiErr) || apiErr.Code != "not_found" || apiErr.Status != 404 {
+		t.Fatalf("不存在的策略应返回 404 not_found, 实际 %v", err)
 	}
 
 	f.authorize(policy.ID)
+	if err := f.database.Model(&model.StoragePolicy{}).Where("id = ?", policy.ID).Update("enabled", false).Error; err != nil {
+		t.Fatalf("停用策略失败: %v", err)
+	}
+	_, err = f.upload(alice, &policy.ID, "disabled.png", pngBytes(t, 74, 4, 4))
+	if !errors.As(err, &apiErr) || apiErr.Code != "not_found" || apiErr.Status != 404 {
+		t.Fatalf("已停用策略应返回 404 not_found, 实际 %v", err)
+	}
+	if err := f.database.Model(&model.StoragePolicy{}).Where("id = ?", policy.ID).Update("enabled", true).Error; err != nil {
+		t.Fatalf("启用策略失败: %v", err)
+	}
+
 	refreshed, err := f.svc.Auth.PrincipalFor(alice.User.ID, nil, nil)
 	if err != nil {
 		t.Fatalf("刷新主体失败: %v", err)
@@ -2486,7 +2488,7 @@ func TestConcurrentQuotaEnforcement(t *testing.T) {
 
 func TestConcurrentSameContentChargedOnce(t *testing.T) {
 	f := newFixture(t)
-	policy := f.createPolicy("并发秒传", "{md5}.{ext}", model.ConflictRename)
+	policy := f.createPolicy("并发去重", "{md5}.{ext}", model.ConflictRename)
 	content := pngBytes(t, 401, 8, 8)
 
 	const workers = 6

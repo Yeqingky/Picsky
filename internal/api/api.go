@@ -72,7 +72,6 @@ func (s *Server) Register(router *gin.Engine) {
 
 	user := group.Group("", s.auth.Required())
 	user.POST("/upload", s.upload)
-	user.POST("/upload/check", s.uploadCheck)
 	user.POST("/upload/base64", s.uploadBase64)
 	user.GET("/images", s.listImages)
 	user.GET("/images/:id", s.getImage)

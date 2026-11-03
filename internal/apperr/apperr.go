@@ -66,7 +66,6 @@ var (
 	ErrForbidden            = New(http.StatusForbidden, "forbidden", "权限不足")
 	ErrRegisterDisabled     = New(http.StatusForbidden, "register_disabled", "注册已关闭")
 	ErrEmailNotAllowed      = New(http.StatusForbidden, "email_not_allowed", "邮箱域名不在注册白名单中")
-	ErrPolicyNotAllowed     = New(http.StatusForbidden, "policy_not_allowed", "存储策略不在用户组的白名单内")
 	ErrQuotaExceeded        = New(http.StatusForbidden, "quota_exceeded", "配额不足")
 	ErrNotFound             = New(http.StatusNotFound, "not_found", "资源不存在")
 	ErrPathConflict         = New(http.StatusConflict, "path_conflict", "目标路径已存在且内容不同")

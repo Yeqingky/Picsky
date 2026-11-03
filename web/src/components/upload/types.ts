@@ -1,7 +1,7 @@
 import type { UploadResult } from '../../api/types';
 
 export type UploadItemStatus =
-  'pending' | 'compressing' | 'hashing' | 'uploading' | 'done' | 'failed' | 'duplicate' | 'skipped';
+  'pending' | 'compressing' | 'uploading' | 'done' | 'failed' | 'skipped';
 
 export interface UploadItem {
   id: string;
@@ -22,8 +22,6 @@ export interface UploadItem {
   compressionError?: string;
   error?: string;
   result?: UploadResult;
-  /** 秒传命中的已有记录 (/upload/check) */
-  dedupRecord?: { id: number; url: string; size: number };
 }
 
 export function createUploadItem(file: File, armed: boolean): UploadItem {
@@ -38,19 +36,19 @@ export function createUploadItem(file: File, armed: boolean): UploadItem {
   };
 }
 
-/** 实际参与校验与上传的文件 */
+/** 实际参与上传的文件 */
 export function uploadItemPayload(item: UploadItem): File {
   return item.uploadFile ?? item.file;
 }
 
-/** 上传项的直链: 完成或秒传命中时可用, 取默认别名 */
+/** 上传项的直链: 完成时可用, 取默认别名 */
 export function uploadItemUrl(item: UploadItem): string | null {
   if (item.result) {
     const urls = item.result.urls;
     const preferred = urls.find((entry) => entry.is_default) ?? urls[0];
     return preferred?.url ?? item.result.url;
   }
-  return item.dedupRecord?.url ?? null;
+  return null;
 }
 
 /** 上传项用于复制格式的原始文件名 */

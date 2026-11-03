@@ -163,11 +163,4 @@ func TestOneImgExistingRecordUsesConfiguredDefaultDomain(t *testing.T) {
 	if !reused.Dedup || reused.Record.URL != wantURL {
 		t.Errorf("复用记录直链 = %q, dedup=%v, 期望 %q", reused.Record.URL, reused.Dedup, wantURL)
 	}
-	checked, err := f.svc.Upload.Check(user, first.Record.SHA256, &policy.ID)
-	if err != nil {
-		t.Fatalf("秒传检查失败: %v", err)
-	}
-	if checked.Record == nil || checked.Record.URL != wantURL {
-		t.Errorf("秒传检查直链 = %+v, 期望 %q", checked.Record, wantURL)
-	}
 }

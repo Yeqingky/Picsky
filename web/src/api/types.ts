@@ -144,25 +144,11 @@ export interface UploadResult {
   format: string;
   ext: string;
   original_filename: string;
-  /** true 表示命中秒传 */
+  /** true 表示命中服务端去重 */
   dedup: boolean;
   /** false 表示复用, 不占配额 */
   quota_charged: boolean;
   created_at: string;
-}
-
-export interface UploadCheckRequest {
-  sha256: string;
-  policy_id?: number;
-}
-
-export interface UploadCheckResponse {
-  exists: boolean;
-  record?: {
-    id: number;
-    url: string;
-    size: number;
-  };
 }
 
 export interface UploadRequest {

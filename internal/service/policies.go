@@ -326,25 +326,19 @@ func (p *Policies) AllowedFor(principal *Principal) ([]model.StoragePolicy, erro
 }
 
 // Resolve 选择上传目标策略: 请求值 -> 用户默认 -> 组内第一个可用策略.
+// 显式请求的策略不存在, 已停用或不在用户组白名单时统一返回 404, 避免枚举策略 ID.
 func (p *Policies) Resolve(principal *Principal, requestedID *int64) (*model.StoragePolicy, error) {
 	if requestedID != nil {
-		policy, err := p.Get(*requestedID)
-		if err != nil {
-			return nil, err
-		}
-		if !policy.Enabled {
-			return nil, apperr.ErrPolicyNotAllowed.WithMessage("存储策略已停用")
-		}
 		allowed, err := p.AllowedFor(principal)
 		if err != nil {
 			return nil, err
 		}
 		for i := range allowed {
-			if allowed[i].ID == policy.ID {
+			if allowed[i].ID == *requestedID {
 				return &allowed[i], nil
 			}
 		}
-		return nil, apperr.ErrPolicyNotAllowed
+		return nil, apperr.ErrNotFound.WithMessage("存储策略不存在")
 	}
 
 	if principal.User.DefaultPolicyID != nil {

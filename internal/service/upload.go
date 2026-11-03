@@ -645,55 +645,6 @@ func UploadLimit(settings *Settings, group *model.Group) int64 {
 	return limit
 }
 
-// CheckResult 是秒传检查结果.
-type CheckResult struct {
-	Exists bool         `json:"exists"`
-	Record *CheckRecord `json:"record,omitempty"`
-}
-
-// CheckRecord 是秒传检查返回的当前用户记录摘要.
-type CheckRecord struct {
-	ID   int64  `json:"id"`
-	URL  string `json:"url"`
-	Size int64  `json:"size"`
-}
-
-// Check 秒传检查: 仅返回当前用户在同策略下相同 sha256 的记录.
-func (u *Upload) Check(principal *Principal, sha256 string, policyID *int64) (*CheckResult, error) {
-	sum := strings.ToLower(strings.TrimSpace(sha256))
-	if len(sum) != 64 || !isHex(sum) {
-		return nil, apperr.ErrInvalidRequest.WithMessage("sha256 必须是 64 位十六进制")
-	}
-	if !principal.Has(model.PermUpload) {
-		return nil, apperr.ErrForbidden.WithMessage("当前用户组没有上传权限")
-	}
-	policy, err := u.policies.Resolve(principal, policyID)
-	if err != nil {
-		return nil, err
-	}
-	var existing model.Image
-	err = u.db.Where("policy_id = ? AND sha256 = ? AND user_id = ? AND kind = ?", policy.ID, sum, principal.User.ID, model.KindImage).
-		Order("id ASC").First(&existing).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return &CheckResult{Exists: false}, nil
-	}
-	if err != nil {
-		return nil, apperr.ErrInternal.WithMessage(err.Error())
-	}
-	urls, err := u.policies.URLs(policy.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(urls) > 0 {
-		recordPath := existing.RelPath
-		if strings.TrimSpace(recordPath) == "" {
-			recordPath = existing.ObjectKey
-		}
-		existing.URL = defaultDomainRecordURL(urls[0].URL, recordPath, existing.URL)
-	}
-	return &CheckResult{Exists: true, Record: &CheckRecord{ID: existing.ID, URL: existing.URL, Size: existing.Size}}, nil
-}
-
 // freshUser 读取用户当前状态, 用于配额与限额判定.
 func (u *Upload) freshUser(userID int64) (*model.User, error) {
 	var user model.User
@@ -703,7 +654,7 @@ func (u *Upload) freshUser(userID int64) (*model.User, error) {
 	return &user, nil
 }
 
-// contentRecord 按内容哈希查询本策略下指定用户的记录 (秒传判定).
+// contentRecord 按内容哈希查询本策略下指定用户的记录 (去重判定).
 func (u *Upload) contentRecord(policyID int64, sha256 string, userID int64) (*model.Image, error) {
 	return contentRecordTx(u.db, policyID, sha256, userID)
 }
@@ -881,15 +832,4 @@ func resolveRecordURL(defaultURL, relPath string, prefixOverride bool, result st
 		return storage.JoinURL(defaultURL, objectPath), objectPath, nil
 	}
 	return result.URL, objectPath, nil
-}
-
-func isHex(value string) bool {
-	for _, r := range value {
-		switch {
-		case r >= '0' && r <= '9', r >= 'a' && r <= 'f':
-		default:
-			return false
-		}
-	}
-	return true
 }

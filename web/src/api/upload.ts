@@ -1,10 +1,5 @@
 import { api } from './client';
-import type {
-  Base64UploadRequest,
-  UploadCheckRequest,
-  UploadCheckResponse,
-  UploadResult,
-} from './types';
+import type { Base64UploadRequest, UploadResult } from './types';
 
 export interface UploadFileOptions {
   policyId?: number;
@@ -14,7 +9,7 @@ export interface UploadFileOptions {
 }
 
 export const uploadApi = {
-  /** multipart 上传; 秒传时后端返回 200, 正常上传返回 201, 两者响应体一致 */
+  /** multipart 上传; 服务端去重命中时返回 200, 正常上传返回 201, 两者响应体一致 */
   uploadFile: (
     { policyId, originalFilename, onProgress, signal }: UploadFileOptions,
     file: File,
@@ -36,9 +31,6 @@ export const uploadApi = {
       })
       .then((r) => r.data);
   },
-
-  check: (body: UploadCheckRequest) =>
-    api.post<UploadCheckResponse>('/upload/check', body).then((r) => r.data),
 
   uploadBase64: (body: Base64UploadRequest) =>
     api.post<UploadResult>('/upload/base64', body).then((r) => r.data),

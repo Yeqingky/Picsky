@@ -1269,19 +1269,10 @@ func TestUploadImagesAndKeys(t *testing.T) {
 	}
 	id := int64(record["id"].(float64))
 
-	// 秒传: 同内容再次上传返回 200 且不新建记录.
+	// 去重: 同内容再次上传返回 200 且不新建记录.
 	again := s.upload("/api/v1/upload", "photo2.png", content, nil, map[string]string{}, []*http.Cookie{cookie})
 	if again.Status != http.StatusOK || s.decode(again)["dedup"] != true {
-		t.Errorf("重复上传应命中秒传: %d %s", again.Status, string(again.Body))
-	}
-
-	checkSum := hashes["sha256"].(string)
-	check := s.json(http.MethodPost, "/api/v1/upload/check", map[string]any{
-		"sha256":    checkSum,
-		"policy_id": policyID,
-	}, []*http.Cookie{cookie})
-	if check.Status != http.StatusOK || s.decode(check)["exists"] != true {
-		t.Errorf("秒传检查失败: %d %s", check.Status, string(check.Body))
+		t.Errorf("重复上传应命中服务端去重: %d %s", again.Status, string(again.Body))
 	}
 
 	list := s.raw(http.MethodGet, "/api/v1/images?page=1&page_size=10", nil, nil, []*http.Cookie{cookie})
@@ -1414,52 +1405,6 @@ func TestUploadImagesAndKeys(t *testing.T) {
 	overview := s.decode(stats)
 	if overview["image_count"].(float64) < 1 {
 		t.Errorf("概览图片数不正确: %v", overview)
-	}
-}
-
-func TestUploadCheckDoesNotExposeOtherUsersRecord(t *testing.T) {
-	s := newServer(t)
-	ownerCookie, policyID := s.bootstrap()
-
-	uploaded := s.upload("/api/v1/upload", "private.png", pngContent(t, 19), map[string]string{
-		"policy_id": fmt.Sprint(policyID),
-	}, map[string]string{}, []*http.Cookie{ownerCookie})
-	if uploaded.Status != http.StatusCreated {
-		t.Fatalf("上传测试图片失败: %d %s", uploaded.Status, string(uploaded.Body))
-	}
-	record := s.decode(uploaded)
-	hashes, ok := record["hashes"].(map[string]any)
-	if !ok {
-		t.Fatalf("上传响应缺少哈希: %v", record["hashes"])
-	}
-	sha256, ok := hashes["sha256"].(string)
-	if !ok || sha256 == "" {
-		t.Fatalf("上传响应缺少 SHA-256: %v", hashes["sha256"])
-	}
-
-	var owner model.User
-	if err := s.db.Where("email = ?", "admin@example.com").First(&owner).Error; err != nil {
-		t.Fatalf("读取记录所有者失败: %v", err)
-	}
-	userLogin, userCookie := s.registerAndLogin("other", "other@example.com", "password123")
-	userID := int64(s.decode(userLogin)["id"].(float64))
-	if err := s.db.Model(&model.User{}).Where("id = ?", userID).Update("group_id", owner.GroupID).Error; err != nil {
-		t.Fatalf("授权测试用户使用同一策略失败: %v", err)
-	}
-
-	check := s.json(http.MethodPost, "/api/v1/upload/check", map[string]any{
-		"sha256":    sha256,
-		"policy_id": policyID,
-	}, []*http.Cookie{userCookie})
-	if check.Status != http.StatusOK {
-		t.Fatalf("跨用户秒传检查失败: %d %s", check.Status, string(check.Body))
-	}
-	result := s.decode(check)
-	if result["exists"] != false {
-		t.Errorf("跨用户记录应视为当前用户不存在: %s", string(check.Body))
-	}
-	if _, exists := result["record"]; exists {
-		t.Errorf("响应不得包含其他用户的记录 ID, URL 或大小: %s", string(check.Body))
 	}
 }
 

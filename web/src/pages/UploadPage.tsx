@@ -35,7 +35,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/tooltip';
 import { copyText, renderCopyText } from '../utils/clipboard';
 import type { CopyFormat } from '../utils/clipboard';
-import { sha256Hex } from '../utils/hash';
 import { STORAGE_KEYS } from '../utils/constants';
 import { cn } from '../lib/utils';
 
@@ -95,11 +94,9 @@ function policyAllowsFormat(formats: string[] | undefined, format: string): bool
 function matchesFilter(item: UploadItem, filter: UploadFilter): boolean {
   switch (filter) {
     case 'done':
-      return item.status === 'done' || item.status === 'duplicate';
+      return item.status === 'done';
     case 'uploading':
-      return (
-        item.status === 'uploading' || item.status === 'hashing' || item.status === 'compressing'
-      );
+      return item.status === 'uploading' || item.status === 'compressing';
     case 'queued':
       return item.status === 'pending';
     case 'failed':
@@ -232,7 +229,7 @@ export default function UploadPage() {
     };
   }, [canUpload, addFiles]);
 
-  // 串行处理队列: 计算 sha256 -> 秒传检查 -> 上传 (失败可重试)
+  // 串行处理队列: 压缩 -> 上传 (失败可重试)
   useEffect(() => {
     if (!canUpload || runningRef.current || policyId === null) return;
     const next = queue.find((item) => item.status === 'pending' && item.armed);
@@ -268,7 +265,6 @@ export default function UploadPage() {
                 // 编码结果没有更小: 保留原图与原始文件名
                 payload = next.file;
                 updateItem(next.id, {
-                  status: 'hashing',
                   compressionError: undefined,
                   compressedSize: compressed.file.size,
                 });
@@ -284,7 +280,6 @@ export default function UploadPage() {
                 payload = compressed.file;
                 updateItem(next.id, {
                   uploadFile: compressed.file,
-                  status: 'hashing',
                   compressionError: undefined,
                   compressedSize: compressed.file.size,
                 });
@@ -296,7 +291,7 @@ export default function UploadPage() {
                 updateItem(next.id, { status: 'skipped', progress: 0, compressionError: message });
                 return;
               }
-              updateItem(next.id, { status: 'hashing', compressionError: message });
+              updateItem(next.id, { compressionError: message });
             }
           }
         }
@@ -312,14 +307,7 @@ export default function UploadPage() {
           return;
         }
 
-        updateItem(next.id, { status: 'hashing', progress: 0, error: undefined });
-        const sha256 = await sha256Hex(payload);
-        const check = await uploadApi.check({ sha256, policy_id: targetPolicy });
-        if (check.exists && check.record) {
-          updateItem(next.id, { status: 'duplicate', progress: 100, dedupRecord: check.record });
-          return;
-        }
-        updateItem(next.id, { status: 'uploading' });
+        updateItem(next.id, { status: 'uploading', progress: 0, error: undefined });
         const result = await uploadApi.uploadFile(
           {
             policyId: targetPolicy,
@@ -365,13 +353,13 @@ export default function UploadPage() {
     for (const item of queue) {
       const payloadSize = item.uploadFile?.size ?? item.size;
       if (item.status !== 'skipped') bytes += payloadSize;
-      if (item.status === 'done' || item.status === 'duplicate') {
+      if (item.status === 'done') {
         done += 1;
         uploaded += payloadSize;
       } else if (item.status === 'uploading') {
         uploading += 1;
         uploaded += (payloadSize * item.progress) / 100;
-      } else if (item.status === 'hashing' || item.status === 'compressing') {
+      } else if (item.status === 'compressing') {
         uploading += 1;
       } else if (item.status === 'failed') {
         failed += 1;

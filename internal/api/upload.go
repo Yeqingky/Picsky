@@ -6,7 +6,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/yeqingky/Picsky/internal/apperr"
 	"github.com/yeqingky/Picsky/internal/httpupload"
 	"github.com/yeqingky/Picsky/internal/middleware"
 	"github.com/yeqingky/Picsky/internal/model"
@@ -52,25 +51,6 @@ func (s *Server) upload(c *gin.Context) {
 		return
 	}
 	c.JSON(upload.Status, s.toUploadDTO(upload))
-}
-
-// uploadCheck 秒传检查.
-func (s *Server) uploadCheck(c *gin.Context) {
-	principal := middleware.Principal(c)
-	var payload struct {
-		SHA256   string `json:"sha256"`
-		PolicyID *int64 `json:"policy_id"`
-	}
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		s.fail(c, apperr.ErrInvalidRequest.WithMessage("请求体解析失败: "+err.Error()))
-		return
-	}
-	result, err := s.svc.Upload.Check(principal, payload.SHA256, payload.PolicyID)
-	if err != nil {
-		s.fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, result)
 }
 
 // uploadBase64 处理 JSON base64 上传.

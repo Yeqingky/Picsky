@@ -73,16 +73,13 @@ export const upload = {
   queue: {
     statusPending: '等待中',
     statusCompressing: '压缩中',
-    statusHashing: '校验中',
     statusDone: '完成',
-    statusDuplicate: '已存在',
     statusFailed: '失败',
     statusSkipped: '已跳过',
     start: '开始上传 ({{count}})',
     retry: '重试',
   },
   error: {
-    hashFailed: '无法计算文件校验值',
     uploadFailed: '上传失败',
     compressFailed: '图片压缩失败',
     noPolicy: '请先选择存储策略',

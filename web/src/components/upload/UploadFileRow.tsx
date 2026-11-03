@@ -36,11 +36,10 @@ function StatusCell({ item }: { item: UploadItem }) {
 
   switch (item.status) {
     case 'done':
-    case 'duplicate':
       return (
         <span className="text-success flex items-center gap-1 text-xs whitespace-nowrap">
           <CircleCheck className="size-3.5" />
-          {t(item.status === 'done' ? 'upload.queue.statusDone' : 'upload.queue.statusDuplicate')}
+          {t('upload.queue.statusDone')}
         </span>
       );
     case 'uploading':
@@ -60,13 +59,6 @@ function StatusCell({ item }: { item: UploadItem }) {
         <span className="text-info flex items-center gap-1 text-xs whitespace-nowrap">
           <LoaderCircle className="size-3.5 animate-spin" />
           {t('upload.queue.statusCompressing')}
-        </span>
-      );
-    case 'hashing':
-      return (
-        <span className="text-info flex items-center gap-1 text-xs whitespace-nowrap">
-          <LoaderCircle className="size-3.5 animate-spin" />
-          {t('upload.queue.statusHashing')}
         </span>
       );
     case 'skipped':
@@ -200,11 +192,7 @@ export function UploadFileRow({
               size="icon-sm"
               className="text-muted-foreground hover:text-foreground"
               aria-label={t('upload.remove')}
-              disabled={
-                item.status === 'compressing' ||
-                item.status === 'hashing' ||
-                item.status === 'uploading'
-              }
+              disabled={item.status === 'compressing' || item.status === 'uploading'}
               onClick={() => onRemove(item.id)}
             >
               <X className="size-4" />
