@@ -30,6 +30,7 @@ export const adminPolicies = {
 
   type: {
     webdav: 'WebDAV',
+    ftp: 'FTP',
     sobot: 'Sobot',
     celine: '思琳中国',
     metaso: '秘塔',
@@ -145,6 +146,11 @@ export const adminPolicies = {
       bucketMissing: '存储桶 #{{id}} (列表中已不存在)',
       directory: '目录',
       directoryHint: '默认 /picsky; 上传与扫描只使用该目录.',
+      ftpEndpoint: '服务器地址',
+      ftpEndpointHint: 'FTP 服务器地址与端口; 端口缺省为 21.',
+      ftpEndpointPlaceholder: 'ftp.example.com:21',
+      ftpDirectory: '远程目录',
+      ftpDirectoryHint: '上传与扫描只使用该目录; 留空表示 FTP 根目录.',
       autoLogin: '自动登录',
       autoLoginHint:
         '开启后显示鉴权方式并通过登录获取 Refresh Token; 关闭时手动填写 Refresh Token.',

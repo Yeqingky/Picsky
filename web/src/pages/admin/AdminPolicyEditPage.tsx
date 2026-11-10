@@ -86,6 +86,7 @@ import type { PolicyTransferResult } from './policyTransfer';
  */
 const TYPE_OPTIONS = [
   'webdav',
+  'ftp',
   'sobot',
   'celine',
   'metaso',
@@ -104,6 +105,10 @@ const NEW_TYPE_TRAITS: Record<
   { capabilities: string[]; urlFromBackend: boolean; urlPrefixOverride?: boolean }
 > = {
   webdav: {
+    capabilities: ['upload', 'list', 'read', 'delete', 'overwrite', 'stat', 'mkdir'],
+    urlFromBackend: false,
+  },
+  ftp: {
     capabilities: ['upload', 'list', 'read', 'delete', 'overwrite', 'stat', 'mkdir'],
     urlFromBackend: false,
   },
@@ -197,6 +202,13 @@ const URL_RE = /^https?:\/\//i;
 const DEFAULT_PATH_TEMPLATE = '{md5:2}/{md5}.{ext}';
 const CLOUDREVE_DEFAULT_PATH_TEMPLATE = '{md5:2}/{md5}.{ext}';
 const CLOUDREVE_DEFAULT_DIRECTORY = '/picsky';
+/** FTP 远程目录留空表示服务器根目录, 不套用 Cloudreve 的默认目录 */
+const FTP_DEFAULT_DIRECTORY = '';
+
+/** 各驱动新建策略时的默认远程目录 */
+function defaultDirectoryFor(type: string): string {
+  return type === 'ftp' ? FTP_DEFAULT_DIRECTORY : CLOUDREVE_DEFAULT_DIRECTORY;
+}
 const PATH_EXT_SUFFIX = '.{ext}';
 const DEFAULT_CONFLICT_POLICY: ConflictPolicy = 'rename';
 
@@ -273,7 +285,7 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     directory:
       typeof policy.config.directory === 'string' && policy.config.directory.trim() !== ''
         ? policy.config.directory
-        : CLOUDREVE_DEFAULT_DIRECTORY,
+        : defaultDirectoryFor(policy.type),
     autoLogin: policy.config.auto_login === 'true',
     username: policy.secrets?.username ?? '',
     password: policy.secrets?.password ?? '',
@@ -765,6 +777,7 @@ export default function AdminPolicyEditPage() {
     const isCloudreve = form.type === 'cloudreve';
     const isOneImg = form.type === 'oneimg';
     const isAcgFaka = form.type === 'acgfaka';
+    const isFtp = form.type === 'ftp';
 
     const secrets: {
       username?: string;
@@ -854,7 +867,9 @@ export default function AdminPolicyEditPage() {
           path_template: form.pathTemplate.trim(),
           conflict_policy: form.conflictPolicy,
           reuse_released_seq: form.reuseReleasedSeq,
-          config: { endpoint: form.endpoint.trim() },
+          config: isFtp
+            ? { endpoint: form.endpoint.trim(), directory: form.directory.trim() }
+            : { endpoint: form.endpoint.trim() },
           urls: urlRows,
         };
     if (
@@ -1152,7 +1167,7 @@ export default function AdminPolicyEditPage() {
         type: nextType,
         hint: replaceHint ? driverDefaultHint(nextType) : current.hint,
         pathTemplate,
-        directory: CLOUDREVE_DEFAULT_DIRECTORY,
+        directory: defaultDirectoryFor(nextType),
         autoLogin: false,
         cloudreveLoggedIn: false,
         cloudreveRefreshToken: '',
@@ -1422,6 +1437,7 @@ export default function AdminPolicyEditPage() {
   const isAcgFaka = form.type === 'acgfaka';
   const isColorful = form.type === 'colorful';
   const isLittlePan = form.type === 'littlepan';
+  const isFtp = form.type === 'ftp';
 
   const credentialFields = (
     <>
@@ -1668,10 +1684,16 @@ export default function AdminPolicyEditPage() {
             <div className="flex flex-col gap-5">
               <FormField
                 id="policy-endpoint"
-                label={t('adminPolicies.edit.field.endpoint')}
+                label={
+                  isFtp
+                    ? t('adminPolicies.edit.field.ftpEndpoint')
+                    : t('adminPolicies.edit.field.endpoint')
+                }
                 error={errorFor('endpoint')}
                 hint={
-                  isCloudreve ? (
+                  isFtp ? (
+                    t('adminPolicies.edit.field.ftpEndpointHint')
+                  ) : isCloudreve ? (
                     <>
                       <ExternalLink href="https://github.com/netcccyun/pan">
                         {t('adminPolicies.type.cloudreve')}
@@ -1720,22 +1742,40 @@ export default function AdminPolicyEditPage() {
                           })
                   }
                   placeholder={
-                    isCloudreve
-                      ? t('adminPolicies.edit.field.cloudreveEndpointPlaceholder')
-                      : isOneImg
-                        ? t('adminPolicies.edit.field.oneimgEndpointPlaceholder')
-                        : isAcgFaka
-                          ? t('adminPolicies.edit.field.acgfakaEndpointPlaceholder')
-                          : isColorful
-                            ? t('adminPolicies.edit.field.colorfulEndpointPlaceholder')
-                            : isLittlePan
-                              ? t('adminPolicies.edit.field.littlepanEndpointPlaceholder')
-                              : t('adminPolicies.edit.field.endpointPlaceholder')
+                    isFtp
+                      ? t('adminPolicies.edit.field.ftpEndpointPlaceholder')
+                      : isCloudreve
+                        ? t('adminPolicies.edit.field.cloudreveEndpointPlaceholder')
+                        : isOneImg
+                          ? t('adminPolicies.edit.field.oneimgEndpointPlaceholder')
+                          : isAcgFaka
+                            ? t('adminPolicies.edit.field.acgfakaEndpointPlaceholder')
+                            : isColorful
+                              ? t('adminPolicies.edit.field.colorfulEndpointPlaceholder')
+                              : isLittlePan
+                                ? t('adminPolicies.edit.field.littlepanEndpointPlaceholder')
+                                : t('adminPolicies.edit.field.endpointPlaceholder')
                   }
                   aria-invalid={errorFor('endpoint') !== undefined}
                   required
                 />
               </FormField>
+              {isFtp && (
+                <FormField
+                  id="policy-ftp-directory"
+                  label={t('adminPolicies.edit.field.ftpDirectory')}
+                  hint={t('adminPolicies.edit.field.ftpDirectoryHint')}
+                  className="sm:w-80"
+                >
+                  <Input
+                    id="policy-ftp-directory"
+                    value={form.directory}
+                    onChange={(event) => updateForm({ directory: event.target.value })}
+                    placeholder="/htdocs"
+                    className="font-mono"
+                  />
+                </FormField>
+              )}
               {isCloudreve && (
                 <>
                   <FormField

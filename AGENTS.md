@@ -43,6 +43,7 @@ Picsky/
 |   |   |-- celine/    思琳中国驱动 (固定地址, 无配置, 仅上传)
 |   |   |-- cloudreve/ Cloudreve v4 驱动 (账号密码登录, 上传)
 |   |   |-- colorful/  彩虹外链网盘驱动 (站点地址, 公开上传, 仅上传)
+|   |   |-- ftp/       FTP 驱动 (服务器地址, 远程目录, 被动模式, 依赖 MLSD)
 |   |   |-- littlepan/ LittlePan 驱动 (站点地址, 公开上传与删除)
 |   |   |-- metaso/    秘塔驱动 (固定地址与公开前缀, 无配置, 仅上传)
 |   |   |-- oneimg/    初春图床驱动 (站点地址与 Token, 可选存储桶, 上传与远端缩略图)
@@ -83,7 +84,8 @@ Picsky/
 - `acgfaka` 驱动对接异次元店铺系统 (acg-faka): `config` 保存 `endpoint` 与 `auto_login` (`true` / `false`, 默认 `false`), `secrets` 保存 `cookie` (USER_SESSION 原值或完整 Cookie), 自动登录时另存 `username` / `password` / `cookie_expires`; 上传 `POST {endpoint}/user/api/ticket/upload?mime=image`, multipart 字段 `file`, 必须携带与站点同主机的 `Referer` 和 Cookie; 响应 `code=200` 时 `data.url` / `data.path` 为站点内相对路径, 驱动按站点地址补全为绝对直链; 只声明 `upload` 与 `url_from_backend`, 不支持扫描, 删除, 状态查询与分发域名. 单文件上限 10 MiB (10,485,760 字节), 仅支持 PNG / JPEG / WebP.
 - `acgfaka` 自动登录使用 `POST /user/api/authentication/login` (账号支持用户名, 邮箱或手机号), 支持 `42001` 两步验证并通过 `POST /user/api/authentication/totp` 完成; 登录后调用 `POST /user/api/security/deviceSessions` 读取 `current=true` 的 `expires_time` 作为 Cookie 到期时间. 站点必须关闭登录人机验证, 否则只能手动填写 Cookie. 上传返回会话失效时使用保存的账号密码重新登录并重试一次, 刷新后的 Cookie 在进程内缓存供后续请求复用; 两步验证账号在 Cookie 过期后无法自动刷新, 需重新登录. 管理后台手动模式提供 Cookie 验证按钮, 自动登录模式登录后 Cookie 输入框只读.
 - `cloudreve` 驱动对接 Cloudreve v4: `config` 保存 `endpoint`, `directory` (默认 `/picsky`), `auto_login` (`true` / `false`, 默认 `false`), `secrets` 保存账号邮箱, 密码与 `refresh_token` / `refresh_expires` / `access_expires`; 自动登录关闭时只显示手填 Refresh Token 并调用刷新接口显示两个到期时间, 开启时显示账号密码并强制登录获取 Refresh Token, 输入框只读; 开启自动登录后 Refresh Token 刷新失败可回退账号密码登录; 账号密码登录支持 2FA; 登录成功后保存 RefreshToken 并默认启用策略, 未登录可保存但必须禁用, 列表启用开关在有令牌时才可用. 登录响应缺少 `direct_link_batch_size` 或为 0 时拒绝登录; 上传通过创建目录, 上传会话, 分片与 `PUT /file/source` 直链接口完成, 只支持本机, relay 或 remote 中转策略, 其他存储策略明确报错; 驱动声明 `upload`, `stat`, `delete`, 由后端返回直链; 删除通过 `DELETE /file` 将对象移入 Cloudreve 回收站 (`skip_soft_delete: false`), 文件不存在或已在回收站视为已删除, 不做物理删除; 魔法路径默认 `{md5:2}/{md5}.{ext}`, 实际对象键为目录加魔法路径, 记录 `rel_path` 不含目录而 `object_key` 含目录.
-- 由后端下发直链 (`url_from_backend`) 的驱动不支持扫描补录, 扫描接口与列表按钮必须拒绝或禁用; 可扫描驱动在创建任务前执行可选预检 (`storage.ScanChecker`), WebDAV 使用根目录 PROPFIND 校验凭据, 预检失败不入队; 扫描任务最长运行 30 分钟.
+- `ftp` 驱动对接 FTP 服务器目录: `config` 保存服务器地址 `endpoint` (主机或 `主机:端口`, 允许 `ftp://` 前缀, 端口缺省 21) 与远程目录 `directory` (留空表示根目录), `secrets` 保存 `username` / `password` (留空按 `anonymous` 登录); 每次操作新建控制连接, 统一被动模式 (优先 EPSV, 回退 PASV, 数据连接优先复用控制连接主机地址以兼容 NAT), 上传 `STOR` 并按需逐级 `MKD`, 查询优先 `SIZE` / `MDTM` 并退化为 MLSD, 删除 `DELE` 且 550 时用查询区分不存在与无权限; 列举与扫描预检依赖 `MLSD`, 不支持 RFC 3659 的服务器直接报错; 声明 `upload`, `delete`, `overwrite`, `stat`, `list`, `read`, `mkdir`, 不实现 FTPS, 与 WebDAV 一样只是内部存储通道, 记录直链由分发域名拼接.
+- 由后端下发直链 (`url_from_backend`) 的驱动不支持扫描补录, 扫描接口与列表按钮必须拒绝或禁用; 可扫描驱动在创建任务前执行可选预检 (`storage.ScanChecker`), WebDAV 使用根目录 PROPFIND 校验凭据, FTP 使用远程目录 MLSD 校验凭据与目录, 预检失败不入队; 扫描任务最长运行 30 分钟.
 - 魔法路径模板必须包含内容哈希变量或单个 `{seq}`, 且必须以 `.{ext}` 结尾; `{seq}` 只允许 `rename`, 使用策略级原子计数器分配并跨输出格式共享, 已有匹配路径与扫描补录参与初始化与对账; 删除图片且外部对象确认删除后序号写入释放队列, 策略开关 `reuse_released_seq` 控制是否按先进先出复用, 关闭时仍记录; 模板变化时重置计数器并清空队列; 未使用 `{seq}` 时冲突重命名追加 `-N`, 其他生成变量在重试中固定.
 - 冲突策略只使用 `rename` / `skip`; `overwrite` 是后端能力声明, 不作为冲突策略.
 - Lsky Pro 兼容层是适配层: 不得绕过认证, 权限, 配额与能力降级; 兼容字段有变更时先更新 `docs/lsky-compat.md`.
@@ -110,7 +112,7 @@ Picsky/
 - 密码找回令牌必须限时, 一次性且绑定当前密码散列; 邮件链接只在 URL fragment 携带令牌, WebUI 立即清理地址栏并通过 POST body 提交; 重置密码与清除 TOTP 秘钥必须在同一事务中完成; 登录页仅在公开站点信息报告 SMTP 发信已配置时显示找回入口.
 - 所有应用 HTTP 响应必须设置 `Referrer-Policy: no-referrer`; WebUI HTML 入口声明同等 meta 策略.
 - 会话令牌必须绑定 `users.session_version`; 登出, 修改密码, 密码重置与管理员重置用户密码递增版本并吊销该账号的全部旧会话; Cookie 修改密码成功后为当前浏览器签发新会话.
-- 维护任务 (队列) 必须幂等可重试, 已完成任务可手动重跑, 不得绕过权限与能力降级; 外部对象删除成功与失败都必须写入维护队列, 驱动必须校验删除响应; 失败的对象删除任务保留为 `failed`, 不自动重试也不自动清理, 必须由管理员手动重试或删除, 重试成功后释放 `{seq}`; 手动策略扫描必须立即创建任务并返回任务 ID, 由后台队列列举并持久化对象清单后读取解析, 前端通过任务状态接口查询状态; WebDAV 只是内部存储通道, 不得对外暴露.
+- 维护任务 (队列) 必须幂等可重试, 已完成任务可手动重跑, 不得绕过权限与能力降级; 外部对象删除成功与失败都必须写入维护队列, 驱动必须校验删除响应; 失败的对象删除任务保留为 `failed`, 不自动重试也不自动清理, 必须由管理员手动重试或删除, 重试成功后释放 `{seq}`; 手动策略扫描必须立即创建任务并返回任务 ID, 由后台队列列举并持久化对象清单后读取解析, 前端通过任务状态接口查询状态; WebDAV 与 FTP 只是内部存储通道, 不得对外暴露.
 - 内置用户组 (`管理员` / `只读`, 由 `groups.is_system` 标记) 的权限位固定, 不可删除, 不可设为默认组; 调整组规则时同步更新 `docs/permissions.md`.
 - 删除用户组时必须同时检查 `users.group_id` 与 `users.restore_group_id`, 避免验证或解封后恢复到已删除的用户组.
 - 后台区域入口按任一管理权限位判定 (`view_all`, `delete_all`, `manage_policies`, `manage_users`, `manage_groups`, `manage_settings`, `view_logs`), 各管理接口仍按自身权限位校验; `/admin/stats` 只要求后台入口.
