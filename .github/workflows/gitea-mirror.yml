@@ -1,0 +1,32 @@
+name: gitea-mirror
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: gitea-mirror
+  cancel-in-progress: false
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: mirror to Gitea
+        env:
+          GITEA_ACCESS_TOKEN: ${{ secrets.GITEA_ACCESS_TOKEN }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          timeout 300 git clone --mirror "https://github.com/${GITHUB_REPOSITORY}.git" mirror.git
+          cd mirror.git
+          git remote add gitea "https://git.ovh.im/yeqing/Picsky.git"
+          git config credential.helper '!f() { echo "username=yeqing"; echo "password=${GITEA_ACCESS_TOKEN}"; }; f'
+          for attempt in 1 2 3; do
+            if timeout 300 git push --prune gitea "+refs/heads/*:refs/heads/*" "+refs/tags/*:refs/tags/*"; then
+              exit 0
+            fi
+            echo "Gitea mirror push failed (attempt ${attempt}/3)" >&2
+            sleep 5
+          done
+          exit 1
