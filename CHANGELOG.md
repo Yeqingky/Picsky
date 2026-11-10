@@ -1,5 +1,9 @@
 # v0.6.4-rc.1
 
+## 变更
+
+- Docker 镜像工作流改为仅在 `vX.Y.Z` tag push 时触发, 构建并发布版本 tag 与 `latest`; 不再在分支 push 与 PR 上构建.
+
 ## 新增
 
 - 新增 `gitea-mirror` GitHub Actions 工作流: push 与手动触发时把全部分支与 tag 镜像同步到 `https://git.ovh.im/yeqing/Picsky.git`, 使用机密 `GITEA_ACCESS_TOKEN` 认证, 推送失败重试 3 次.

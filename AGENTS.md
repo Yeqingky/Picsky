@@ -72,7 +72,7 @@ Picsky/
 ## 开发约定
 
 - Git 提交身份: 用户名 `YeqingKy`, 邮箱 `me@yeqing.im`.
-- GitHub Actions 容器工作流在所有分支 push 与 PR 上构建; 分支 push 发布 `ghcr.io/yeqingky/picsky:<短 hash>`, `vX.Y.Z` tag 发布版本 tag 与 `latest`; PR 仅构建不推送; GHCR 认证使用 `GITHUB_TOKEN`.
+- GitHub Actions 容器工作流仅在 `vX.Y.Z` tag push 时构建并发布 `ghcr.io/yeqingky/picsky:<版本 tag>` 与 `latest`; 分支 push 与 PR 不构建; GHCR 认证使用 `GITHUB_TOKEN`.
 - `gitea-mirror` 工作流在 push 与手动触发时把分支与 tag 镜像推送到 `https://git.ovh.im/yeqing/Picsky.git`, 使用机密 `GITEA_ACCESS_TOKEN` 认证, 失败重试 3 次.
 - 不把 `README` 用作变更日志; 变更日志写入仓库根目录的 `CHANGELOG.md` 并随版本提交, 每次发布在文件顶部追加版本段落, 版本倒序排列; 未发布的修改写入顶部最新的 `vX.Y.Z-rc.N` 预发布段落, 不追加到已发布 tag 对应的版本段落; 版本数量较多或单文件过长时改用 `CHANGELOG/` 目录, 每个版本一个文件.
 - 存储适配器必须声明能力 (`upload`, `delete`, `overwrite`, `stat`, `presign`, `multipart`); 新增驱动不得假设后端支持删除或覆盖, 上层按能力降级. 驱动未声明 `delete` 时删除记录直接返回 403, 不删除记录与外部对象.
