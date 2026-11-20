@@ -59,6 +59,8 @@ func (s *Server) Register(router *gin.Engine) {
 	authGroup.POST("/verify-email", s.verifyEmail)
 	authGroup.POST("/password/reset/request", s.requestPasswordReset)
 	authGroup.POST("/password/reset", s.resetPassword)
+	authGroup.GET("/oidc/:id/start", s.oidcStart)
+	authGroup.GET("/oidc/:id/callback", s.oidcCallback)
 
 	authed := authGroup.Group("", s.auth.Required())
 	authed.POST("/logout", s.logout)
@@ -69,6 +71,9 @@ func (s *Server) Register(router *gin.Engine) {
 	authed.POST("/totp/enable", s.totpEnable)
 	authed.POST("/totp/disable", s.totpDisable)
 	authed.POST("/resend-verification", s.resendVerification)
+	authed.GET("/oidc/:id/bind", s.oidcBindStart)
+	authed.GET("/oidc-identities", s.listOIDCBindings)
+	authed.DELETE("/oidc-identities/:provider_id", s.unbindOIDCIdentity)
 
 	user := group.Group("", s.auth.Required())
 	user.POST("/upload", s.upload)
@@ -123,6 +128,14 @@ func (s *Server) Register(router *gin.Engine) {
 	settings.GET("", s.adminGetSettings)
 	settings.GET("/client-ip-sources", s.adminClientIPSources)
 	settings.PATCH("", s.adminUpdateSettings)
+
+	oidc := admin.Group("/oidc", middleware.Require(model.PermManageSettings))
+	oidc.GET("/providers", s.adminListOIDCProviders)
+	oidc.POST("/providers/allocate", s.adminAllocateOIDCProvider)
+	oidc.POST("/providers", s.adminCreateOIDCProvider)
+	oidc.POST("/discover", s.adminImportOIDCDiscovery)
+	oidc.PATCH("/providers/:id", s.adminUpdateOIDCProvider)
+	oidc.DELETE("/providers/:id", s.adminDeleteOIDCProvider)
 
 	tasks := admin.Group("/tasks", middleware.Require(model.PermManageSettings))
 	tasks.GET("", s.adminListTasks)
@@ -227,6 +240,11 @@ func (s *Server) health(c *gin.Context) {
 
 // publicSite 返回站点公开信息 (名称, 注册开关, 找回密码可用性, 人机验证配置与注册邮箱域名白名单).
 func (s *Server) publicSite(c *gin.Context) {
+	providers, err := s.svc.Auth.PublicOIDCProviders()
+	if err != nil {
+		s.log.Error("读取第三方登录提供方失败", "error", err)
+		providers = []service.OIDCPublicProvider{}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"site_name":                  s.svc.Settings.String("site_name"),
 		"register_enabled":           s.svc.Settings.Bool("register_enabled", true),
@@ -234,6 +252,7 @@ func (s *Server) publicSite(c *gin.Context) {
 		"captcha":                    s.svc.Captcha.Public(),
 		"registration_email_domains": splitEmailDomains(s.svc.Settings.String("registration_email_allowlist")),
 		"referrer_allowlist":         splitReferrerAllowlist(s.svc.Settings.String("referrer_allowlist")),
+		"oidc_providers":             providers,
 	})
 }
 

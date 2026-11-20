@@ -28,6 +28,15 @@ export interface SiteInfo {
   registration_email_domains: string[];
   /** Referrer 白名单; 命中域名后缀时发送 Referer, 空数组表示全部禁止 */
   referrer_allowlist: string[];
+  /** 已启用的第三方登录提供方 */
+  oidc_providers: OIDCPublicProvider[];
+}
+
+/** 登录页可见的第三方登录提供方 */
+export interface OIDCPublicProvider {
+  id: number;
+  name: string;
+  icon_url: string;
 }
 
 /* ------------------------------------------------------------------ 认证 */
@@ -54,6 +63,7 @@ export interface CurrentUser {
   id: number;
   username: string;
   nickname: string;
+  avatar_url: string;
   email: string;
   email_verified: boolean;
   group: GroupRef;
@@ -61,6 +71,14 @@ export interface CurrentUser {
   quota: QuotaInfo;
   default_policy_id: number | null;
   totp_enabled: boolean;
+}
+
+/** 当前用户已绑定的第三方身份 */
+export interface OIDCBinding {
+  provider_id: number;
+  provider_name: string;
+  icon_url: string;
+  subject: string;
 }
 
 export type LoginRequest =
@@ -587,6 +605,72 @@ export interface AdminStats {
   today_uploads: number;
   by_format: StatsByFormat[];
   by_policy: StatsByPolicy[];
+}
+
+/* ---------------------------------------------------------- 第三方登录 */
+
+export interface OIDCGroupMapping {
+  value: string;
+  group_id: number;
+}
+
+/** 新建应用的一次性 ID 分配; 保存前不会出现在提供方列表 */
+export interface AdminOIDCProviderAllocation {
+  provider_id: number;
+  allocation_token: string;
+  redirect_uri: string;
+  expires_at: string;
+}
+
+/** 从 URL 导入的发现文档 JSON */
+export interface AdminOIDCDiscoveryImport {
+  discovery_document: string;
+  discovery_url: string;
+}
+
+/** 管理端第三方登录提供方; 客户端密钥只返回是否已设置 */
+export interface AdminOIDCProvider {
+  id: number;
+  name: string;
+  icon_url: string;
+  discovery_url: string;
+  discovery_document: string;
+  client_id: string;
+  scopes: string;
+  enabled: boolean;
+  allow_unbound: boolean;
+  client_secret_set: boolean;
+  sub_path: string;
+  email_path: string;
+  name_path: string;
+  picture_path: string;
+  group_claim: string;
+  group_mappings: OIDCGroupMapping[];
+  redirect_uri: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminOIDCProviderWriteRequest {
+  /** 仅创建时提交: 一次性分配的应用 ID 与令牌 */
+  id?: number;
+  allocation_token?: string;
+  name: string;
+  icon_url: string;
+  discovery_url: string;
+  discovery_document: string;
+  client_id: string;
+  client_secret?: string;
+  clear_client_secret?: boolean;
+  scopes: string;
+  enabled: boolean;
+  allow_unbound: boolean;
+  sub_path: string;
+  email_path: string;
+  name_path: string;
+  picture_path: string;
+  group_claim: string;
+  group_mappings: OIDCGroupMapping[];
 }
 
 /* ---------------------------------------------------------------- 权限位 */

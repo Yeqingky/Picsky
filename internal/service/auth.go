@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/mail"
 	"strconv"
 	"strings"
@@ -97,6 +98,9 @@ type Auth struct {
 	registerMu                sync.Mutex
 	loginChallengesMu         sync.Mutex
 	loginChallenges           map[string]loginChallenge
+	oidcHTTPClient            *http.Client
+	oidcMu                    sync.Mutex
+	oidcPending               map[string]oidcPendingFlow
 }
 
 // NewAuth 创建认证服务.
@@ -115,6 +119,8 @@ func NewAuth(database *gorm.DB, settings *Settings, cipher *crypto.Cipher, audit
 		passwordResetLimiter:      NewRateLimiter(passwordResetRequestWindow),
 		verificationResendLimiter: NewRateLimiter(verificationResendWindow),
 		loginChallenges:           make(map[string]loginChallenge),
+		oidcHTTPClient:            &http.Client{Timeout: 15 * time.Second},
+		oidcPending:               make(map[string]oidcPendingFlow),
 	}
 }
 
@@ -483,7 +489,10 @@ func (a *Auth) loginWithChallenge(token, code, ip, userAgent string) (*model.Use
 }
 
 func (a *Auth) finishLogin(user *model.User, ip, userAgent, ipKey, identifierKey string) error {
+	return a.finishLoginWithDetail(user, ip, userAgent, ipKey, identifierKey, nil)
+}
 
+func (a *Auth) finishLoginWithDetail(user *model.User, ip, userAgent, ipKey, identifierKey string, detail map[string]any) error {
 	now := nowUTC()
 	if err := a.db.Model(&model.User{}).Where("id = ?", user.ID).Updates(map[string]any{
 		"last_login_at": now,
@@ -497,7 +506,7 @@ func (a *Auth) finishLogin(user *model.User, ip, userAgent, ipKey, identifierKey
 	a.loginLimiter.Reset(identifierKey)
 	a.loginLimiter.Reset(ipKey)
 
-	a.audit.Recordf(Entry{UserID: &user.ID, Action: "login", TargetType: "user", TargetID: &user.ID, IP: ip, UserAgent: userAgent})
+	a.audit.Recordf(Entry{UserID: &user.ID, Action: "login", TargetType: "user", TargetID: &user.ID, Detail: detail, IP: ip, UserAgent: userAgent})
 	return nil
 }
 
@@ -781,7 +790,8 @@ func (a *Auth) RequestPasswordReset(ctx context.Context, email, captchaToken, ip
 		}
 		return apperr.ErrInternal.WithMessage(err.Error())
 	}
-	if user.Status == model.UserStatusBanned {
+	if user.Status == model.UserStatusBanned || user.PasswordHash == "" {
+		// 仅通过第三方登录创建的用户没有本地密码, 不发送找回链接.
 		return nil
 	}
 

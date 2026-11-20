@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { ApiError, authApi } from '../api';
 import type { CaptchaConfig } from '../api';
 import { CaptchaWidget } from '../components/CaptchaWidget';
+import { OidcLoginButtons } from '../components/OidcLoginButtons';
 import { AuthCardSkeleton } from '../components/skeletons';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
@@ -37,7 +38,11 @@ export default function LoginPage() {
   const [totpDialogOpen, setTotpDialogOpen] = useState(false);
   const [captchaToken, setCaptchaToken] = useState('');
   const [resetSignal, setResetSignal] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => {
+    const code = searchParams.get('oidc_error');
+    if (!code) return null;
+    return t(`auth.oidc.errors.${code}`, { defaultValue: t('auth.oidc.errors.failed') });
+  });
   const [totpError, setTotpError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [submitting, setSubmitting] = useState(false);
@@ -187,7 +192,9 @@ export default function LoginPage() {
           {submitting ? t('auth.login.submitting') : t('auth.login.submit')}
         </Button>
 
-        <div className="flex flex-col items-center gap-1">
+        <OidcLoginButtons />
+
+        <div className="flex flex-col items-center gap-2">
           <p className="text-sm">
             {t('auth.login.noAccount')}{' '}
             <RouterLink to="/register" className="text-primary underline-offset-4 hover:underline">

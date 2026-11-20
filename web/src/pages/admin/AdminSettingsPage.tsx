@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
+  Fingerprint,
   Globe,
   HardDrive,
   EyeOff,
@@ -9,7 +10,6 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   UserPlus,
-  X,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -18,14 +18,15 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { adminGroupsApi, adminSettingsApi } from '../../api';
 import type { ClientIPSource, SettingsPayload } from '../../api';
+import { OidcProvidersPanel } from '../../components/admin/OidcProvidersPanel';
 import { PageHeader } from '../../components/PageHeader';
+import { SecretField } from '../../components/SecretField';
 import { ErrorState } from '../../components/States';
 import { SizeInput } from '../../components/SizeInput';
 import { TagsInput } from '../../components/TagsInput';
 import { SkeletonSurface } from '../../components/skeletons';
 import { SITE_QUERY_KEY } from '../../hooks/useSite';
 import { Alert, AlertDescription } from '../../components/ui/alert';
-import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
@@ -40,7 +41,6 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { Switch } from '../../components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { Textarea } from '../../components/ui/textarea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip';
 import { cn } from '../../lib/utils';
 import { formatBytes } from '../../utils/format';
 import { normalizeReferrerDomain } from '../../utils/referrer';
@@ -162,6 +162,7 @@ const SETTING_TABS = [
   { id: 'site', labelKey: 'site', icon: <Globe className={TAB_ICON_CLASS} /> },
   { id: 'register', labelKey: 'register', icon: <UserPlus className={TAB_ICON_CLASS} /> },
   { id: 'captcha', labelKey: 'captcha', icon: <ShieldCheck className={TAB_ICON_CLASS} /> },
+  { id: 'oidc', labelKey: 'oidc', icon: <Fingerprint className={TAB_ICON_CLASS} /> },
   { id: 'email', labelKey: 'email', icon: <Mail className={TAB_ICON_CLASS} /> },
   { id: 'privacy', labelKey: 'privacy', icon: <EyeOff className={TAB_ICON_CLASS} /> },
   { id: 'quota', labelKey: 'quota', icon: <HardDrive className={TAB_ICON_CLASS} /> },
@@ -329,67 +330,6 @@ function SwitchField({
   );
 }
 
-/** 不回显的敏感项: 密码输入 + 清除按钮 + 是否已设置状态 */
-function SecretField({
-  id,
-  label,
-  hint,
-  value,
-  isSet,
-  onChange,
-  onClear,
-  className,
-}: {
-  id: string;
-  label: string;
-  hint: string;
-  value: string;
-  isSet: boolean;
-  onChange: (next: string) => void;
-  onClear: () => void;
-  className?: string;
-}) {
-  const { t } = useTranslation();
-  const clearLabel = t('adminSystem.settings.clearSecret');
-  return (
-    <div className={cn('flex flex-col gap-1.5', className)}>
-      <Label htmlFor={id}>{label}</Label>
-      <div className="flex items-center gap-1.5">
-        <Input
-          id={id}
-          type="password"
-          autoComplete="new-password"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="min-w-0 flex-1"
-        />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={clearLabel}
-              onClick={onClear}
-              disabled={!isSet}
-            >
-              <X />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{clearLabel}</TooltipContent>
-        </Tooltip>
-      </div>
-      <p className="text-muted-foreground text-xs">{hint}</p>
-      <Badge
-        variant="outline"
-        className={cn('w-fit', isSet && 'border-transparent bg-success/10 text-success')}
-      >
-        {isSet ? t('adminSystem.settings.secretSet') : t('adminSystem.settings.secretUnset')}
-      </Badge>
-    </div>
-  );
-}
-
 /** 首屏骨架: 标签栏与表单行, 与真实内容同尺寸 */
 function SettingsSkeleton({ tab }: { tab: SettingTabId }) {
   const { t } = useTranslation();
@@ -397,6 +337,7 @@ function SettingsSkeleton({ tab }: { tab: SettingTabId }) {
     site: 4,
     register: 4,
     captcha: 4,
+    oidc: 3,
     email: 6,
     privacy: 1,
     quota: 2,
@@ -406,6 +347,7 @@ function SettingsSkeleton({ tab }: { tab: SettingTabId }) {
     site: ['sm:max-w-[220px]', 'sm:max-w-lg', 'sm:max-w-lg', 'sm:max-w-[220px]'],
     register: ['', '', 'sm:max-w-lg', 'sm:max-w-sm'],
     captcha: ['sm:max-w-[220px]', 'sm:max-w-lg', 'sm:max-w-lg', 'sm:max-w-sm'],
+    oidc: [],
     email: [
       'sm:max-w-sm',
       'sm:max-w-40',
@@ -437,6 +379,22 @@ function SettingsSkeleton({ tab }: { tab: SettingTabId }) {
       </div>
       <div className="mt-6 flex max-w-2xl flex-col gap-5">
         {Array.from({ length: rowCounts[tab] }, (_, index) => {
+          if (tab === 'oidc') {
+            return (
+              <div
+                key={index}
+                className="border-border flex items-center gap-3 rounded-xl border p-4"
+              >
+                <Skeleton className="size-8 rounded-lg" />
+                <div className="flex flex-1 flex-col gap-2">
+                  <Skeleton className="h-4 w-32 rounded-sm" />
+                  <Skeleton className="h-3 w-24 rounded-sm" />
+                </div>
+                <Skeleton className="h-5 w-9 rounded-full" />
+                <Skeleton className="size-7 rounded-lg" />
+              </div>
+            );
+          }
           const switchField = (tab === 'register' && index < 2) || (tab === 'other' && index === 2);
           const hasHint =
             (tab === 'site' && index > 0) ||
@@ -616,9 +574,8 @@ export default function AdminSettingsPage() {
   const header = (
     <PageHeader
       title={t('adminSystem.settings.title')}
-      description={t('adminSystem.settings.description')}
       actions={
-        draft ? (
+        tab === 'oidc' ? undefined : draft ? (
           saveActions
         ) : settingsQuery.isPending ? (
           <>
@@ -932,6 +889,10 @@ export default function AdminSettingsPage() {
               />
             </>
           )}
+        </TabsContent>
+
+        <TabsContent value="oidc" className={TAB_PANEL_CLASS}>
+          <OidcProvidersPanel groups={groups} groupsError={groupsQuery.isError} />
         </TabsContent>
 
         <TabsContent value="email" className={TAB_PANEL_CLASS}>

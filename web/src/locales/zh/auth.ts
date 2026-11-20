@@ -19,6 +19,26 @@ export const auth = {
     forgotPassword: '忘记密码?',
   },
 
+  oidc: {
+    title: '第三方登录',
+    loginWith: '使用 {{name}} 登录',
+    errors: {
+      oidc_not_found: '第三方登录提供方不存在',
+      oidc_disabled: '第三方登录提供方已停用',
+      oidc_state_invalid: '登录状态已过期, 请重新发起第三方登录',
+      oidc_denied: '第三方登录已取消或授权失败',
+      oidc_unbound: '该第三方账号尚未绑定本站账号',
+      oidc_banned: '账号已封禁',
+      oidc_email_unverified: '第三方账号邮箱未验证, 无法绑定本站账号',
+      oidc_email_conflict: '该邮箱已注册, 请使用本站账号登录',
+      oidc_identity_conflict: '该第三方账号已绑定其他用户',
+      oidc_provider_already_bound: '该登录方式已绑定其他第三方账号',
+      oidc_last_login_method: '至少保留一个登录方式',
+      oidc_site_url: '站点地址未配置, 请联系管理员',
+      oidc_failed: '第三方登录失败, 请稍后重试',
+    },
+  },
+
   register: {
     title: '注册',
     username: '用户名',

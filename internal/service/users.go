@@ -396,6 +396,9 @@ func (u *Users) Delete(id int64, actor *Principal, ip, userAgent string) error {
 		if err := tx.Where("user_id = ?", user.ID).Delete(&model.APIKey{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("user_id = ?", user.ID).Delete(&model.OIDCIdentity{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&model.User{}, user.ID).Error
 	}); err != nil {
 		return apperr.ErrInternal.WithMessage("删除用户失败: " + err.Error())

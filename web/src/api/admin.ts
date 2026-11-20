@@ -5,6 +5,10 @@ import type {
   AcgFakaTwoFactorRequest,
   AdminGroup,
   AdminGroupWriteRequest,
+  AdminOIDCDiscoveryImport,
+  AdminOIDCProvider,
+  AdminOIDCProviderAllocation,
+  AdminOIDCProviderWriteRequest,
   AdminPolicy,
   AdminPolicyWriteRequest,
   AdminStats,
@@ -124,6 +128,24 @@ export const adminPoliciesApi = {
     api
       .post<{ cookie_expires: string }>('/admin/policies/acgfaka/session', body)
       .then((r) => r.data),
+};
+
+export const adminOidcApi = {
+  list: () => api.get<AdminOIDCProvider[]>('/admin/oidc/providers').then((r) => r.data),
+
+  allocate: () =>
+    api.post<AdminOIDCProviderAllocation>('/admin/oidc/providers/allocate').then((r) => r.data),
+
+  importDiscovery: (url: string) =>
+    api.post<AdminOIDCDiscoveryImport>('/admin/oidc/discover', { url }).then((r) => r.data),
+
+  create: (body: AdminOIDCProviderWriteRequest) =>
+    api.post<AdminOIDCProvider>('/admin/oidc/providers', body).then((r) => r.data),
+
+  update: (id: number, body: Partial<AdminOIDCProviderWriteRequest>) =>
+    api.patch<AdminOIDCProvider>(`/admin/oidc/providers/${id}`, body).then((r) => r.data),
+
+  remove: (id: number) => api.delete<void>(`/admin/oidc/providers/${id}`).then(() => undefined),
 };
 
 export const adminSettingsApi = {

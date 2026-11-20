@@ -22,7 +22,7 @@ import {
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../hooks/useAuth';
-import { useSiteName } from '../hooks/useSite';
+import { useReferrerPolicy, useSiteName } from '../hooks/useSite';
 import { cravatarAvatarUrl } from '../utils/avatar';
 import { isAdminVisible, hasPermission } from '../utils/permissions';
 import type { PermissionName } from '../api/types';
@@ -257,7 +257,11 @@ function UserMenu() {
   const { user, logout, permissions } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const avatarUrl = useMemo(() => cravatarAvatarUrl(user?.email), [user?.email]);
+  const avatarUrl = useMemo(
+    () => user?.avatar_url || cravatarAvatarUrl(user?.email),
+    [user?.avatar_url, user?.email],
+  );
+  const avatarReferrerPolicy = useReferrerPolicy(avatarUrl);
 
   const handleLogout = async () => {
     setOpen(false);
@@ -274,7 +278,9 @@ function UserMenu() {
           className="hover:bg-accent rounded-full p-0.5 transition-colors"
         >
           <Avatar className="size-8">
-            {avatarUrl && <AvatarImage src={avatarUrl} alt="" />}
+            {avatarUrl && (
+              <AvatarImage src={avatarUrl} alt="" referrerPolicy={avatarReferrerPolicy} />
+            )}
             <AvatarFallback className="text-xs">
               {(user?.nickname || user?.username || '?').slice(0, 1).toUpperCase()}
             </AvatarFallback>

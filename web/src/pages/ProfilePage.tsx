@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ApiError, authApi } from '../api';
-import type { PasswordChangeRequest, TotpSetupResponse } from '../api';
+import type { OIDCBinding, PasswordChangeRequest, TotpSetupResponse } from '../api';
+import { useConfirm } from '../components/ConfirmDialog';
+import { OidcProviderIcon } from '../components/OidcProviderIcon';
 import { PageHeader } from '../components/PageHeader';
 import { CopyButton } from '../components/CopyButton';
 import { QuotaBar } from '../components/QuotaBar';
@@ -24,7 +27,9 @@ import {
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
+import { Skeleton } from '../components/ui/skeleton';
 import { useAuth } from '../hooks/useAuth';
+import { useSiteInfo } from '../hooks/useSite';
 import { useThemeMode } from '../theme/ThemeModeProvider';
 import type { ThemeMode } from '../theme';
 
@@ -66,6 +71,46 @@ export default function ProfilePage() {
   const { t } = useTranslation();
   const { user, isLoading, updateUser, refresh } = useAuth();
   const { mode, setMode } = useThemeMode();
+  const queryClient = useQueryClient();
+  const confirm = useConfirm();
+  const { data: siteInfo } = useSiteInfo();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const bindingsQuery = useQuery({
+    queryKey: ['auth', 'oidc-bindings'],
+    queryFn: authApi.oidcBindings,
+    enabled: Boolean(user),
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const bindings = useMemo(() => bindingsQuery.data ?? [], [bindingsQuery.data]);
+  const providers = useMemo(() => siteInfo?.oidc_providers ?? [], [siteInfo?.oidc_providers]);
+  const oidcRows = useMemo(() => {
+    const boundByProvider = new Map<number, OIDCBinding>(
+      bindings.map((binding) => [binding.provider_id, binding]),
+    );
+    const rows: Array<{
+      id: number;
+      name: string;
+      icon_url: string;
+      binding?: OIDCBinding;
+    }> = providers.map((provider) => ({
+      ...provider,
+      binding: boundByProvider.get(provider.id),
+    }));
+    for (const binding of bindings) {
+      if (!rows.some((row) => row.id === binding.provider_id)) {
+        rows.push({
+          id: binding.provider_id,
+          name: binding.provider_name,
+          icon_url: binding.icon_url,
+          binding,
+        });
+      }
+    }
+    return rows;
+  }, [bindings, providers]);
 
   const [nickname, setNickname] = useState('');
   const [oldPassword, setOldPassword] = useState('');
@@ -85,6 +130,30 @@ export default function ProfilePage() {
   useEffect(() => {
     setNickname(storedNickname);
   }, [storedNickname]);
+
+  useEffect(() => {
+    const success = searchParams.get('oidc_bind');
+    const error = searchParams.get('oidc_bind_error');
+    if (!success && !error) return;
+    if (success) {
+      toast.success(t('account.profile.oidcBoundSuccess'));
+    } else if (error) {
+      toast.error(t(`auth.oidc.errors.${error}`, { defaultValue: t('auth.oidc.errors.failed') }));
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('oidc_bind');
+    next.delete('oidc_bind_error');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, t]);
+
+  const unbindMutation = useMutation({
+    mutationFn: (providerId: number) => authApi.unbindOidc(providerId),
+    onSuccess: async () => {
+      toast.success(t('account.profile.oidcUnboundSuccess'));
+      await queryClient.invalidateQueries({ queryKey: ['auth', 'oidc-bindings'] });
+    },
+    onError: (error) => toast.error(errorMessage(error, t('common.error.unknown'))),
+  });
 
   const resendMutation = useMutation({
     mutationFn: () => authApi.resendVerification(),
@@ -182,6 +251,15 @@ export default function ProfilePage() {
     }
   };
 
+  const handleUnbind = async (providerId: number, providerName: string) => {
+    const confirmed = await confirm({
+      danger: true,
+      title: t('account.profile.oidcUnbindTitle', { name: providerName }),
+      description: t('account.profile.oidcUnbindDescription'),
+    });
+    if (confirmed) unbindMutation.mutate(providerId);
+  };
+
   return (
     <>
       <PageHeader title={t('nav.profile')} description={t('account.profile.description')} />
@@ -254,6 +332,58 @@ export default function ProfilePage() {
             </div>
           )}
         </SectionCard>
+
+        {oidcRows.length > 0 && (
+          <SectionCard title={t('account.profile.oidcSection')}>
+            {bindingsQuery.isPending ? (
+              <div className="flex flex-col gap-3">
+                {Array.from({ length: 2 }, (_, index) => (
+                  <div key={index} className="flex items-center gap-3">
+                    <Skeleton className="size-5 rounded-sm" />
+                    <Skeleton className="h-4 w-32 rounded-sm" />
+                    <Skeleton className="ml-auto h-7 w-16 rounded-lg" />
+                  </div>
+                ))}
+              </div>
+            ) : bindingsQuery.isError ? (
+              <Alert variant="destructive">
+                <AlertDescription>
+                  {errorMessage(bindingsQuery.error, t('common.state.loadFailed'))}
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {oidcRows.map((row) => (
+                  <div key={row.id} className="flex items-center gap-3">
+                    <OidcProviderIcon url={row.icon_url} className="size-5" />
+                    <span className="min-w-0 flex-1 truncate text-sm">{row.name}</span>
+                    {row.binding && (
+                      <Badge className="border-transparent bg-success/10 text-success">
+                        {t('account.profile.oidcBound')}
+                      </Badge>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={unbindMutation.isPending}
+                      onClick={() => {
+                        if (row.binding) {
+                          void handleUnbind(row.id, row.name);
+                        } else {
+                          window.location.assign(`/api/v1/auth/oidc/${row.id}/bind`);
+                        }
+                      }}
+                    >
+                      {row.binding
+                        ? t('account.profile.oidcUnbind')
+                        : t('account.profile.oidcBind')}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+        )}
 
         <SectionCard title={t('account.profile.passwordSection')}>
           <p className="text-muted-foreground text-sm">

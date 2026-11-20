@@ -32,6 +32,7 @@ type meDTO struct {
 	ID              int64       `json:"id"`
 	Username        string      `json:"username"`
 	Nickname        string      `json:"nickname"`
+	AvatarURL       string      `json:"avatar_url"`
 	Email           string      `json:"email"`
 	EmailVerified   bool        `json:"email_verified"`
 	Group           groupRefDTO `json:"group"`
@@ -50,6 +51,7 @@ func (s *Server) meResponse(principal *service.Principal) meDTO {
 		ID:              user.ID,
 		Username:        user.Username,
 		Nickname:        user.Nickname,
+		AvatarURL:       user.AvatarURL,
 		Email:           user.Email,
 		EmailVerified:   user.EmailVerifiedAt != nil,
 		Group:           groupRefDTO{ID: principal.Group.ID, Name: principal.Group.Name},
@@ -330,11 +332,15 @@ func (s *Server) resendVerification(c *gin.Context) {
 
 // setSessionCookie 写入或清除会话 cookie.
 func (s *Server) setSessionCookie(c *gin.Context, token string, maxAge int) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(middleware.SessionCookieName, token, maxAge, "/", "", s.secureCookie(c), true)
+}
+
+// secureCookie 判断当前请求是否必须使用 Secure cookie: 原生 TLS, HTTPS 站点地址或可信代理标记.
+func (s *Server) secureCookie(c *gin.Context) bool {
 	siteURL := strings.TrimSpace(s.svc.Settings.String("site_url"))
 	secureSiteURL := len(siteURL) >= len("https://") && strings.EqualFold(siteURL[:len("https://")], "https://")
 	// The reverse proxy must overwrite X-Forwarded-Proto and keep the application port private.
 	secureProxy := strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")), "https")
-	secure := c.Request.TLS != nil || secureSiteURL || secureProxy
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(middleware.SessionCookieName, token, maxAge, "/", "", secure, true)
+	return c.Request.TLS != nil || secureSiteURL || secureProxy
 }

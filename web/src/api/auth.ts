@@ -3,6 +3,7 @@ import type {
   CaptchaConfig,
   CurrentUser,
   LoginRequest,
+  OIDCBinding,
   PasswordResetRequest,
   PasswordResetConfirmRequest,
   PasswordChangeRequest,
@@ -56,4 +57,10 @@ export const authApi = {
 
   resendVerification: () =>
     api.post<void>('/auth/resend-verification', undefined, { silent: true }).then(() => undefined),
+
+  oidcBindings: () =>
+    api.get<OIDCBinding[]>('/auth/oidc-identities', { silent: true }).then((r) => r.data),
+
+  unbindOidc: (providerId: number) =>
+    api.delete<void>(`/auth/oidc-identities/${providerId}`).then(() => undefined),
 };

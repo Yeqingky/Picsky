@@ -8,6 +8,7 @@ export { uploadApi } from './upload';
 export {
   adminGroupsApi,
   adminLogsApi,
+  adminOidcApi,
   adminPoliciesApi,
   adminSettingsApi,
   adminStatsApi,

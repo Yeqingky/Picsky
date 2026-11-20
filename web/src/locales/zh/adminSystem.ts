@@ -2,7 +2,6 @@
 export const adminSystem = {
   settings: {
     title: '系统设置',
-    description: '站点信息, 注册与人机验证, 邮件发送, 上传限制与维护策略',
     saved: '设置已保存',
     resetDone: '已恢复到最近保存的设置',
     invalidForm: '请先修正表单中标红的字段',
@@ -16,6 +15,7 @@ export const adminSystem = {
       site: '站点',
       register: '注册',
       captcha: '人机验证',
+      oidc: '第三方登录',
       email: '邮箱',
       privacy: '隐私',
       quota: '格式与大小',

@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { ApiError, authApi } from '../api';
 import type { CaptchaConfig } from '../api';
 import { CaptchaWidget } from '../components/CaptchaWidget';
+import { OidcLoginButtons } from '../components/OidcLoginButtons';
 import { AuthCardSkeleton } from '../components/skeletons';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
@@ -283,7 +284,9 @@ export default function RegisterPage() {
         {submitting ? t('auth.register.submitting') : t('auth.register.submit')}
       </Button>
 
-      <div className="flex flex-col items-center gap-1">
+      <OidcLoginButtons />
+
+      <div className="flex flex-col items-center gap-2">
         <p className="text-sm">
           {t('auth.register.hasAccount')}{' '}
           <RouterLink to="/login" className="text-primary underline-offset-4 hover:underline">

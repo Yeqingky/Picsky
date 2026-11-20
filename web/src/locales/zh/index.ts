@@ -9,6 +9,7 @@ import { gallery } from './gallery';
 import { admin } from './admin';
 import { adminPolicies } from './adminPolicies';
 import { adminSystem } from './adminSystem';
+import { adminOidc } from './adminOidc';
 
 /** 首版仅中文; 结构按命名空间划分, 追加语言只需新增同构资源目录 */
 export const zh = {
@@ -23,6 +24,7 @@ export const zh = {
   admin,
   adminPolicies,
   adminSystem,
+  adminOidc,
 };
 
 export type ZhResources = typeof zh;

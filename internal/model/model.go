@@ -119,6 +119,7 @@ type User struct {
 	PasswordHash    string     `gorm:"size:255;not null" json:"-"`
 	EmailVerifiedAt *time.Time `json:"email_verified_at"`
 	Nickname        string     `gorm:"size:64" json:"nickname"`
+	AvatarURL       string     `gorm:"size:512" json:"avatar_url"`
 	GroupID         int64      `gorm:"not null;index" json:"group_id"`
 	RestoreGroupID  *int64     `gorm:"index" json:"-"`
 	DefaultPolicyID *int64     `json:"default_policy_id"`
@@ -215,6 +216,61 @@ type MaintenanceTask struct {
 	FinishedAt *time.Time `json:"finished_at"`
 }
 
+// OIDCProvider 是第三方登录提供方; ClientSecret 以 AES-256-GCM 密文存储.
+type OIDCProvider struct {
+	ID                int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name              string    `gorm:"size:64;not null" json:"name"`
+	IconURL           string    `gorm:"size:512" json:"icon_url"`
+	DiscoveryURL      string    `gorm:"size:512;not null" json:"discovery_url"`
+	DiscoveryDocument string    `gorm:"type:text;not null;default:''" json:"discovery_document"`
+	ClientID          string    `gorm:"size:255;not null" json:"client_id"`
+	ClientSecret      string    `gorm:"type:text" json:"-"`
+	Scopes            string    `gorm:"size:255;not null;default:'openid email profile'" json:"scopes"`
+	Enabled           bool      `gorm:"not null;default:false" json:"enabled"`
+	AllowUnbound      bool      `gorm:"not null;default:false" json:"allow_unbound"`
+	SubPath           string    `gorm:"size:128;not null;default:'sub'" json:"sub_path"`
+	EmailPath         string    `gorm:"size:128;not null;default:'email'" json:"email_path"`
+	NamePath          string    `gorm:"size:128;not null;default:'name'" json:"name_path"`
+	PicturePath       string    `gorm:"size:128;not null;default:'picture'" json:"picture_path"`
+	GroupClaim        string    `gorm:"size:128" json:"group_claim"`
+	GroupMappings     string    `gorm:"type:text;not null;default:'[]'" json:"-"`
+	CreatedAt         time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt         time.Time `gorm:"not null" json:"updated_at"`
+}
+
+// TableName 固定表名, 避免 GORM 把 OIDC 初始缩写拆成 o_id_c_providers.
+func (OIDCProvider) TableName() string { return "oidc_providers" }
+
+// OIDCGroupMapping 把用户组声明值映射到本地用户组; 仅在新用户首次登录时生效.
+type OIDCGroupMapping struct {
+	Value   string `json:"value"`
+	GroupID int64  `json:"group_id"`
+}
+
+// OIDCIdentity 绑定第三方提供方的 sub 与本地用户.
+type OIDCIdentity struct {
+	ID         int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	ProviderID int64     `gorm:"not null;uniqueIndex:idx_oidc_identities_provider_subject,priority:1" json:"provider_id"`
+	Subject    string    `gorm:"size:255;not null;uniqueIndex:idx_oidc_identities_provider_subject,priority:2" json:"subject"`
+	UserID     int64     `gorm:"not null;index" json:"user_id"`
+	CreatedAt  time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"not null" json:"updated_at"`
+}
+
+// TableName 固定表名, 避免 GORM 把 OIDC 初始缩写拆成 o_id_c_identities.
+func (OIDCIdentity) TableName() string { return "oidc_identities" }
+
+// OIDCProviderAllocation 是一次性的第三方登录应用 ID 分配; 保存前删除记录, 之后该 ID 不再发放.
+type OIDCProviderAllocation struct {
+	ProviderID int64     `gorm:"primaryKey;autoIncrement:false" json:"provider_id"`
+	TokenHash  string    `gorm:"size:64;not null" json:"-"`
+	ExpiresAt  time.Time `gorm:"not null;index" json:"expires_at"`
+	CreatedAt  time.Time `gorm:"not null" json:"created_at"`
+}
+
+// TableName 固定表名.
+func (OIDCProviderAllocation) TableName() string { return "oidc_provider_allocations" }
+
 // AllModels 是迁移涉及的模型清单, 顺序即建表顺序.
 func AllModels() []any {
 	return []any{
@@ -230,5 +286,8 @@ func AllModels() []any {
 		&Setting{},
 		&MaintenanceTask{},
 		&PolicyScanManifest{},
+		&OIDCProvider{},
+		&OIDCIdentity{},
+		&OIDCProviderAllocation{},
 	}
 }
