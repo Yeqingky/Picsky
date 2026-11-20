@@ -97,7 +97,12 @@ export default function DashboardPage() {
 
   const imagesQuery = useQuery({
     queryKey: ['images', 'dashboard'],
-    queryFn: () => imagesApi.list({ page: 1, page_size: RECENT_LIMIT }),
+    queryFn: () => imagesApi.list({ page: 1, page_size: 1 }),
+    enabled: user !== null,
+  });
+  const recentQuery = useQuery({
+    queryKey: ['images', 'dashboard', 'recent'],
+    queryFn: () => imagesApi.list({ page: 1, page_size: RECENT_LIMIT, source: 'web,api' }),
     enabled: user !== null,
   });
   const policiesQuery = useQuery({
@@ -115,7 +120,7 @@ export default function DashboardPage() {
   const showStatsSkeleton = useDelayedLoading(
     policiesQuery.isPending || (canManageKeys && keysQuery.isPending),
   );
-  const showRecentSkeleton = useDelayedLoading(imagesQuery.isPending);
+  const showRecentSkeleton = useDelayedLoading(recentQuery.isPending);
 
   if (isLoading) return <DashboardSkeleton />;
   if (!user) return <ErrorState onRetry={() => void refresh()} />;
@@ -144,7 +149,7 @@ export default function DashboardPage() {
   const policies = policiesQuery.data ?? [];
   const activeKeys = keysQuery.data?.filter((key) => key.revoked_at === null).length;
   const defaultPolicy = policies.find((policy) => policy.id === user.default_policy_id);
-  const recent = imagesQuery.data?.items ?? [];
+  const recent = recentQuery.data?.items ?? [];
 
   // 骨架格数与真实数字格一致, 避免加载完成后跳动 (docs/webui.md 第 3 节)
   const tileCount = 4 + (remaining === null ? 0 : 1) + (canManageKeys ? 1 : 0);
@@ -293,8 +298,8 @@ export default function DashboardPage() {
             <CardContent className="flex flex-1 flex-col justify-center">
               {showRecentSkeleton ? (
                 <RecentUploadsSkeleton rows={RECENT_LIMIT} />
-              ) : imagesQuery.isError ? (
-                <ErrorState onRetry={() => void imagesQuery.refetch()} />
+              ) : recentQuery.isError ? (
+                <ErrorState onRetry={() => void recentQuery.refetch()} />
               ) : recent.length === 0 ? (
                 <EmptyState
                   title={t('dashboard.recent.emptyTitle')}

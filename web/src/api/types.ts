@@ -228,6 +228,8 @@ export interface ImageListParams {
   /** RFC3339 */
   to?: string;
   policy_id?: number;
+  /** 逗号分隔的来源过滤: web, api, scan */
+  source?: string;
   /** 上传用户邮箱模糊搜索 */
   user?: string;
 }

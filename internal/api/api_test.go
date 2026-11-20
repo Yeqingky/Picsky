@@ -1317,6 +1317,46 @@ func TestUploadImagesAndKeys(t *testing.T) {
 		t.Errorf("列表项尺寸不正确: %v", item)
 	}
 
+	// 来源过滤: 扫描补录记录不属于用户上传.
+	scan := model.Image{
+		UserID:           int64(item["user_id"].(float64)),
+		PolicyID:         policyID,
+		RelPath:          "scan/scan.png",
+		ObjectKey:        "scan/scan.png",
+		MD5:              strings.Repeat("0", 32),
+		SHA1:             strings.Repeat("1", 40),
+		SHA256:           strings.Repeat("2", 64),
+		SHA512:           strings.Repeat("3", 128),
+		Size:             128,
+		Kind:             model.KindImage,
+		Format:           "png",
+		Ext:              "png",
+		MIME:             "image/png",
+		OriginalFilename: "scan.png",
+		URL:              "https://cdn.example.com/scan/scan.png",
+		Source:           model.SourceScan,
+		CreatedAt:        time.Now().Add(time.Minute),
+	}
+	if err := s.db.Create(&scan).Error; err != nil {
+		t.Fatalf("写入扫描记录失败: %v", err)
+	}
+	uploadedOnly := s.raw(http.MethodGet, "/api/v1/images?source=web,api", nil, nil, []*http.Cookie{cookie})
+	if uploadedOnly.Status != http.StatusOK {
+		t.Fatalf("来源筛选失败: %d %s", uploadedOnly.Status, string(uploadedOnly.Body))
+	}
+	uploadedPage := s.decode(uploadedOnly)
+	if uploadedPage["total"].(float64) != 1 {
+		t.Errorf("来源筛选应只返回用户上传: %v", uploadedPage["total"])
+	}
+	uploadedItem := uploadedPage["items"].([]any)[0].(map[string]any)
+	if uploadedItem["original_filename"] != "photo.png" {
+		t.Errorf("来源筛选返回了扫描补录记录: %v", uploadedItem)
+	}
+	invalidSource := s.raw(http.MethodGet, "/api/v1/images?source=svg", nil, nil, []*http.Cookie{cookie})
+	if invalidSource.Status != http.StatusBadRequest {
+		t.Errorf("非法来源应返回 400: %d %s", invalidSource.Status, string(invalidSource.Body))
+	}
+
 	detail := s.raw(http.MethodGet, fmt.Sprintf("/api/v1/images/%d", id), nil, nil, []*http.Cookie{cookie})
 	if detail.Status != http.StatusOK {
 		t.Errorf("详情失败: %d %s", detail.Status, string(detail.Body))

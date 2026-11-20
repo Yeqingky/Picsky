@@ -9,6 +9,7 @@ import (
 
 	"github.com/yeqingky/Picsky/internal/apperr"
 	"github.com/yeqingky/Picsky/internal/middleware"
+	"github.com/yeqingky/Picsky/internal/model"
 	"github.com/yeqingky/Picsky/internal/service"
 	"github.com/yeqingky/Picsky/internal/storage"
 )
@@ -42,6 +43,11 @@ func (s *Server) listImages(c *gin.Context) {
 		}
 		policyID = &parsed
 	}
+	sources, err := sourceParam(c)
+	if err != nil {
+		s.fail(c, err)
+		return
+	}
 
 	result, err := s.svc.Images.List(principal, service.ListFilter{
 		Page:      page,
@@ -52,6 +58,7 @@ func (s *Server) listImages(c *gin.Context) {
 		From:      from,
 		To:        to,
 		PolicyID:  policyID,
+		Sources:   sources,
 	})
 	if err != nil {
 		s.fail(c, err)
@@ -68,6 +75,25 @@ func (s *Server) listImages(c *gin.Context) {
 		"page_size": result.PageSize,
 		"items":     items,
 	})
+}
+
+// sourceParam 解析逗号分隔的来源过滤; 空值表示不过滤.
+func sourceParam(c *gin.Context) ([]string, error) {
+	raw := strings.TrimSpace(c.Query("source"))
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	sources := make([]string, 0, len(parts))
+	for _, part := range parts {
+		switch source := strings.ToLower(strings.TrimSpace(part)); source {
+		case model.SourceWeb, model.SourceAPI, model.SourceScan:
+			sources = append(sources, source)
+		default:
+			return nil, apperr.ErrInvalidRequest.WithMessage("source 必须是 web, api 或 scan")
+		}
+	}
+	return sources, nil
 }
 
 // getImage 返回记录详情.

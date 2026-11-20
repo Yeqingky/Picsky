@@ -52,6 +52,7 @@ type ListFilter struct {
 	UserID    *int64
 	UserEmail string
 	PolicyID  *int64
+	Sources   []string
 	SortField string
 	SortDesc  bool
 }
@@ -105,6 +106,9 @@ func (i *Images) List(principal *Principal, filter ListFilter) (*ListResult, err
 	}
 	if filter.PolicyID != nil {
 		query = query.Where("images.policy_id = ?", *filter.PolicyID)
+	}
+	if len(filter.Sources) > 0 {
+		query = query.Where("images.source IN ?", filter.Sources)
 	}
 
 	var total int64
