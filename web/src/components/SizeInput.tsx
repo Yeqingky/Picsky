@@ -95,7 +95,7 @@ export function SizeInput({
     >
       <input
         id={id}
-        className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-base outline-none placeholder:text-muted-foreground md:text-sm"
+        className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-base outline-none placeholder:text-muted-foreground focus:placeholder:text-transparent md:text-sm"
         inputMode="numeric"
         value={amount}
         disabled={disabled}

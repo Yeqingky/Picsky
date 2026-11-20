@@ -42,7 +42,6 @@ import { Switch } from '../../components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { Textarea } from '../../components/ui/textarea';
 import { cn } from '../../lib/utils';
-import { formatBytes } from '../../utils/format';
 import { normalizeReferrerDomain } from '../../utils/referrer';
 
 const DEFAULT_CLIENT_IP_SOURCE = 'REMOTE_ADDR';
@@ -1002,10 +1001,7 @@ export default function AdminSettingsPage() {
             className={SETTING_FIELD_WIDTH.wide}
             hint={
               formatTokens.length > 0
-                ? t('adminSystem.settings.field.allowedFormatsPreview', {
-                    count: formatTokens.length,
-                    formats: formatTokens.join(', '),
-                  })
+                ? undefined
                 : t('adminSystem.settings.field.allowedFormatsHint')
             }
             error={errors.default_allowed_formats}
@@ -1014,7 +1010,7 @@ export default function AdminSettingsPage() {
               id="setting-allowed-formats"
               value={formatTokens}
               onChange={(formats) => setField('default_allowed_formats', formats.join(','))}
-              placeholder={t('adminSystem.settings.field.allowedFormatsPlaceholder')}
+              placeholder=""
               invalid={Boolean(errors.default_allowed_formats)}
             />
           </Field>
@@ -1022,13 +1018,6 @@ export default function AdminSettingsPage() {
             id="setting-max-file-size"
             label={t('adminSystem.settings.field.maxFileSize')}
             className={SETTING_FIELD_WIDTH.compact}
-            hint={
-              maxFileSize !== null
-                ? t('adminSystem.settings.field.maxFileSizeHint', {
-                    size: formatBytes(maxFileSize),
-                  })
-                : undefined
-            }
             error={errors.max_file_size_bytes}
           >
             <SizeInput

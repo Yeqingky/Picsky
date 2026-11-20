@@ -2,7 +2,6 @@
 export const auth = {
   login: {
     title: '登录',
-    description: '使用邮箱登录 {{siteName}}',
     email: '邮箱',
     emailRequired: '请输入邮箱',
     password: '密码',
@@ -14,7 +13,6 @@ export const auth = {
     captchaRequired: '请先完成人机验证',
     submit: '登录',
     submitting: '登录中...',
-    noAccount: '还没有账号?',
     goRegister: '注册新账号',
     forgotPassword: '忘记密码?',
   },

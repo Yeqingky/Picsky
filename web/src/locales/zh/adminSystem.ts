@@ -61,12 +61,9 @@ export const adminSystem = {
       smtpFrom: '发件人地址',
       smtpFromHint: '例如 Picsky <no-reply@example.com>',
       smtpEncryption: '加密方式',
-      allowedFormats: '允许的格式基线',
+      allowedFormats: '文件格式限制',
       allowedFormatsHint: '输入后按 Enter 或逗号添加, 例如 png,jpg,webp; 全局生效, 系统禁止 SVG',
-      allowedFormatsPlaceholder: '输入格式后按 Enter 添加',
-      allowedFormatsPreview: '共 {{count}} 种: {{formats}}',
       maxFileSize: '单文件上限',
-      maxFileSizeHint: '当前 {{size}}; 可被用户组覆盖',
       conflictPolicy: '默认冲突策略',
       pathTemplate: '默认路径模板',
       pathTemplateHint:

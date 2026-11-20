@@ -13,7 +13,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { useAuth } from '../hooks/useAuth';
-import { useSiteInfo, useSiteName } from '../hooks/useSite';
+import { useSiteInfo } from '../hooks/useSite';
 import {
   Dialog,
   DialogContent,
@@ -25,7 +25,6 @@ import {
 /** 登录页: 邮箱 + 密码 + 按需两步验证 + 人机验证 (/login) */
 export default function LoginPage() {
   const { t } = useTranslation();
-  const siteName = useSiteName();
   const { data: siteInfo } = useSiteInfo();
   const { login, isLoading } = useAuth();
   const navigate = useNavigate();
@@ -55,7 +54,10 @@ export default function LoginPage() {
   const captchaConfig: CaptchaConfig | undefined = captchaQuery.data;
   const captchaRequired = (captchaConfig?.provider ?? 'none') !== 'none';
 
-  if (isLoading) return <AuthCardSkeleton captcha={captchaQuery.isPending || captchaRequired} />;
+  if (isLoading)
+    return (
+      <AuthCardSkeleton description={false} captcha={captchaQuery.isPending || captchaRequired} />
+    );
   const finishLogin = () => {
     const redirect = searchParams.get('redirect');
     const target =
@@ -129,12 +131,7 @@ export default function LoginPage() {
   return (
     <>
       <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-        <div className="flex flex-col gap-1">
-          <h2 className="font-heading text-xl font-semibold">{t('auth.login.title')}</h2>
-          <p className="text-muted-foreground text-sm">
-            {t('auth.login.description', { siteName })}
-          </p>
-        </div>
+        <h2 className="font-heading text-xl font-semibold">{t('auth.login.title')}</h2>
 
         {error && (
           <Alert variant="destructive">
@@ -194,14 +191,11 @@ export default function LoginPage() {
 
         <OidcLoginButtons />
 
-        <div className="flex flex-col items-center gap-2">
-          <p className="text-sm">
-            {t('auth.login.noAccount')}{' '}
-            <RouterLink to="/register" className="text-primary underline-offset-4 hover:underline">
-              {t('auth.login.goRegister')}
-            </RouterLink>
-          </p>
-        </div>
+        <p className="text-center text-sm">
+          <RouterLink to="/register" className="text-primary underline-offset-4 hover:underline">
+            {t('auth.login.goRegister')}
+          </RouterLink>
+        </p>
       </form>
       <Dialog
         open={totpDialogOpen}

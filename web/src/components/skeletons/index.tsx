@@ -430,9 +430,11 @@ export function RecentUploadsSkeleton({ rows = 5 }: { rows?: number }) {
 export function AuthCardSkeleton({
   fields = 2,
   captcha = false,
+  description = true,
 }: {
   fields?: number;
   captcha?: boolean;
+  description?: boolean;
 } = {}) {
   const { t } = useTranslation();
   return (
@@ -440,7 +442,7 @@ export function AuthCardSkeleton({
       <div className="flex w-full flex-col gap-4">
         <div className="flex flex-col gap-1">
           <Skeleton className="h-7 w-40 rounded-sm" />
-          <Skeleton className="h-4 w-64 max-w-full rounded-sm" />
+          {description && <Skeleton className="h-4 w-64 max-w-full rounded-sm" />}
         </div>
         {Array.from({ length: fields }, (_, index) => (
           <div key={index} className="flex flex-col gap-2">
