@@ -1657,30 +1657,7 @@ export default function AdminPolicyEditPage() {
         </TabsContent>
 
         <TabsContent value="connection" className={TAB_PANEL_CLASS}>
-          <PolicySection
-            actions={
-              <>
-                {!isCloudreve &&
-                  (isEdit ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={testMutation.isPending}
-                      onClick={() => testMutation.mutate(numericId)}
-                    >
-                      {testMutation.isPending
-                        ? t('adminPolicies.edit.test.running')
-                        : t('adminPolicies.edit.test.button')}
-                    </Button>
-                  ) : (
-                    <p className="text-muted-foreground text-xs">
-                      {t('adminPolicies.edit.test.needSave')}
-                    </p>
-                  ))}
-              </>
-            }
-          >
+          <PolicySection>
             <div className="flex flex-col gap-5">
               <FormField
                 id="policy-endpoint"
@@ -2215,13 +2192,12 @@ export default function AdminPolicyEditPage() {
                   </AlertDescription>
                 </Alert>
               )}
-              {isCloudreve &&
-                (isEdit ? (
+              {isEdit ? (
+                <div className="flex justify-end">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="self-end"
                     disabled={testMutation.isPending}
                     onClick={() => testMutation.mutate(numericId)}
                   >
@@ -2229,11 +2205,14 @@ export default function AdminPolicyEditPage() {
                       ? t('adminPolicies.edit.test.running')
                       : t('adminPolicies.edit.test.button')}
                   </Button>
-                ) : (
+                </div>
+              ) : (
+                <div className="flex justify-end">
                   <p className="text-muted-foreground text-xs">
                     {t('adminPolicies.edit.test.needSave')}
                   </p>
-                ))}
+                </div>
+              )}
             </div>
           </PolicySection>
         </TabsContent>
