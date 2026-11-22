@@ -36,6 +36,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/toolti
 import { copyText, renderCopyText } from '../utils/clipboard';
 import type { CopyFormat } from '../utils/clipboard';
 import { STORAGE_KEYS } from '../utils/constants';
+import { formatBytes } from '../utils/format';
 import { cn } from '../lib/utils';
 
 type UploadFilter = 'all' | 'done' | 'uploading' | 'queued' | 'failed';
@@ -121,14 +122,38 @@ export default function UploadPage() {
   const runningRef = useRef(false);
   const dragDepthRef = useRef(0);
 
-  const { data: policies, isPending: policiesPending } = useQuery({
+  const { data: catalog, isPending: policiesPending } = useQuery({
     queryKey: ['policies', 'mine'],
     queryFn: policiesApi.listMine,
     staleTime: 5 * 60 * 1000,
   });
+  const policies = catalog?.items;
 
   const selectedPolicy = policies?.find((policy) => policy.id === policyId);
   const policyFormats = selectedPolicy?.formats;
+  const policyMaxFileSize = selectedPolicy?.max_file_size ?? 0;
+  // 单文件上限: 用户组覆盖全局, 再与驱动上限取较小值; 0 表示不限 (docs/permissions.md 第 4 节)
+  const accountMaxFileSize = useMemo(() => {
+    const groupLimit = catalog?.group.max_file_size ?? null;
+    return groupLimit !== null ? groupLimit : (catalog?.global.max_file_size ?? 0);
+  }, [catalog]);
+  const effectiveMaxFileSize = useMemo(() => {
+    const limits = [accountMaxFileSize, policyMaxFileSize].filter((limit) => limit > 0);
+    return limits.length === 0 ? 0 : Math.min(...limits);
+  }, [accountMaxFileSize, policyMaxFileSize]);
+  // 体积超限提示: 与服务端判定顺序一致, 先用户组 (含全局基线) 后驱动上限
+  const fileSizeError = useCallback(
+    (size: number): string | null => {
+      if (effectiveMaxFileSize <= 0 || size <= effectiveMaxFileSize) return null;
+      const accountBinds =
+        accountMaxFileSize > 0 &&
+        (policyMaxFileSize === 0 || accountMaxFileSize <= policyMaxFileSize);
+      return accountBinds
+        ? t('upload.error.fileTooLarge', { limit: formatBytes(accountMaxFileSize) })
+        : t('upload.error.policySize', { limit: formatBytes(policyMaxFileSize) });
+    },
+    [accountMaxFileSize, effectiveMaxFileSize, policyMaxFileSize, t],
+  );
   const compressionFormat = useMemo<UploadOutputFormat>(() => {
     const requested = settings.format;
     const requestedName = requested === 'jpg' ? 'jpeg' : requested;
@@ -178,12 +203,25 @@ export default function UploadPage() {
         toast.warning(t('upload.error.notImage'));
       }
       if (images.length === 0) return;
+      // 压缩可能把超限文件降到上限内, 启用压缩时统一交给处理流程判定
+      let accepted = images;
+      if (!settings.compression) {
+        accepted = [];
+        let rejection: string | null = null;
+        for (const file of images) {
+          const message = fileSizeError(file.size);
+          if (message === null) accepted.push(file);
+          else rejection ??= message;
+        }
+        if (rejection !== null) toast.warning(rejection);
+      }
+      if (accepted.length === 0) return;
       setQueue((current) => [
         ...current,
-        ...images.map((file) => createUploadItem(file, settings.autoUpload)),
+        ...accepted.map((file) => createUploadItem(file, settings.autoUpload)),
       ]);
     },
-    [settings.autoUpload, t],
+    [fileSizeError, settings.autoUpload, settings.compression, t],
   );
 
   // 拖拽到页面任意位置 + Ctrl+V 粘贴
@@ -296,6 +334,13 @@ export default function UploadPage() {
           }
         }
 
+        const sizeError = fileSizeError(payload.size);
+        if (sizeError !== null) {
+          toast.error(sizeError);
+          updateItem(next.id, { status: 'failed', error: sizeError });
+          return;
+        }
+
         const payloadFormat = fileFormatName(payload);
         if (!policyAllowsFormat(policyFormats, payloadFormat)) {
           const message = t('upload.error.policyFormat', {
@@ -338,6 +383,7 @@ export default function UploadPage() {
     t,
     settings,
     policyFormats,
+    fileSizeError,
     compressionFormat,
     formatOverride,
   ]);

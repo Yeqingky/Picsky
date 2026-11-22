@@ -146,7 +146,7 @@ export default function DashboardPage() {
   const usageDetail =
     limit === null ? occupied : isByteQuota ? quotaDetail : `${quotaDetail} - ${occupied}`;
 
-  const policies = policiesQuery.data ?? [];
+  const policies = policiesQuery.data?.items ?? [];
   const activeKeys = keysQuery.data?.filter((key) => key.revoked_at === null).length;
   const defaultPolicy = policies.find((policy) => policy.id === user.default_policy_id);
   const recent = recentQuery.data?.items ?? [];

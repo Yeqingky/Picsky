@@ -343,7 +343,7 @@ export default function GalleryPage() {
 
       <GalleryFilters
         value={filters}
-        policies={policiesQuery.data ?? []}
+        policies={policiesQuery.data?.items ?? []}
         canFilterUser={canViewAll}
         onChange={(patch) => setFilters((current) => ({ ...current, ...patch }))}
         onClear={() => setFilters({ keyword: '', format: '', policyId: null, user: '' })}

@@ -5,7 +5,7 @@ import type {
   ImageListParams,
   ImageRecord,
   Paginated,
-  PolicySummary,
+  PolicyCatalog,
 } from './types';
 
 export const imagesApi = {
@@ -21,6 +21,6 @@ export const imagesApi = {
 };
 
 export const policiesApi = {
-  /** 当前用户组白名单内的启用策略 */
-  listMine: () => api.get<PolicySummary[]>('/policies').then((r) => r.data),
+  /** 当前用户组白名单内的启用策略, 以及全局与用户组的单文件上限 */
+  listMine: () => api.get<PolicyCatalog>('/policies').then((r) => r.data),
 };

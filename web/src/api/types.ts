@@ -250,13 +250,33 @@ export interface BatchDeleteResult {
 export interface PolicySummary {
   id: number;
   name: string;
-  type: string;
   /** 策略提示文字; 空表示不显示提示 */
   hint: string;
   urls: UploadUrlAlias[];
   /** 驱动支持的图片格式; 空表示不额外限制 */
   formats: string[];
+  /** 驱动单文件上限 (字节); 0 表示不额外限制 */
+  max_file_size: number;
   is_default: boolean;
+}
+
+/** 全局单文件上限 (字节); 0 表示不限 */
+export interface GlobalFileSizeLimit {
+  max_file_size: number;
+}
+
+/** 当前用户组的单文件上限; null 表示继承全局 */
+export interface GroupFileSizeLimit {
+  id: number;
+  name: string;
+  max_file_size: number | null;
+}
+
+/** GET /policies: 上传限制与可用策略 */
+export interface PolicyCatalog {
+  global: GlobalFileSizeLimit;
+  group: GroupFileSizeLimit;
+  items: PolicySummary[];
 }
 
 /* ------------------------------------------------------------ API 密钥 */

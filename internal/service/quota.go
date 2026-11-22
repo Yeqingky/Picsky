@@ -69,6 +69,11 @@ func CheckQuota(quota Quota, addImages, addBytes int64) error {
 	return nil
 }
 
+// SystemMaxFileSize 返回系统基线单文件上限; 0 表示不限.
+func SystemMaxFileSize(settings *Settings) int64 {
+	return settings.Int64("max_file_size_bytes", 10*1024*1024)
+}
+
 // EffectiveMaxFileSize 计算单文件体积上限; 0 表示不限.
 func EffectiveMaxFileSize(settings *Settings, group *model.Group) int64 {
 	if group != nil && group.MaxFileSizeBytes != nil {
@@ -77,7 +82,7 @@ func EffectiveMaxFileSize(settings *Settings, group *model.Group) int64 {
 		}
 		return *group.MaxFileSizeBytes
 	}
-	return settings.Int64("max_file_size_bytes", 10*1024*1024)
+	return SystemMaxFileSize(settings)
 }
 
 // EffectiveAllowedFormats 计算允许上传的格式: 只取系统设置里的格式基线 (全局生效).

@@ -98,6 +98,7 @@ Picsky/
 - Base64 JSON 上传必须在读取请求体前完成认证, 上传权限与限流预检, 并流式读取 `data` 直接解码到共用上传缓冲, 禁止在内存完整保留编码字符串或解码副本; 不限组仍受 2 GiB 单次硬上限约束, `data` 字段前后区段各最多 32 KiB, data URL 头最多 4 KiB, 解码缓冲遵循 `PICSKY_UPLOAD_MEMORY_LIMIT`.
 - 驱动可声明单对象体积上限 (`max_file_size_bytes`, `0` 表示不限); 上传先校验用户组单文件上限, 通过后再校验策略驱动上限, 仅策略上限触发时返回 `file_too_large` 与 "此存储策略最大支持xxMB"; Sobot 固定 50 MiB (52,428,800 字节), Celine 20,971,326 字节 (20 MiB 扣除 multipart 开销), Metaso 209,715,000 字节 (200 MiB 扣除 multipart 开销), 异次元店铺系统 10,485,760 字节 (10 MiB), WebUI 以右下角 toast 提示.
 - 驱动可声明支持的图片格式 (`formats`, 空表示不限); 上传在系统格式白名单后校验策略格式, 不匹配返回 `unsupported_format`; Celine 仅支持 `png` / `jpeg` / `gif`, 异次元店铺系统仅支持 `png` / `jpeg` / `webp`; 前端压缩对受限策略自动改用 JPEG, 未压缩原图的格式不支持时直接提示失败且不发请求.
+- `GET /api/v1/policies` 返回 `global.max_file_size` (系统基线单文件上限, 0 表示不限), `group` (`id`, `name`, `max_file_size`, `null` 表示继承全局) 与 `items`; `items` 每项不含驱动 `type`, 含 `max_file_size` (驱动单对象上限, 0 表示不限); WebUI 上传页以组覆盖值 (无覆盖用全局) 与所选策略上限的较小值作为生效上限, 未启用压缩时入队前拒绝超限文件, 启用压缩时在压缩后与上传前判定, 超限只 toast 提示并标记失败, 不发请求.
 - 未设置 `PICSKY_TEMP_DIR` 时, spool 可将处理期溢出文件写入系统临时目录, 但 `CleanupStale` 必须跳过目录扫描; 仅对应用专用且隔离的临时目录执行启动残留清理.
 - `/upload` 跨用户复用只返回当前用户自己的新记录, 不返回其他用户的记录 ID, URL 或大小.
 - 注册页启用注册邮箱域名白名单时, 邮箱字段由左侧本地部分输入框与右侧域名下拉框组成, 提交时拼接为完整邮箱; 未启用白名单时为完整邮箱输入框; 白名单域名由 `GET /site` 的 `registration_email_domains` 提供.

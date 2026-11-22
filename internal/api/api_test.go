@@ -1791,15 +1791,59 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 	if policies.Status != http.StatusOK {
 		t.Fatalf("读取可用策略失败: %d %s", policies.Status, string(policies.Body))
 	}
-	var policyList []map[string]any
-	if err := json.Unmarshal(policies.Body, &policyList); err != nil {
+	var catalog struct {
+		Global struct {
+			MaxFileSize int64 `json:"max_file_size"`
+		} `json:"global"`
+		Group *struct {
+			ID          int64  `json:"id"`
+			Name        string `json:"name"`
+			MaxFileSize *int64 `json:"max_file_size"`
+		} `json:"group"`
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(policies.Body, &catalog); err != nil {
 		t.Fatalf("解析策略失败: %v", err)
 	}
-	if len(policyList) != 1 {
-		t.Errorf("可用策略列表不正确: %v", policyList)
+	if len(catalog.Items) != 1 {
+		t.Errorf("可用策略列表不正确: %v", catalog.Items)
 	}
-	if hint, ok := policyList[0]["hint"]; !ok || hint != "" {
-		t.Errorf("可用策略应包含 hint 字段: %v", policyList[0])
+	if hint, ok := catalog.Items[0]["hint"]; !ok || hint != "" {
+		t.Errorf("可用策略应包含 hint 字段: %v", catalog.Items[0])
+	}
+	if _, ok := catalog.Items[0]["type"]; ok {
+		t.Errorf("可用策略不应返回驱动类型: %v", catalog.Items[0])
+	}
+	if limit, ok := catalog.Items[0]["max_file_size"]; !ok || limit != float64(0) {
+		t.Errorf("可用策略应返回驱动单文件上限 0 (不限), 实际 %v", catalog.Items[0])
+	}
+	if catalog.Global.MaxFileSize != 10485760 {
+		t.Errorf("全局单文件上限 = %d, 期望 10485760", catalog.Global.MaxFileSize)
+	}
+	if catalog.Group == nil || catalog.Group.ID != normalGroupID || catalog.Group.MaxFileSize != nil {
+		t.Errorf("用户组单文件上限应返回组信息且未覆盖全局: %+v", catalog.Group)
+	}
+
+	limited := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/groups/%d", normalGroupID), map[string]any{
+		"max_file_size_bytes": 524288000,
+	}, []*http.Cookie{cookie})
+	if limited.Status != http.StatusOK {
+		t.Fatalf("设置用户组单文件上限失败: %d %s", limited.Status, string(limited.Body))
+	}
+	overridden := s.raw(http.MethodGet, "/api/v1/policies", nil, nil, []*http.Cookie{aliceCookie})
+	if overridden.Status != http.StatusOK {
+		t.Fatalf("读取可用策略失败: %d %s", overridden.Status, string(overridden.Body))
+	}
+	var overriddenCatalog struct {
+		Group struct {
+			MaxFileSize *int64 `json:"max_file_size"`
+		} `json:"group"`
+	}
+	if err := json.Unmarshal(overridden.Body, &overriddenCatalog); err != nil {
+		t.Fatalf("解析策略失败: %v", err)
+	}
+	if overriddenCatalog.Group.MaxFileSize == nil || *overriddenCatalog.Group.MaxFileSize != 524288000 {
+		t.Errorf("用户组覆盖后应返回组单文件上限 524288000: %s", string(overridden.Body))
 	}
 
 	aliceUpload := s.upload("/api/v1/upload", "alice.png", pngContent(t, 9), nil, map[string]string{}, []*http.Cookie{aliceCookie})

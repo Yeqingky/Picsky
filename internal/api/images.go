@@ -156,7 +156,7 @@ func (s *Server) batchDeleteImages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": results})
 }
 
-// userPolicies 返回当前用户可用的存储策略.
+// userPolicies 返回当前用户可用的存储策略, 以及全局与用户组的单文件上限.
 func (s *Server) userPolicies(c *gin.Context) {
 	principal := middleware.Principal(c)
 	policies, err := s.svc.Policies.AllowedFor(principal)
@@ -188,24 +188,32 @@ func (s *Server) userPolicies(c *gin.Context) {
 		for _, url := range urls {
 			urlItems = append(urlItems, urlDTO{Alias: url.Alias, URL: url.URL, IsDefault: url.IsDefault})
 		}
-		item := gin.H{
-			"id":         policy.ID,
-			"name":       policy.Name,
-			"type":       policy.Type,
-			"hint":       policy.Hint,
-			"urls":       urlItems,
-			"is_default": policy.ID == defaultPolicyID,
-		}
+		formats := []string{}
+		maxFileSize := int64(0)
 		if spec, ok := storage.SpecOf(policy.Type); ok {
-			formats := spec.Formats
-			if formats == nil {
-				formats = []string{}
+			if spec.Formats != nil {
+				formats = spec.Formats
 			}
-			item["formats"] = formats
-		} else {
-			item["formats"] = []string{}
+			maxFileSize = spec.MaxFileSize
 		}
-		items = append(items, item)
+		items = append(items, gin.H{
+			"id":            policy.ID,
+			"name":          policy.Name,
+			"hint":          policy.Hint,
+			"urls":          urlItems,
+			"formats":       formats,
+			"max_file_size": maxFileSize,
+			"is_default":    policy.ID == defaultPolicyID,
+		})
 	}
-	c.JSON(http.StatusOK, items)
+	response := gin.H{
+		"global": gin.H{"max_file_size": service.SystemMaxFileSize(s.svc.Settings)},
+		"group": gin.H{
+			"id":            principal.Group.ID,
+			"name":          principal.Group.Name,
+			"max_file_size": principal.Group.MaxFileSizeBytes,
+		},
+		"items": items,
+	}
+	c.JSON(http.StatusOK, response)
 }
