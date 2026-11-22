@@ -1534,6 +1534,131 @@ func TestAdminListOneImgBuckets(t *testing.T) {
 	}
 }
 
+// TestFileSizeLimitPrecedence 校验 全局 -> 用户组 -> 驱动 的三级上限判定与保存校验.
+func TestFileSizeLimitPrecedence(t *testing.T) {
+	s := newServer(t)
+	adminCookie, policyID := s.bootstrap()
+
+	// 系统基线改为 100 MiB.
+	settings := s.json(http.MethodPatch, "/api/v1/admin/settings", map[string]any{
+		"max_file_size_bytes": 100 << 20,
+	}, []*http.Cookie{adminCookie})
+	if settings.Status != http.StatusOK {
+		t.Fatalf("更新系统单文件上限失败: %d %s", settings.Status, string(settings.Body))
+	}
+
+	// 驱动上限 3 MiB 的策略: 用 sobot 会走外部请求, 改为直接设置策略级上限验证持久化.
+	limited := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/policies/%d", policyID), map[string]any{
+		"max_file_size_bytes": 3 << 20,
+	}, []*http.Cookie{adminCookie})
+	if limited.Status != http.StatusOK {
+		t.Fatalf("设置策略单文件上限失败: %d %s", limited.Status, string(limited.Body))
+	}
+	if got := int64(s.decode(limited)["max_file_size_bytes"].(float64)); got != 3<<20 {
+		t.Fatalf("策略单文件上限未保存: %d", got)
+	}
+	// 超过全局基线的策略上限必须被拒绝.
+	beyondGlobal := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/policies/%d", policyID), map[string]any{
+		"max_file_size_bytes": 200 << 20,
+	}, []*http.Cookie{adminCookie})
+	if beyondGlobal.Status != http.StatusBadRequest {
+		t.Fatalf("策略上限超过全局应返回 400, 实际 %d %s", beyondGlobal.Status, string(beyondGlobal.Body))
+	}
+
+	// 用户组: a = 1 MiB, b = 90 MiB.
+	createA := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+		"name":                "限流组A",
+		"permissions":         []string{"upload"},
+		"max_file_size_bytes": 1 << 20,
+	}, []*http.Cookie{adminCookie})
+	if createA.Status != http.StatusCreated {
+		t.Fatalf("创建组 A 失败: %d %s", createA.Status, string(createA.Body))
+	}
+	groupA := int64(s.decode(createA)["id"].(float64))
+	createB := s.json(http.MethodPost, "/api/v1/admin/groups", map[string]any{
+		"name":                "限流组B",
+		"permissions":         []string{"upload"},
+		"max_file_size_bytes": 90 << 20,
+	}, []*http.Cookie{adminCookie})
+	if createB.Status != http.StatusCreated {
+		t.Fatalf("创建组 B 失败: %d %s", createB.Status, string(createB.Body))
+	}
+	groupB := int64(s.decode(createB)["id"].(float64))
+	// 高于全局基线的组上限必须被拒绝.
+	overGroup := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/groups/%d", groupB), map[string]any{
+		"max_file_size_bytes": 900 << 20,
+	}, []*http.Cookie{adminCookie})
+	if overGroup.Status != http.StatusBadRequest {
+		t.Fatalf("组上限超过全局应返回 400, 实际 %d %s", overGroup.Status, string(overGroup.Body))
+	}
+	for _, groupID := range []int64{groupA, groupB} {
+		auth := s.json(http.MethodPut, fmt.Sprintf("/api/v1/admin/groups/%d/policies", groupID), map[string]any{
+			"policy_ids": []int64{policyID},
+		}, []*http.Cookie{adminCookie})
+		if auth.Status != http.StatusNoContent {
+			t.Fatalf("授权组策略失败: %d %s", auth.Status, string(auth.Body))
+		}
+	}
+
+	login := func(username string, groupID int64) *http.Cookie {
+		created := s.json(http.MethodPost, "/api/v1/admin/users", map[string]any{
+			"username": username,
+			"email":    username + "@example.com",
+			"password": "password123",
+			"group_id": groupID,
+		}, []*http.Cookie{adminCookie})
+		if created.Status != http.StatusCreated {
+			t.Fatalf("创建用户 %s 失败: %d %s", username, created.Status, string(created.Body))
+		}
+		userLogin := s.json(http.MethodPost, "/api/v1/auth/login", map[string]any{
+			"identifier": username + "@example.com",
+			"password":   "password123",
+		}, nil)
+		if userLogin.Status != http.StatusOK {
+			t.Fatalf("登录 %s 失败: %d %s", username, userLogin.Status, string(userLogin.Body))
+		}
+		return s.sessionCookie(userLogin)
+	}
+	cookieA := login("limita", groupA)
+	cookieB := login("limitb", groupB)
+
+	// 以基础 PNG 加尾部填充凑出精确体积 (解码器忽略 IEND 之后的内容).
+	sized := func(target int64) []byte {
+		base := pngContent(t, 77)
+		if int64(len(base)) > target {
+			t.Fatalf("目标体积 %d 小于基础 PNG 体积 %d", target, len(base))
+		}
+		return append(base, make([]byte, int(target)-len(base))...)
+	}
+	fiveMiB := sized(5 << 20)
+	twoMiB := sized(2 << 20)
+
+	upload := func(cookie *http.Cookie, content []byte) *response {
+		return s.upload("/api/v1/upload", "size.png", content, map[string]string{
+			"policy_id": fmt.Sprint(policyID),
+		}, map[string]string{}, []*http.Cookie{cookie})
+	}
+	expectBlocked := func(name string, res *response, wantScope string) {
+		if res.Status != http.StatusRequestEntityTooLarge {
+			t.Fatalf("%s 应返回 413, 实际 %d %s", name, res.Status, string(res.Body))
+		}
+		details, _ := s.decode(res)["details"].(map[string]any)
+		if details["scope"] != wantScope {
+			t.Errorf("%s 触发来源 = %v, 期望 %q (%s)", name, details["scope"], wantScope, string(res.Body))
+		}
+	}
+
+	// 策略上限 3 MiB 对两个组都生效: 谁的上限更宽松都挡住 5 MiB.
+	expectBlocked("组 A 上传 5 MiB", upload(cookieA, fiveMiB), "group")
+	expectBlocked("组 B 上传 5 MiB", upload(cookieB, fiveMiB), "driver")
+	// 组 A 上限 1 MiB 比策略上限更严格.
+	expectBlocked("组 A 上传 2 MiB", upload(cookieA, twoMiB), "group")
+	// 组 B 上限 90 MiB: 2 MiB 未触发任何一级.
+	if res := upload(cookieB, twoMiB); res.Status != http.StatusCreated {
+		t.Errorf("组 B 上传 2 MiB 应通过, 实际 %d %s", res.Status, string(res.Body))
+	}
+}
+
 func TestAdminReorderPolicies(t *testing.T) {
 	s := newServer(t)
 	cookie, firstID := s.bootstrap()
@@ -1824,8 +1949,16 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 		t.Errorf("用户组单文件上限应返回组信息且未覆盖全局: %+v", catalog.Group)
 	}
 
-	limited := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/groups/%d", normalGroupID), map[string]any{
+	// 用户组上限不能高于系统基线 (测试库基线为 10 MiB).
+	tooLarge := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/groups/%d", normalGroupID), map[string]any{
 		"max_file_size_bytes": 524288000,
+	}, []*http.Cookie{cookie})
+	if tooLarge.Status != http.StatusBadRequest {
+		t.Fatalf("用户组上限高于系统上限应被拒绝, 实际 %d %s", tooLarge.Status, string(tooLarge.Body))
+	}
+
+	limited := s.json(http.MethodPatch, fmt.Sprintf("/api/v1/admin/groups/%d", normalGroupID), map[string]any{
+		"max_file_size_bytes": 5242880,
 	}, []*http.Cookie{cookie})
 	if limited.Status != http.StatusOK {
 		t.Fatalf("设置用户组单文件上限失败: %d %s", limited.Status, string(limited.Body))
@@ -1842,8 +1975,8 @@ func TestAdminEndpointsAndPermissions(t *testing.T) {
 	if err := json.Unmarshal(overridden.Body, &overriddenCatalog); err != nil {
 		t.Fatalf("解析策略失败: %v", err)
 	}
-	if overriddenCatalog.Group.MaxFileSize == nil || *overriddenCatalog.Group.MaxFileSize != 524288000 {
-		t.Errorf("用户组覆盖后应返回组单文件上限 524288000: %s", string(overridden.Body))
+	if overriddenCatalog.Group.MaxFileSize == nil || *overriddenCatalog.Group.MaxFileSize != 5242880 {
+		t.Errorf("用户组覆盖后应返回组单文件上限 5242880: %s", string(overridden.Body))
 	}
 
 	aliceUpload := s.upload("/api/v1/upload", "alice.png", pngContent(t, 9), nil, map[string]string{}, []*http.Cookie{aliceCookie})

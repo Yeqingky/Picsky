@@ -194,7 +194,11 @@ func (s *Server) userPolicies(c *gin.Context) {
 			if spec.Formats != nil {
 				formats = spec.Formats
 			}
+			// 策略级上限不会高于驱动声明 (后端已校验), 取较小值兜底历史数据.
 			maxFileSize = spec.MaxFileSize
+			if policy.MaxFileSizeBytes > 0 && (maxFileSize == 0 || policy.MaxFileSizeBytes < maxFileSize) {
+				maxFileSize = policy.MaxFileSizeBytes
+			}
 		}
 		items = append(items, gin.H{
 			"id":            policy.ID,

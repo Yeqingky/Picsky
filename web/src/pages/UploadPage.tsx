@@ -131,28 +131,29 @@ export default function UploadPage() {
 
   const selectedPolicy = policies?.find((policy) => policy.id === policyId);
   const policyFormats = selectedPolicy?.formats;
+  // 三级单文件上限 (字节): 全局 -> 用户组 -> 存储驱动; 0 表示该级不限 (docs/permissions.md 第 4 节)
+  const globalMaxFileSize = catalog?.global.max_file_size ?? 0;
+  const groupMaxFileSize = catalog?.group.max_file_size ?? 0;
   const policyMaxFileSize = selectedPolicy?.max_file_size ?? 0;
-  // 单文件上限: 用户组覆盖全局, 再与驱动上限取较小值; 0 表示不限 (docs/permissions.md 第 4 节)
-  const accountMaxFileSize = useMemo(() => {
-    const groupLimit = catalog?.group.max_file_size ?? null;
-    return groupLimit !== null ? groupLimit : (catalog?.global.max_file_size ?? 0);
-  }, [catalog]);
-  const effectiveMaxFileSize = useMemo(() => {
-    const limits = [accountMaxFileSize, policyMaxFileSize].filter((limit) => limit > 0);
-    return limits.length === 0 ? 0 : Math.min(...limits);
-  }, [accountMaxFileSize, policyMaxFileSize]);
-  // 体积超限提示: 与服务端判定顺序一致, 先用户组 (含全局基线) 后驱动上限
+  const fileSizeLimit = useMemo(() => {
+    const levels = [
+      { scope: 'global', limit: globalMaxFileSize },
+      { scope: 'group', limit: groupMaxFileSize },
+      { scope: 'policy', limit: policyMaxFileSize },
+    ].filter((level) => level.limit > 0);
+    if (levels.length === 0) return { limit: 0, scope: '' };
+    return levels.reduce((a, b) => (b.limit < a.limit ? b : a));
+  }, [globalMaxFileSize, groupMaxFileSize, policyMaxFileSize]);
+  // 超限提示与服务端一致: 取最严格一级, 并区分全局 / 用户组 / 存储驱动
   const fileSizeError = useCallback(
     (size: number): string | null => {
-      if (effectiveMaxFileSize <= 0 || size <= effectiveMaxFileSize) return null;
-      const accountBinds =
-        accountMaxFileSize > 0 &&
-        (policyMaxFileSize === 0 || accountMaxFileSize <= policyMaxFileSize);
-      return accountBinds
-        ? t('upload.error.fileTooLarge', { limit: formatBytes(accountMaxFileSize) })
-        : t('upload.error.policySize', { limit: formatBytes(policyMaxFileSize) });
+      if (fileSizeLimit.limit <= 0 || size <= fileSizeLimit.limit) return null;
+      if (fileSizeLimit.scope === 'policy') {
+        return t('upload.error.policySize', { limit: formatBytes(fileSizeLimit.limit) });
+      }
+      return t('upload.error.fileTooLarge', { limit: formatBytes(fileSizeLimit.limit) });
     },
-    [accountMaxFileSize, effectiveMaxFileSize, policyMaxFileSize, t],
+    [fileSizeLimit, t],
   );
   const compressionFormat = useMemo<UploadOutputFormat>(() => {
     const requested = settings.format;

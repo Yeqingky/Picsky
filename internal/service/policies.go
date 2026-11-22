@@ -60,13 +60,15 @@ type URLInput struct {
 
 // PolicyInput 是策略创建/更新入参.
 type PolicyInput struct {
-	Name             string            `json:"name"`
-	Hint             *string           `json:"hint"`
-	Type             string            `json:"type"`
-	Enabled          *bool             `json:"enabled"`
-	PathTemplate     string            `json:"path_template"`
-	ConflictPolicy   string            `json:"conflict_policy"`
-	ReuseReleasedSeq *bool             `json:"reuse_released_seq"`
+	Name             string  `json:"name"`
+	Hint             *string `json:"hint"`
+	Type             string  `json:"type"`
+	Enabled          *bool   `json:"enabled"`
+	PathTemplate     string  `json:"path_template"`
+	ConflictPolicy   string  `json:"conflict_policy"`
+	ReuseReleasedSeq *bool   `json:"reuse_released_seq"`
+	// MaxFileSizeBytes 是策略级单对象上限 (字节); 0 表示不限. 不能超过驱动声明与系统基线.
+	MaxFileSizeBytes *int64            `json:"max_file_size_bytes"`
 	Config           map[string]string `json:"config"`
 	Secrets          map[string]string `json:"secrets"`
 	URLs             []URLInput        `json:"urls"`
@@ -100,7 +102,11 @@ type PolicyView struct {
 	URLFromBackend    bool              `json:"url_from_backend"`
 	URLPrefixOverride bool              `json:"url_prefix_override"`
 	Formats           []string          `json:"formats"`
-	ImageCount        int64             `json:"image_count"`
+	// DriverMaxFileSize 是驱动声明的单对象上限; 0 表示不限.
+	DriverMaxFileSize int64 `json:"driver_max_file_size"`
+	// MaxFileSizeLimit 是策略级上限可设置的最大值 (驱动上限与系统基线取较小者); 0 表示不限.
+	MaxFileSizeLimit int64 `json:"max_file_size_limit"`
+	ImageCount       int64 `json:"image_count"`
 }
 
 // ConfigMap 解码非敏感配置.
@@ -258,6 +264,8 @@ func (p *Policies) View(policy *model.StoragePolicy) (*PolicyView, error) {
 		URLFromBackend:    spec.URLFromBackend,
 		URLPrefixOverride: spec.URLPrefixOverride,
 		Formats:           formats,
+		DriverMaxFileSize: spec.MaxFileSize,
+		MaxFileSizeLimit:  MaxAllowedPolicyFileSize(policy.Type, SystemMaxFileSize(p.settings)),
 	}
 	if view.URLs == nil {
 		view.URLs = []model.PolicyURL{}
@@ -420,6 +428,18 @@ func (p *Policies) Validate(in *PolicyInput, policy *model.StoragePolicy) error 
 	}
 	if !spec.Has(storage.CapUpload) {
 		return apperr.ErrInvalidRequest.WithMessage("存储后端未声明上传能力")
+	}
+	if in.MaxFileSizeBytes != nil {
+		limit := *in.MaxFileSizeBytes
+		if limit < 0 {
+			return apperr.ErrInvalidRequest.WithMessage("单文件上限不能为负数")
+		}
+		// 策略级上限同时受驱动声明与系统基线约束, 避免绕过前端校验放宽限制.
+		if allowed := MaxAllowedPolicyFileSize(in.Type, SystemMaxFileSize(p.settings)); allowed > 0 && limit > allowed {
+			return apperr.ErrInvalidRequest.
+				WithMessage("单文件上限不能超过 " + FormatBytes(allowed)).
+				WithDetails(map[string]any{"limit": limit, "allowed": allowed})
+		}
 	}
 	if spec.URLFromBackend {
 		// 后端自行分配直链: 只填策略名也能创建; 声明前缀覆盖的驱动可另配分发域名.
@@ -640,6 +660,10 @@ func (p *Policies) Create(in PolicyInput, actor *Principal, ip, userAgent string
 		}
 		sortOrder++
 	}
+	maxFileSize := int64(0)
+	if in.MaxFileSizeBytes != nil {
+		maxFileSize = *in.MaxFileSizeBytes
+	}
 	policy := model.StoragePolicy{
 		Name:             in.Name,
 		Type:             in.Type,
@@ -647,6 +671,7 @@ func (p *Policies) Create(in PolicyInput, actor *Principal, ip, userAgent string
 		PathTemplate:     in.PathTemplate,
 		ConflictPolicy:   in.ConflictPolicy,
 		ReuseReleasedSeq: reuseReleased,
+		MaxFileSizeBytes: maxFileSize,
 		Hint:             hint,
 		Config:           string(configJSON),
 		Secrets:          secrets,
@@ -819,18 +844,23 @@ func (p *Policies) Update(id int64, in PolicyInput, actor *Principal, ip, userAg
 	if in.Sort != nil {
 		sortOrder = *in.Sort
 	}
+	maxFileSize := policy.MaxFileSizeBytes
+	if in.MaxFileSizeBytes != nil {
+		maxFileSize = *in.MaxFileSizeBytes
+	}
 	updates := map[string]any{
-		"name":               in.Name,
-		"type":               in.Type,
-		"enabled":            enabled,
-		"hint":               hint,
-		"path_template":      in.PathTemplate,
-		"conflict_policy":    in.ConflictPolicy,
-		"reuse_released_seq": reuseReleased,
-		"config":             string(configJSON),
-		"secrets":            secrets,
-		"sort":               sortOrder,
-		"updated_at":         nowUTC(),
+		"name":                in.Name,
+		"type":                in.Type,
+		"enabled":             enabled,
+		"hint":                hint,
+		"path_template":       in.PathTemplate,
+		"conflict_policy":     in.ConflictPolicy,
+		"reuse_released_seq":  reuseReleased,
+		"max_file_size_bytes": maxFileSize,
+		"config":              string(configJSON),
+		"secrets":             secrets,
+		"sort":                sortOrder,
+		"updated_at":          nowUTC(),
 	}
 	if err := p.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.StoragePolicy{}).Where("id = ?", policy.ID).Updates(updates).Error; err != nil {

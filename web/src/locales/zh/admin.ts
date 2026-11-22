@@ -122,6 +122,8 @@ export const admin = {
     inherit: '继承系统默认',
     unlimited: '不限',
     inheritHint: '留空表示继承系统默认',
+    maxFileSizeHint: '不能超过系统上限 {{limit}}; 留空表示继承系统默认',
+    maxFileSizeExceeds: '单文件上限不能超过系统上限 {{limit}}',
     rateLimitHint: '留空或 0 表示不限',
     quotaValueRequired: '请填写配额数值',
     perMinute: '{{count}} 次/分钟',

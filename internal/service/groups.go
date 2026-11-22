@@ -65,6 +65,8 @@ type GroupView struct {
 	PermissionBits  int64    `json:"permission_bits"`
 	UserCount       int64    `json:"user_count"`
 	PolicyIDs       []int64  `json:"policy_ids"`
+	// MaxFileSizeLimit 是系统基线单文件上限, 用户组只能收紧不能放宽; 0 表示不限.
+	MaxFileSizeLimit int64 `json:"max_file_size_limit"`
 }
 
 // List 返回全部用户组.
@@ -353,11 +355,12 @@ func (g *Groups) view(group *model.Group) (*GroupView, error) {
 		return nil, apperr.ErrInternal.WithMessage(err.Error())
 	}
 	return &GroupView{
-		Group:           *group,
-		PermissionNames: group.Permissions.Names(),
-		PermissionBits:  int64(group.Permissions),
-		UserCount:       userCount,
-		PolicyIDs:       policyIDs,
+		Group:            *group,
+		PermissionNames:  group.Permissions.Names(),
+		PermissionBits:   int64(group.Permissions),
+		UserCount:        userCount,
+		PolicyIDs:        policyIDs,
+		MaxFileSizeLimit: SystemMaxFileSize(g.settings),
 	}, nil
 }
 
@@ -408,8 +411,19 @@ func (g *Groups) validate(in *GroupInput, group *model.Group) (model.Permission,
 	if in.QuotaValue.Set && in.QuotaValue.Value != nil && *in.QuotaValue.Value < 0 {
 		return 0, apperr.ErrInvalidRequest.WithMessage("配额数值不能为负数")
 	}
-	if in.MaxFileSizeBytes.Set && in.MaxFileSizeBytes.Value != nil && *in.MaxFileSizeBytes.Value < 0 {
-		return 0, apperr.ErrInvalidRequest.WithMessage("单文件上限不能为负数")
+	if in.MaxFileSizeBytes.Set && in.MaxFileSizeBytes.Value != nil {
+		value := *in.MaxFileSizeBytes.Value
+		if value < 0 {
+			return 0, apperr.ErrInvalidRequest.WithMessage("单文件上限不能为负数")
+		}
+		if value > 0 {
+			// 系统基线是硬上限: 用户组只能收紧, 不能放宽 (docs/permissions.md 第 4 节).
+			if global := SystemMaxFileSize(g.settings); global > 0 && value > global {
+				return 0, apperr.ErrInvalidRequest.
+					WithMessage("单文件上限不能超过系统上限 " + FormatBytes(global)).
+					WithDetails(map[string]any{"limit": value, "global": global})
+			}
+		}
 	}
 	if in.UploadRateLimit.Set && in.UploadRateLimit.Value != nil && *in.UploadRateLimit.Value < 0 {
 		return 0, apperr.ErrInvalidRequest.WithMessage("上传速率限制不能为负数")

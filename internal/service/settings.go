@@ -229,6 +229,19 @@ func (s *Settings) Update(values map[string]string) error {
 				return apperr.ErrInvalidRequest.WithMessage(err.Error())
 			}
 		}
+		if key == "max_file_size_bytes" {
+			trimmed := strings.TrimSpace(value)
+			limit, err := strconv.ParseInt(trimmed, 10, 64)
+			if trimmed != "" && (err != nil || limit < 0) {
+				return apperr.ErrInvalidRequest.WithMessage("单文件上限必须是非负整数")
+			}
+			if err != nil {
+				limit = 0
+			}
+			if err := s.checkFileSizeLimitChange(limit); err != nil {
+				return err
+			}
+		}
 		if key == "default_group_id" {
 			if err := s.checkDefaultGroup(value); err != nil {
 				return err
@@ -272,6 +285,42 @@ func (s *Settings) Update(values map[string]string) error {
 		return fmt.Errorf("写入系统设置失败: %w", err)
 	}
 	return s.Reload()
+}
+
+// checkFileSizeLimitChange 校验系统单文件上限下调后不会低于已有用户组或策略的上限.
+// 系统基线是硬上限, 已有更宽的配置必须先由管理员收紧, 避免静默改写数据.
+func (s *Settings) checkFileSizeLimitChange(next int64) error {
+	if next <= 0 || next == SystemMaxFileSize(s) {
+		return nil
+	}
+	var groups []model.Group
+	if err := s.db.Where("max_file_size_bytes IS NOT NULL AND max_file_size_bytes > ?", next).
+		Order("id ASC").Find(&groups).Error; err != nil {
+		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if len(groups) > 0 {
+		names := make([]string, 0, len(groups))
+		for _, group := range groups {
+			names = append(names, group.Name)
+		}
+		return apperr.ErrInvalidRequest.
+			WithMessage("以下用户组的单文件上限高于新上限, 请先调整: " + strings.Join(names, ", ")).
+			WithDetails(map[string]any{"limit": next, "groups": names})
+	}
+	var policies []model.StoragePolicy
+	if err := s.db.Where("max_file_size_bytes > ?", next).Order("id ASC").Find(&policies).Error; err != nil {
+		return apperr.ErrInternal.WithMessage(err.Error())
+	}
+	if len(policies) > 0 {
+		names := make([]string, 0, len(policies))
+		for _, policy := range policies {
+			names = append(names, policy.Name)
+		}
+		return apperr.ErrInvalidRequest.
+			WithMessage("以下存储策略的单文件上限高于新上限, 请先调整: " + strings.Join(names, ", ")).
+			WithDetails(map[string]any{"limit": next, "policies": names})
+	}
+	return nil
 }
 
 func validateEmailDomainAllowlist(raw string) error {

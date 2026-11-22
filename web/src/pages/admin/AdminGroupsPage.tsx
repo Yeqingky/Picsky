@@ -50,8 +50,8 @@ import { formatBytes, formatNumber } from '../../utils/format';
 /** Radix Select 不支持空字符串值, 用哨兵表示 "不限" */
 const QUOTA_UNLIMITED = '__unlimited__';
 
-/** 体积单位 (1024 进制): 单文件上限用 KB/MB, 存储空间配额用 GB/MB */
-const FILE_SIZE_UNITS = ['KB', 'MB'] as const;
+/** 体积单位 (1024 进制): 单文件上限默认 MB, 存储空间配额默认 GB */
+const FILE_SIZE_UNITS = ['B', 'KB', 'MB'] as const;
 const STORAGE_UNITS = ['GB', 'MB'] as const;
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
@@ -85,6 +85,8 @@ export default function AdminGroupsPage() {
   });
 
   const groups = groupsQuery.data ?? [];
+  // 系统基线单文件上限随组视图返回; 无数据时按不限处理
+  const maxFileSizeLimit = groups[0]?.max_file_size_limit ?? 0;
 
   const refreshIndicator = useDelayedLoading(groupsQuery.isFetching && !groupsQuery.isPending);
 
@@ -314,6 +316,7 @@ export default function AdminGroupsPage() {
     if (current.kind === 'create') {
       return (
         <GroupFormDialog
+          maxFileSizeLimit={maxFileSizeLimit}
           submitting={createMutation.isPending}
           onClose={() => setDialog(null)}
           onSubmit={(body) => createMutation.mutate(body)}
@@ -325,6 +328,7 @@ export default function AdminGroupsPage() {
       return (
         <GroupFormDialog
           group={target}
+          maxFileSizeLimit={maxFileSizeLimit}
           submitting={updateMutation.isPending}
           onClose={() => setDialog(null)}
           onSubmit={(body) => updateMutation.mutate({ id: target.id, body })}
@@ -403,17 +407,21 @@ export default function AdminGroupsPage() {
 
 function GroupFormDialog({
   group,
+  maxFileSizeLimit,
   submitting,
   onClose,
   onSubmit,
 }: {
   group?: AdminGroup;
+  /** 系统基线单文件上限 (字节); 组上限只能收紧, 0 表示不限 */
+  maxFileSizeLimit: number;
   submitting: boolean;
   onClose: () => void;
   onSubmit: (body: AdminGroupWriteRequest) => void;
 }) {
   const { t } = useTranslation();
   const isSystem = group?.is_system ?? false;
+  const limit = maxFileSizeLimit;
   const grantedPermissions = group?.permissions ?? [];
   const [name, setName] = useState(group?.name ?? '');
   const [description, setDescription] = useState(group?.description ?? '');
@@ -466,9 +474,19 @@ function GroupFormDialog({
       }
     }
 
+    // 用户组上限不能高于系统基线 (后端同样校验)
+    if (canUpload && maxFileSize.trim() !== '') {
+      const bytes = Number(maxFileSize.trim());
+      if (!Number.isFinite(bytes) || bytes < 0) {
+        next.maxFileSize = t('common.form.invalidNumber');
+      } else if (limit > 0 && bytes > limit) {
+        next.maxFileSize = t('admin.groups.maxFileSizeExceeds', { limit: formatBytes(limit) });
+      }
+    }
+
     const numericFields: [string, string][] = [['sort', sort]];
     if (canUpload) {
-      numericFields.push(['maxFileSize', maxFileSize], ['uploadRateLimit', uploadRateLimit]);
+      numericFields.push(['uploadRateLimit', uploadRateLimit]);
     }
     for (const [field, raw] of numericFields) {
       const trimmed = raw.trim();
@@ -634,7 +652,10 @@ function GroupFormDialog({
                     errors.maxFileSize ? 'text-destructive' : 'text-muted-foreground',
                   )}
                 >
-                  {errors.maxFileSize || t('admin.groups.inheritHint')}
+                  {errors.maxFileSize ||
+                    (limit > 0
+                      ? t('admin.groups.maxFileSizeHint', { limit: formatBytes(limit) })
+                      : t('admin.groups.inheritHint'))}
                 </p>
               </div>
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">

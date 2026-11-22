@@ -19,9 +19,12 @@ import (
 	"github.com/yeqingky/Picsky/internal/storage/cloudreve"
 )
 
-// adminPolicyDrivers 返回已注册存储后端类型与字段定义.
+// adminPolicyDrivers 返回已注册存储后端类型, 字段定义与单文件上限约束.
 func (s *Server) adminPolicyDrivers(c *gin.Context) {
-	c.JSON(http.StatusOK, storage.Specs())
+	c.JSON(http.StatusOK, gin.H{
+		"global_max_file_size": service.SystemMaxFileSize(s.svc.Settings),
+		"drivers":              storage.Specs(),
+	})
 }
 
 // adminListPolicyBuckets 使用当前表单凭据读取驱动的存储桶选项.

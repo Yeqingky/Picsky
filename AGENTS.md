@@ -96,9 +96,10 @@ Picsky/
 - 上传哈希与去重必须由服务端对完整上传内容计算, 客户端始终上传完整文件; 不提供客户端秒传预检接口, 不接受或信任客户端提供的哈希; 去重命中同样占用上传带宽与上传速率额度, 这是预期行为.
 - 非上传接口按路径限制 JSON 请求体 1 MiB, 不按 `Content-Type` 豁免; 携带请求体的非上传接口只接受 `application/json` (含 `application/*+json`), 其他媒体类型返回 415 `unsupported_media_type`; 上传接口按路径豁免并自行限额.
 - Base64 JSON 上传必须在读取请求体前完成认证, 上传权限与限流预检, 并流式读取 `data` 直接解码到共用上传缓冲, 禁止在内存完整保留编码字符串或解码副本; 不限组仍受 2 GiB 单次硬上限约束, `data` 字段前后区段各最多 32 KiB, data URL 头最多 4 KiB, 解码缓冲遵循 `PICSKY_UPLOAD_MEMORY_LIMIT`.
-- 驱动可声明单对象体积上限 (`max_file_size_bytes`, `0` 表示不限); 上传先校验用户组单文件上限, 通过后再校验策略驱动上限, 仅策略上限触发时返回 `file_too_large` 与 "此存储策略最大支持xxMB"; Sobot 固定 50 MiB (52,428,800 字节), Celine 20,971,326 字节 (20 MiB 扣除 multipart 开销), Metaso 209,715,000 字节 (200 MiB 扣除 multipart 开销), 异次元店铺系统 10,485,760 字节 (10 MiB), WebUI 以右下角 toast 提示.
+- 单文件上限统一以字节存储并按 全局 -> 用户组 -> 存储驱动 判定, 取最严格的一级; 系统基线始终生效, 用户组与存储策略的上限都不能高于系统基线, 策略上限还不能高于驱动声明, 保存时后端返回 400 阻止绕过; 超限返回 `file_too_large`, `details.scope` 标明来源 (`global` / `group` / `driver`). 驱动可声明单对象体积上限 (`max_file_size_bytes`, `0` 表示不限), 驱动或策略级触发时 message 以 "此存储策略最大支持" 开头; Sobot 固定 50 MiB (52,428,800 字节), Celine 20,971,326 字节 (20 MiB 扣除 multipart 开销), Metaso 209,715,000 字节 (200 MiB 扣除 multipart 开销), 异次元店铺系统 10,485,760 字节 (10 MiB), WebUI 以右下角 toast 提示.
 - 驱动可声明支持的图片格式 (`formats`, 空表示不限); 上传在系统格式白名单后校验策略格式, 不匹配返回 `unsupported_format`; Celine 仅支持 `png` / `jpeg` / `gif`, 异次元店铺系统仅支持 `png` / `jpeg` / `webp`; 前端压缩对受限策略自动改用 JPEG, 未压缩原图的格式不支持时直接提示失败且不发请求.
-- `GET /api/v1/policies` 返回 `global.max_file_size` (系统基线单文件上限, 0 表示不限), `group` (`id`, `name`, `max_file_size`, `null` 表示继承全局) 与 `items`; `items` 每项不含驱动 `type`, 含 `max_file_size` (驱动单对象上限, 0 表示不限); WebUI 上传页以组覆盖值 (无覆盖用全局) 与所选策略上限的较小值作为生效上限, 未启用压缩时入队前拒绝超限文件, 启用压缩时在压缩后与上传前判定, 超限只 toast 提示并标记失败, 不发请求.
+- `GET /api/v1/policies` 返回 `global.max_file_size` (系统基线单文件上限, 0 表示不限), `group` (`id`, `name`, `max_file_size`, `null` 表示不额外限制) 与 `items`; `items` 每项不含驱动 `type`, 含 `max_file_size` (策略级与驱动级上限的较小值, 0 表示不限); WebUI 按三级的较小非零值拦截, 未启用压缩时入队前拒绝超限文件, 启用压缩时在压缩后与上传前判定, 超限只 toast 提示并标记失败, 不发请求.
+- 单文件上限输入框统一提供 B / KB / MB 单位并默认 MB, 接口与数据库只用字节; 切换单位按 1024 进制换算并向下取整 (10250 B 切到 KB 显示 10), 不能被 1024 整除的驱动上限以 B 为单位展示; `GET /api/v1/admin/policies/drivers` 返回 `global_max_file_size` 与 `drivers`.
 - 未设置 `PICSKY_TEMP_DIR` 时, spool 可将处理期溢出文件写入系统临时目录, 但 `CleanupStale` 必须跳过目录扫描; 仅对应用专用且隔离的临时目录执行启动残留清理.
 - `/upload` 跨用户复用只返回当前用户自己的新记录, 不返回其他用户的记录 ID, URL 或大小.
 - 注册页启用注册邮箱域名白名单时, 邮箱字段由左侧本地部分输入框与右侧域名下拉框组成, 提交时拼接为完整邮箱; 未启用白名单时为完整邮箱输入框; 白名单域名由 `GET /site` 的 `registration_email_domains` 提供.

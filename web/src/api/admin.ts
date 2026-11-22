@@ -27,6 +27,7 @@ import type {
   Paginated,
   PolicyBucket,
   PolicyBucketListRequest,
+  PolicyDriversPayload,
   PolicyPreviewRequest,
   PolicyPreviewResult,
   PolicyScanEnqueued,
@@ -92,6 +93,9 @@ export const adminPoliciesApi = {
     api
       .post<PolicyBucket[]>('/admin/policies/buckets', body, { timeout: 60_000 })
       .then((r) => r.data),
+
+  /** 已注册后端类型, 字段定义与单文件上限约束 */
+  drivers: () => api.get<PolicyDriversPayload>('/admin/policies/drivers').then((r) => r.data),
 
   test: (id: number) =>
     api

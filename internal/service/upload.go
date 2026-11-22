@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -186,10 +185,6 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 	}
 
 	sums := req.Spooled.Hashes
-	maxSize := EffectiveMaxFileSize(u.settings, req.Principal.Group)
-	if req.Spooled.Truncated || (maxSize > 0 && sums.Size > maxSize) {
-		return nil, apperr.ErrFileTooLarge.WithDetails(map[string]any{"size": sums.Size, "limit": maxSize})
-	}
 	if req.Permit == nil {
 		if err := u.allowRateLimit(req.Principal); err != nil {
 			return nil, err
@@ -205,9 +200,12 @@ func (u *Upload) Upload(ctx context.Context, req UploadRequest) (*UploadResult, 
 		if err := checkPolicyFormats(spec.Formats, detected.Format); err != nil {
 			return nil, err
 		}
-		if err := checkPolicyFileSizeLimit(spec.MaxFileSize, sums.Size); err != nil {
-			return nil, err
-		}
+	}
+	// 单文件上限按 全局 -> 用户组 -> 存储驱动 的顺序判定:
+	// 用户组覆盖只在未触发系统基线时生效, 驱动上限始终生效 (docs/permissions.md 第 4 节).
+	limits := FileSizeLimits(SystemMaxFileSize(u.settings), groupMaxFileSize(req.Principal.Group), policyStorageMaxFileSize(policy, spec))
+	if req.Spooled.Truncated || (limits.Effective > 0 && sums.Size > limits.Effective) {
+		return nil, fileSizeLimitError(limits, sums.Size)
 	}
 	adapter, err := u.policies.Adapter(policy)
 	if err != nil {
@@ -619,21 +617,33 @@ func checkPolicyFormats(allowed []string, format string) error {
 		WithDetails(map[string]any{"format": format, "allowed": allowed, "scope": "policy"})
 }
 
-// checkPolicyFileSizeLimit 校验驱动声明的单对象体积上限; limit <= 0 表示不限.
-// 调用方先校验用户组单文件上限, 因此这里只在策略上限更严格时触发.
-func checkPolicyFileSizeLimit(limit, size int64) error {
-	if limit <= 0 || size <= limit {
-		return nil
+// policyStorageMaxFileSize 返回策略级与驱动级合并后的上限: 两者都配置时取较小值.
+// 策略级上限已由管理接口保证不高于驱动声明, 这里仍取最小值兜底历史数据.
+func policyStorageMaxFileSize(policy *model.StoragePolicy, spec storage.Spec) int64 {
+	driver := spec.MaxFileSize
+	if policy == nil || policy.MaxFileSizeBytes <= 0 {
+		return driver
 	}
-	megabytesValue := float64(limit) / float64(1<<20)
-	rounded := math.Round(megabytesValue)
-	megabytes := strconv.FormatFloat(megabytesValue, 'f', -1, 64)
-	if math.Abs(megabytesValue-rounded) < 0.01 {
-		megabytes = strconv.FormatInt(int64(rounded), 10)
+	if driver <= 0 || policy.MaxFileSizeBytes < driver {
+		return policy.MaxFileSizeBytes
 	}
-	return apperr.ErrFileTooLarge.
-		WithMessage("此存储策略最大支持" + megabytes + "MB").
-		WithDetails(map[string]any{"size": size, "limit": limit, "scope": "policy"})
+	return driver
+}
+
+// fileSizeLimitError 按生效上限来源生成超限错误; 驱动上限优先说明策略限制.
+func fileSizeLimitError(limits FileSizeLimit, size int64) error {
+	message := "文件超过单文件上限 " + FormatBytes(limits.Effective)
+	if limits.Source == "driver" {
+		message = "此存储策略最大支持" + FormatBytes(limits.Driver)
+	}
+	return apperr.ErrFileTooLarge.WithMessage(message).WithDetails(map[string]any{
+		"size":   size,
+		"limit":  limits.Effective,
+		"scope":  limits.Source,
+		"global": limits.Global,
+		"group":  limits.Group,
+		"driver": limits.Driver,
+	})
 }
 
 // UploadLimit 计算读取上传输入时的字节上限: 组上限 (或系统上限) 与硬上限取较小值.

@@ -76,13 +76,15 @@ type GroupPolicy struct {
 
 // StoragePolicy 是一条完整的存储策略: 后端, 前缀, 魔法路径, 冲突策略.
 type StoragePolicy struct {
-	ID               int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	Name             string    `gorm:"size:64;not null;uniqueIndex" json:"name"`
-	Type             string    `gorm:"size:32;not null" json:"type"`
-	Enabled          bool      `gorm:"not null" json:"enabled"`
-	PathTemplate     string    `gorm:"size:255;not null" json:"path_template"`
-	ConflictPolicy   string    `gorm:"size:16;not null;default:'rename'" json:"conflict_policy"`
-	ReuseReleasedSeq bool      `gorm:"not null;default:false" json:"reuse_released_seq"`
+	ID               int64  `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name             string `gorm:"size:64;not null;uniqueIndex" json:"name"`
+	Type             string `gorm:"size:32;not null" json:"type"`
+	Enabled          bool   `gorm:"not null" json:"enabled"`
+	PathTemplate     string `gorm:"size:255;not null" json:"path_template"`
+	ConflictPolicy   string `gorm:"size:16;not null;default:'rename'" json:"conflict_policy"`
+	ReuseReleasedSeq bool   `gorm:"not null;default:false" json:"reuse_released_seq"`
+	// MaxFileSizeBytes 是策略级单对象上限 (字节); 0 表示沿用驱动上限, 永不高于驱动声明值.
+	MaxFileSizeBytes int64     `gorm:"not null;default:0" json:"max_file_size_bytes"`
 	Hint             string    `gorm:"type:text;not null;default:''" json:"hint"`
 	Config           string    `gorm:"type:text;not null;default:'{}'" json:"config"`
 	Secrets          string    `gorm:"type:text" json:"-"`

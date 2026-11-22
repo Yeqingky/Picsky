@@ -35,6 +35,8 @@ import type {
   PolicyScanResult,
 } from '../../api/types';
 import { CopyButton } from '../../components/CopyButton';
+import { SizeInput } from '../../components/SizeInput';
+import type { SizeUnit } from '../../components/SizeInput';
 import { ExternalLink } from '../../components/ExternalLink';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorState } from '../../components/States';
@@ -98,6 +100,31 @@ const TYPE_OPTIONS = [
 ] as const;
 
 const CONFLICT_OPTIONS: readonly ConflictPolicy[] = ['rename', 'skip'];
+
+/** 策略单文件上限单位: 默认 MB, 驱动上限不能被 1024 整除时可切到 B */
+const POLICY_FILE_SIZE_UNITS: readonly SizeUnit[] = ['B', 'KB', 'MB'];
+
+/** 策略上限允许的最大值: 驱动声明与系统基线取较小者; 0 表示都不限 */
+function driverLimitFor(driver: number, global: number | undefined): number {
+  const systemLimit = global ?? 0;
+  if (driver <= 0) return systemLimit;
+  if (systemLimit <= 0 || driver < systemLimit) return driver;
+  return systemLimit;
+}
+
+/** 字节数展示: 不能被 1024 整除时按字节显示, 与后端 FormatBytes 一致 */
+function formatSize(bytes: number): string {
+  if (bytes <= 0) return '';
+  if (bytes % 1024 !== 0) return `${bytes} B`;
+  const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes / 1024;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${Number(value.toFixed(2))} ${units[index]}`;
+}
 
 /** 新建时的驱动特征: 编辑模式以服务端返回的 capabilities / url_from_backend 为准 */
 const NEW_TYPE_TRAITS: Record<
@@ -244,6 +271,8 @@ interface FormState {
   pathTemplate: string;
   conflictPolicy: ConflictPolicy;
   reuseReleasedSeq: boolean;
+  /** 策略级单对象上限 (字节); '' 表示沿用驱动上限 */
+  maxFileSize: string;
   urls: UrlRow[];
 }
 
@@ -299,6 +328,7 @@ function formStateFromPolicy(policy: AdminPolicy): FormState {
     pathTemplate: policy.path_template,
     conflictPolicy: policy.conflict_policy,
     reuseReleasedSeq: policy.reuse_released_seq,
+    maxFileSize: policy.max_file_size_bytes > 0 ? String(policy.max_file_size_bytes) : '',
     urls,
   };
 }
@@ -561,6 +591,15 @@ export default function AdminPolicyEditPage() {
     retry: false,
   });
 
+  // 驱动上限清单: 新建策略时用于限制单文件上限输入, 编辑时以策略响应为准
+  const driversQuery = useQuery({
+    queryKey: ['admin', 'policy-drivers'],
+    queryFn: () => adminPoliciesApi.drivers(),
+    enabled: isNew,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+
   const bucketCredentialsReady =
     form?.type === 'oneimg' && form.endpoint.trim() !== '' && form.token.trim() !== '';
   const bucketsQuery = useQuery({
@@ -618,6 +657,7 @@ export default function AdminPolicyEditPage() {
       conflictPolicy:
         CONFLICT_OPTIONS.find((option) => option === rawConflict) ?? DEFAULT_CONFLICT_POLICY,
       reuseReleasedSeq: false,
+      maxFileSize: '',
       urls: [{ key: nextUrlKey(), alias: '', url: '' }],
     });
   }, [isNew, settingsQuery.data, settingsQuery.isPending]);
@@ -718,6 +758,25 @@ export default function AdminPolicyEditPage() {
       next.hint = t('adminPolicies.edit.error.hintTooLong');
     }
 
+    // 策略级上限不能超过驱动声明与系统基线, 与后端校验保持一致
+    if (form.maxFileSize.trim() !== '') {
+      const bytes = Number(form.maxFileSize.trim());
+      const limit = isEdit
+        ? (policyQuery.data?.max_file_size_limit ?? 0)
+        : driverLimitFor(
+            driversQuery.data?.drivers.find((item) => item.type === form.type)
+              ?.max_file_size_bytes ?? 0,
+            driversQuery.data?.global_max_file_size,
+          );
+      if (!Number.isFinite(bytes) || bytes <= 0) {
+        next.maxFileSize = t('adminPolicies.edit.error.maxFileSizeInvalid');
+      } else if (limit > 0 && bytes > limit) {
+        next.maxFileSize = t('adminPolicies.edit.error.maxFileSizeExceeds', {
+          limit: formatSize(limit),
+        });
+      }
+    }
+
     if (!formURLFromBackend || formURLPrefixOverride) {
       form.urls.forEach((row, index) => {
         if (formURLPrefixOverride && row.alias.trim() === '' && row.url.trim() === '') return;
@@ -735,7 +794,15 @@ export default function AdminPolicyEditPage() {
     }
 
     return next;
-  }, [form, formURLFromBackend, formURLPrefixOverride, t]);
+  }, [
+    form,
+    formURLFromBackend,
+    formURLPrefixOverride,
+    isEdit,
+    policyQuery.data,
+    driversQuery.data,
+    t,
+  ]);
 
   const sequenceTemplate = form !== null && SEQ_RE.test(form.pathTemplate.trim());
 
@@ -829,12 +896,14 @@ export default function AdminPolicyEditPage() {
         sort: index + 1,
       }));
 
+    const maxFileSizeBytes = form.maxFileSize.trim() === '' ? 0 : Number(form.maxFileSize.trim());
     const body: AdminPolicyWriteRequest = formURLFromBackend
       ? {
           name: form.name.trim(),
           hint: form.hint.trim(),
           type: form.type,
           enabled: isCloudreve ? form.cloudreveLoggedIn : form.enabled,
+          max_file_size_bytes: maxFileSizeBytes,
           path_template: isCloudreve ? form.pathTemplate.trim() : DEFAULT_PATH_TEMPLATE,
           conflict_policy: DEFAULT_CONFLICT_POLICY,
           reuse_released_seq: isCloudreve ? form.reuseReleasedSeq : false,
@@ -864,6 +933,7 @@ export default function AdminPolicyEditPage() {
           hint: form.hint.trim(),
           type: form.type,
           enabled: form.enabled,
+          max_file_size_bytes: maxFileSizeBytes,
           path_template: form.pathTemplate.trim(),
           conflict_policy: form.conflictPolicy,
           reuse_released_seq: form.reuseReleasedSeq,
@@ -1108,6 +1178,12 @@ export default function AdminPolicyEditPage() {
   const policy = policyQuery.data ?? null;
   const capabilities =
     policy?.capabilities ?? NEW_TYPE_TRAITS[form?.type ?? '']?.capabilities ?? [];
+  // 策略级上限不能超过驱动声明与系统基线; 新建时从驱动清单取该驱动的上限.
+  const driverSpec = driversQuery.data?.drivers.find((item) => item.type === form?.type);
+  const policyMaxFileSizeLimit = isEdit
+    ? (policy?.max_file_size_limit ?? 0)
+    : driverLimitFor(driverSpec?.max_file_size_bytes ?? 0, driversQuery.data?.global_max_file_size);
+
   const canStat = capabilities.includes('stat');
 
   const updateForm = useCallback((patch: Partial<FormState>) => {
@@ -1167,6 +1243,8 @@ export default function AdminPolicyEditPage() {
         type: nextType,
         hint: replaceHint ? driverDefaultHint(nextType) : current.hint,
         pathTemplate,
+        // 切换后端后清空策略级上限: 新驱动的上限可能更低, 交由用户重新填写
+        maxFileSize: '',
         directory: defaultDirectoryFor(nextType),
         autoLogin: false,
         cloudreveLoggedIn: false,
@@ -1212,6 +1290,7 @@ export default function AdminPolicyEditPage() {
               pathTemplate: form.pathTemplate,
               conflictPolicy: form.conflictPolicy,
               reuseReleasedSeq: form.reuseReleasedSeq,
+              maxFileSize: form.maxFileSize,
               urls: form.urls,
             }),
             null,
@@ -1251,6 +1330,9 @@ export default function AdminPolicyEditPage() {
       if (patch.hint !== undefined) next.hint = patch.hint;
       if (nextType !== undefined) next.type = nextType;
       if (patch.enabled !== undefined) next.enabled = patch.enabled;
+      if (patch.maxFileSizeBytes !== undefined) {
+        next.maxFileSize = patch.maxFileSizeBytes > 0 ? String(patch.maxFileSizeBytes) : '';
+      }
       if (patch.directory !== undefined) next.directory = patch.directory;
       if (patch.endpoint !== undefined) {
         next.endpoint = patch.endpoint;
@@ -1609,6 +1691,33 @@ export default function AdminPolicyEditPage() {
                   <p className="text-muted-foreground text-sm">{urlBackendHint}</p>
                 )}
               </div>
+              <FormField
+                id="policy-max-file-size"
+                label={t('adminPolicies.edit.field.maxFileSize')}
+                error={errorFor('maxFileSize')}
+                hint={
+                  policyMaxFileSizeLimit > 0
+                    ? t('adminPolicies.edit.field.maxFileSizeHint', {
+                        limit: formatSize(policyMaxFileSizeLimit),
+                      })
+                    : undefined
+                }
+                className="sm:w-80"
+              >
+                <SizeInput
+                  key={`${form.type}-${policyMaxFileSizeLimit}`}
+                  id="policy-max-file-size"
+                  value={form.maxFileSize.trim() === '' ? null : Number(form.maxFileSize)}
+                  units={POLICY_FILE_SIZE_UNITS}
+                  defaultUnit={
+                    policyMaxFileSizeLimit > 0 && policyMaxFileSizeLimit % 1024 !== 0 ? 'B' : 'MB'
+                  }
+                  invalid={errorFor('maxFileSize') !== undefined}
+                  onChange={(bytes) =>
+                    updateForm({ maxFileSize: bytes === null ? '' : String(bytes) })
+                  }
+                />
+              </FormField>
               <FormField
                 id="policy-hint"
                 label={t('adminPolicies.edit.field.hint')}

@@ -29,6 +29,8 @@ export interface PolicyTransferSource {
   pathTemplate: string;
   conflictPolicy: ConflictPolicy;
   reuseReleasedSeq: boolean;
+  /** 策略级单文件上限 (字节); '' 表示沿用驱动上限 */
+  maxFileSize: string;
   urls: PolicyTransferUrl[];
 }
 
@@ -40,6 +42,7 @@ export interface PolicyTransferPayload {
   path_template: string;
   conflict_policy: ConflictPolicy;
   reuse_released_seq: boolean;
+  max_file_size_bytes: number;
   config: { endpoint: string; bucket_id?: string; directory?: string; auto_login?: string };
   secrets?: {
     username?: string;
@@ -75,6 +78,8 @@ export interface PolicyTransferResult {
   pathTemplate?: string;
   conflictPolicy?: ConflictPolicy;
   reuseReleasedSeq?: boolean;
+  /** 策略级单文件上限 (字节); 0 表示沿用驱动上限 */
+  maxFileSizeBytes?: number;
   urls?: PolicyTransferUrl[];
 }
 
@@ -152,6 +157,7 @@ export function buildPolicyTransferPayload(source: PolicyTransferSource): Policy
     path_template: source.pathTemplate,
     conflict_policy: source.conflictPolicy,
     reuse_released_seq: source.reuseReleasedSeq,
+    max_file_size_bytes: source.maxFileSize.trim() === '' ? 0 : Number(source.maxFileSize.trim()),
     config: { endpoint: source.endpoint },
     urls: source.urls.map((row, index) => ({
       alias: row.alias,
@@ -251,6 +257,15 @@ export function parsePolicyTransfer(
       throw new PolicyTransferError('field', 'reuse_released_seq');
     }
     result.reuseReleasedSeq = root.reuse_released_seq;
+    recognized += 1;
+  }
+
+  if (root.max_file_size_bytes !== undefined) {
+    const value = root.max_file_size_bytes;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new PolicyTransferError('field', 'max_file_size_bytes');
+    }
+    result.maxFileSizeBytes = Math.floor(value);
     recognized += 1;
   }
 

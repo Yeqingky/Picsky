@@ -109,6 +109,8 @@ export const adminPolicies = {
       namePlaceholder: '例如 主站 WebDAV',
       hint: '提示文字',
       hintHint: '显示在上传页存储策略选择器左侧; 留空则不显示.',
+      maxFileSize: '单文件上限',
+      maxFileSizeHint: '留空沿用驱动上限; 不能超过 {{limit}}.',
       hintReset: '重置',
       hintResetHint: '恢复为当前后端的默认提示',
       type: '后端类型',
@@ -197,6 +199,8 @@ export const adminPolicies = {
     error: {
       nameRequired: '请填写策略名称',
       hintTooLong: '提示文字不能超过 500 个字符',
+      maxFileSizeInvalid: '单文件上限必须大于 0',
+      maxFileSizeExceeds: '单文件上限不能超过 {{limit}}',
       endpointRequired: '请填写服务地址',
       cloudreveEmailRequired: '请填写 Cloudreve 账号邮箱',
       acgfakaCookieRequired: '请填写 USER_SESSION Cookie 或先登录',

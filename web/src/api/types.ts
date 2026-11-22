@@ -365,6 +365,8 @@ export interface AdminGroup {
   sort: number;
   user_count: number;
   policy_ids: number[];
+  /** 系统基线单文件上限 (字节); 用户组只能收紧, 0 表示不限 */
+  max_file_size_limit: number;
 }
 
 export interface AdminGroupWriteRequest {
@@ -399,6 +401,8 @@ export interface AdminPolicy {
   conflict_policy: ConflictPolicy;
   /** 是否复用已删除图片释放的 {seq}; 默认 false */
   reuse_released_seq: boolean;
+  /** 策略级单对象上限 (字节); 0 表示沿用驱动上限 */
+  max_file_size_bytes: number;
   config: {
     endpoint?: string;
     region?: string;
@@ -424,6 +428,10 @@ export interface AdminPolicy {
   sort: number;
   /** 该策略下的图片数量 */
   image_count: number;
+  /** 驱动声明的单对象上限; 0 表示不限 */
+  driver_max_file_size: number;
+  /** 策略级上限可设置的最大值 (驱动上限与系统基线取较小者); 0 表示不限 */
+  max_file_size_limit: number;
   capabilities: string[];
   /** true 表示驱动上传后由后端分配直链, 不配置分发域名 */
   url_from_backend: boolean;
@@ -441,6 +449,8 @@ export interface AdminPolicyWriteRequest {
   path_template: string;
   conflict_policy: ConflictPolicy;
   reuse_released_seq?: boolean;
+  /** 策略级单对象上限 (字节); 0 表示沿用驱动上限, 不能超过驱动声明与系统基线 */
+  max_file_size_bytes?: number;
   config: Record<string, unknown>;
   /** 仅写: {"username","password","token","cookie","cookie_expires","refresh_token","refresh_expires","access_expires"} */
   secrets?: {
@@ -455,6 +465,24 @@ export interface AdminPolicyWriteRequest {
   };
   urls: AdminPolicyUrl[];
   sort?: number;
+}
+
+/** 已注册后端类型声明 (管理接口只读) */
+export interface PolicyDriver {
+  type: string;
+  label: string;
+  capabilities: string[];
+  url_from_backend: boolean;
+  url_prefix_override: boolean;
+  /** 驱动单对象上限 (字节); 0 表示不限 */
+  max_file_size_bytes: number;
+  formats: string[];
+}
+
+export interface PolicyDriversPayload {
+  /** 系统基线单文件上限 (字节); 0 表示不限 */
+  global_max_file_size: number;
+  drivers: PolicyDriver[];
 }
 
 export interface PolicyBucket {

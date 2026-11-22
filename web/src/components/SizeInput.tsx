@@ -4,26 +4,33 @@ import { cn } from '../lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 /** 体积单位 (1024 进制); 组件对外统一使用字节数 */
-export type SizeUnit = 'KB' | 'MB' | 'GB';
+export type SizeUnit = 'B' | 'KB' | 'MB' | 'GB';
 
 const UNIT_FACTORS: Record<SizeUnit, number> = {
+  B: 1,
   KB: 1024,
   MB: 1024 * 1024,
   GB: 1024 * 1024 * 1024,
 };
 
-/** 数字是 1024 的整数倍时优先较大的单位, 否则用默认单位 */
+/**
+ * 选择初始单位: 取能把字节数整除的最大单位 (1024 进制);
+ * 任何较大的单位都不能整除时退回 B, 保证不能被 1024 整除的上限按字节原样显示.
+ */
 function pickUnit(bytes: number | null, units: readonly SizeUnit[], fallback: SizeUnit): SizeUnit {
   if (bytes === null || bytes <= 0) return fallback;
   const exact = units.filter((unit) => bytes % UNIT_FACTORS[unit] === 0);
-  if (exact.length === 0) return fallback;
+  if (exact.length === 0) return units.includes('B') ? 'B' : fallback;
   return exact.reduce((a, b) => (UNIT_FACTORS[b] > UNIT_FACTORS[a] ? b : a));
 }
 
-/** 字节数换算为展示数值, 最多两位小数并去掉尾零 */
+/**
+ * 字节数换算为展示数值: 向下取整, 不能整除时舍去余数.
+ * 例如 10250 B 切到 KB 显示 10 (10240 B), 切到 MB 显示 0.
+ */
 function formatAmount(bytes: number | null, unit: SizeUnit): string {
   if (bytes === null || Number.isNaN(bytes)) return '';
-  return String(Number((bytes / UNIT_FACTORS[unit]).toFixed(2)));
+  return String(Math.floor(bytes / UNIT_FACTORS[unit]));
 }
 
 /**
@@ -59,9 +66,7 @@ export function SizeInput({
     setAmount((prev) => {
       const parsed = Number(prev);
       const derived =
-        prev.trim() === '' || !Number.isFinite(parsed)
-          ? null
-          : Math.round(parsed * UNIT_FACTORS[unit]);
+        prev.trim() === '' || !Number.isFinite(parsed) ? null : parsed * UNIT_FACTORS[unit];
       return derived === value ? prev : formatAmount(value, unit);
     });
   }, [value, unit]);
@@ -75,13 +80,21 @@ export function SizeInput({
       onChange(null);
       return;
     }
-    onChange(Math.round(parsed * UNIT_FACTORS[unit]));
+    onChange(Math.floor(parsed * UNIT_FACTORS[unit]));
   };
 
-  /** 切换单位只改变展示数值, 字节数保持不变 */
+  /** 切换单位时按新单位换算; 不能整除的余数直接舍去 */
   const changeUnit = (next: SizeUnit) => {
+    const parsed = Number(amount);
+    const bytes =
+      amount.trim() === '' || !Number.isFinite(parsed)
+        ? null
+        : Math.floor(parsed * UNIT_FACTORS[unit]);
+    const truncated =
+      bytes === null ? null : Math.floor(bytes / UNIT_FACTORS[next]) * UNIT_FACTORS[next];
     setUnit(next);
-    setAmount(formatAmount(value, next));
+    setAmount(truncated === null ? '' : formatAmount(truncated, next));
+    onChange(truncated);
   };
 
   return (
