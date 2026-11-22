@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CloudUpload, Copy, Play, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '../lib/toast';
 import { ApiError } from '../api/client';
 import { policiesApi } from '../api/images';
 import { uploadApi } from '../api/upload';

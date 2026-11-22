@@ -22,7 +22,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '../../lib/toast';
 import { useTranslation } from 'react-i18next';
 import { adminPoliciesApi, adminSettingsApi } from '../../api';
 import type {
@@ -955,6 +955,19 @@ export default function AdminPolicyEditPage() {
 
   const testMutation = useMutation({
     mutationFn: (targetId: number) => adminPoliciesApi.test(targetId),
+    onSuccess: (result) => {
+      // 连接测试结果走顶部通知, 不在表单里留常驻提示
+      if (result.ok) {
+        toast.success(
+          t('adminPolicies.edit.test.ok', { duration: formatDuration(result.elapsed_ms) }),
+        );
+        return;
+      }
+      toast.error(result.error ?? t('adminPolicies.edit.test.failed'));
+    },
+    onError: (error) => {
+      toast.error(errorText(error, t('adminPolicies.edit.test.failed')));
+    },
   });
 
   const applyCloudreveLogin = (result: CloudreveLoginResult): boolean => {
@@ -2277,29 +2290,6 @@ export default function AdminPolicyEditPage() {
                     </div>
                   )}
                 </FormField>
-              )}
-              {testMutation.data !== undefined &&
-                (testMutation.data.ok ? (
-                  <Alert className="border-transparent bg-success/10 text-success">
-                    <AlertDescription>
-                      {t('adminPolicies.edit.test.ok', {
-                        duration: formatDuration(testMutation.data.elapsed_ms),
-                      })}
-                    </AlertDescription>
-                  </Alert>
-                ) : (
-                  <Alert variant="destructive">
-                    <AlertDescription>
-                      {testMutation.data.error ?? t('adminPolicies.edit.test.failed')}
-                    </AlertDescription>
-                  </Alert>
-                ))}
-              {testMutation.isError && (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    {errorText(testMutation.error, t('adminPolicies.edit.test.failed'))}
-                  </AlertDescription>
-                </Alert>
               )}
               {isEdit ? (
                 <div className="flex justify-end">

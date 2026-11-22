@@ -171,3 +171,45 @@
     }
   }
 }
+
+/* 顶部通知 (sonner): 按类型着色, 颜色全部取自语义令牌.
+   不放进 @layer: sonner 运行时注入的样式无层级, 只有顶层规则才能按更高选择器权重覆盖. */
+.sonner-shell [data-sonner-toast][data-styled='true'] {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  width: var(--width);
+}
+
+.sonner-shell [data-sonner-toast][data-styled='true'] [data-title] {
+  line-height: 1.4;
+}
+
+.sonner-shell [data-sonner-toast][data-styled='true'][data-type='success'] {
+  background: color-mix(in srgb, var(--success) 10%, var(--popover));
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+  color: var(--success);
+}
+
+.sonner-shell [data-sonner-toast][data-styled='true'][data-type='info'] {
+  background: color-mix(in srgb, var(--info) 10%, var(--popover));
+  border-color: color-mix(in srgb, var(--info) 30%, var(--border));
+  color: var(--info);
+}
+
+.sonner-shell [data-sonner-toast][data-styled='true'][data-type='warning'] {
+  background: color-mix(in srgb, var(--warning) 10%, var(--popover));
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
+  color: var(--warning);
+}
+
+.sonner-shell [data-sonner-toast][data-styled='true'][data-type='error'] {
+  background: color-mix(in srgb, var(--destructive) 10%, var(--popover));
+  border-color: color-mix(in srgb, var(--destructive) 30%, var(--border));
+  color: var(--destructive);
+}
+
+/* 图标继承同类型文字色 */
+.sonner-shell [data-sonner-toast][data-styled='true'] [data-icon] {
+  color: inherit;
+}

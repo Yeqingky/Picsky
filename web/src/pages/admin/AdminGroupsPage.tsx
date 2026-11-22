@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pencil, Plus, ScrollText, Trash2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '../../lib/toast';
 import { useTranslation } from 'react-i18next';
 import { adminGroupsApi, adminPoliciesApi } from '../../api';
 import type {

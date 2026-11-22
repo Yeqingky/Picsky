@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ComponentProps } from 'react';
 import { Check, ChevronDown, Copy } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../lib/toast';
 import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';

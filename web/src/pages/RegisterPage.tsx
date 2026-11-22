@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '../lib/toast';
 import { useTranslation } from 'react-i18next';
 import { ApiError, authApi } from '../api';
 import type { CaptchaConfig } from '../api';

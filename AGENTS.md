@@ -131,7 +131,7 @@ Picsky/
 - 前端样式只使用 Tailwind CSS v4 与 `src/index.css` 的语义令牌 (`background`, `card`, `muted`, `primary`, `destructive`, `success`, `warning`, `info`, `border`, `ring`, `chart-*`), 禁止硬编码色值与 CSS-in-JS.
 - 系统设置表单控件按字段内容限宽; 人机验证关闭时隐藏配置字段, 服务地址仅在选择 Cap 时显示; 注册邮箱白名单按完整域名精确匹配, 留空时不限制; 列表输入复用 `TagsInput`.
 - 保存系统设置时, SMTP 服务器, 端口或加密方式, 以及人机验证提供方或服务地址发生变化且未同时提交对应密钥时, 必须清空旧密钥; 端点未变化时不得误清空.
-- 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 禁止 MUI, Emotion 与 CSS-in-JS; 在成熟专用库明显优于自研且已登记到 `docs/tech-stack.md` 时可以引入其他组件库 (当前: 图片查看使用 `photoswipe`), 图标统一 lucide-react, 全局提示统一 sonner.
+- 组件层是 shadcn/ui: 新增基元用 `npx shadcn@latest add <name>` (写入 `src/components/ui/`), 业务组件放 `src/components/`; 禁止 MUI, Emotion 与 CSS-in-JS; 在成熟专用库明显优于自研且已登记到 `docs/tech-stack.md` 时可以引入其他组件库 (当前: 图片查看使用 `photoswipe`), 图标统一 lucide-react, 全局提示统一 sonner 并挂在顶部居中; 业务代码从 `web/src/lib/toast.ts` 调用 (成功 3 秒, 信息 4 秒, 警告与错误 5 秒), 不直接 import sonner; 每类通知用语义令牌着色 (成功 `--success`, 信息 `--info`, 警告 `--warning`, 错误 `--destructive`), 规则写在 `web/src/index.css` 顶层 (不能放进 `@layer`, 否则被 sonner 运行时样式覆盖).
 - 表格统一用 `src/components/DataTable.tsx`, 日期选择统一用 `src/components/DatePicker.tsx`, 空/错状态统一用 `src/components/States.tsx`; 需要新交互时先扩展这些共享组件.
 - 加载骨架必须贴合实际页面结构; 表格首屏与局部刷新复用 `DataTable` 的列定义, 表头和行高, 瀑布流骨架复用 `MasonryGrid` 排布; 已知页面不得用通用表单/卡片骨架替代真实布局.
 - 移动端与低高度视口下的对话框最大高度为 `100dvh - 2rem`, 内容超出时在弹窗内纵向滚动, 不得裁切表单或底部操作按钮.

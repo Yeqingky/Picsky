@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '../lib/toast';
 import { useTranslation } from 'react-i18next';
 import { setErrorNotifier, setUnauthorizedHandler } from '../api/client';
 import { AUTH_QUERY_KEY } from '../hooks/useAuth';

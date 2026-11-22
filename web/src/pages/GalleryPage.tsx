@@ -11,7 +11,7 @@ import {
 } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '../lib/toast';
 import { imagesApi, policiesApi } from '../api/images';
 import type { ImageRecord } from '../api/types';
 import type { GalleryView } from '../utils/constants';

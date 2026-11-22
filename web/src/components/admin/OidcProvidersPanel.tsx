@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { ChevronDown, LoaderCircle, Plus, Trash2, X } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '../../lib/toast';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { adminOidcApi } from '../../api';

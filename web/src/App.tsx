@@ -35,13 +35,7 @@ export default function App() {
               <RouterProvider router={router} />
             </AuthProvider>
           </ConfirmProvider>
-          <Toaster
-            position="bottom-right"
-            visibleToasts={3}
-            duration={3200}
-            richColors
-            closeButton
-          />
+          <Toaster />
         </TooltipProvider>
       </AppThemeProvider>
     </QueryClientProvider>

@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Pencil, Plus, ScanSearch, Trash2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '../../lib/toast';
 import { useTranslation } from 'react-i18next';
 import { adminPoliciesApi } from '../../api';
 import type { AdminPolicy } from '../../api/types';

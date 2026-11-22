@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Eye, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '../../lib/toast';
 import { adminTasksApi } from '../../api';
 import type { MaintenanceTask } from '../../api';
 import { PageHeader } from '../../components/PageHeader';
